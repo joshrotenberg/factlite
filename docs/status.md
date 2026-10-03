@@ -1,5 +1,9 @@
 # Work status
 
+Repository setup is complete. The next increment is item 1.1, typed values and
+identity. No database behavior is implemented yet. Both setup increments have
+recorded self-reviews; no independent reviewer or remote CI has run.
+
 ## 0.1 Inspect and initialize — done
 
 - **Done:** Inspected the empty workspace and Git configuration. Created the
@@ -8,8 +12,8 @@
   or project checkout were found.
 - **Decisions:** Use a project subdirectory rather than the read-only placeholder
   `/workspace/.git`. Local merge commits will preserve each completed increment.
-- **Blockers:** None for local Git. Rust is absent; toolchain setup is in progress.
-  A remote destination has not been selected.
+- **Blockers:** None for local Git. Rust was absent at inspection and is now
+  installed under item 0.3. A remote destination has not been selected.
 - **What's next:** Record the contract, roadmap, and workflow on
   `setup/plan-and-workflow`.
 
@@ -23,13 +27,46 @@
   contract. Use replay first and defer current projections to measured need.
   Keep each increment small enough for a complete diff review.
 - **Blockers:** None.
-- **What's next:** Merge `setup/plan-and-workflow`, then start the workspace branch.
+- **What's next:** Documentation branch merged; workspace setup follows in
+  items 0.3 and 0.4.
 
-## 0.3–0.4 Scaffold and verification — pending
+## 0.3 Scaffold the workspace — done
 
-- **Done:** Inspected available tooling and began obtaining a Rust toolchain.
+- **Done:** Installed Rust 1.99.0, Clippy, and rustfmt. Created the `factlite`
+  library and `factlite-cli` package with a `factlite` binary, checked-in
+  lockfile, workspace lints, pinned toolchain, and build instructions. CLI help
+  and version work; unsupported commands exit 2 with stderr and empty stdout.
 - **Decisions:** One library crate and one CLI crate; add dependencies when
-  needed. Do not invent working database APIs in the scaffold.
-- **Blockers:** Rust installation and verification are not complete yet.
-- **What's next:** Branch from the documentation merge, scaffold the workspace,
-  establish checks, run them, review, and merge.
+  needed. Edition 2024, current stable Rust 1.99.0, and no older-compiler promise.
+  All packages are unpublished. CLI usage is documented in README; binary
+  rustdoc is disabled to avoid a name collision with the library documentation.
+- **Blockers:** None. License and remote destination are open decisions, not
+  blockers to local development.
+- **What's next:** Begin typed values and identity on a new semantic-core branch.
+
+## 0.4 Establish verification — done
+
+- **Done:** Added executable `scripts/check.sh` and GitHub Actions configuration
+  invoking the same script. Formatting, Clippy with denied warnings, the test
+  runner, and library documentation passed locally. Built both packages and
+  smoke-checked CLI help/version, unsupported commands, extra arguments, and
+  non-UTF8 input. Checked shell syntax, staged whitespace, and package settings.
+  Review: `reviews/0002-rust-workspace.md`.
+- **Decisions:** Use one shared verification entry point. GitHub Actions has
+  read-only contents permissions and checkout pinned to a commit. There are
+  zero semantic tests at this stage; checks prove the scaffold builds only.
+- **Blockers:** None locally. Remote CI is configured but cannot run until
+  the repository has a remote destination.
+- **What's next:** Add meaningful typed-value and identity acceptance tests with
+  item 1.1, then review and merge that increment separately.
+
+## Environment notes
+
+The local toolchain lives outside Git in `/workspace/.factlite-tools`. For this
+environment, source `/workspace/.factlite-tools/env.sh` before running Cargo.
+Standard development machines can use their usual rustup installation.
+
+## Open repository decisions
+
+- Remote hosting destination: none selected; branch/review/merge is local.
+- License: none selected; publishing is disabled.

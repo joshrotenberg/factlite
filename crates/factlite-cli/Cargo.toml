@@ -1,0 +1,19 @@
+[package]
+name = "factlite-cli"
+description = "Command-line interface for the Factlite library"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "factlite"
+path = "src/main.rs"
+# CLI usage lives in README; rustdoc would collide with the library's name.
+doc = false
+
+[dependencies]
+factlite = { path = "../factlite" }
+
+[lints]
+workspace = true
