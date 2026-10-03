@@ -197,7 +197,8 @@ fn table_names(connection: &Connection) -> Result<Vec<String>> {
 }
 
 fn validate_head(connection: &Connection) -> Result<()> {
-    let head = read_head(connection)?.revision();
+    let basis = read_head(connection)?;
+    let head = basis.revision();
     let maximum: Option<Vec<u8>> =
         connection.query_row("SELECT MAX(revision) FROM transactions", [], |row| {
             row.get(0)
@@ -210,6 +211,8 @@ fn validate_head(connection: &Connection) -> Result<()> {
             "committed head does not match retained transaction log",
         ));
     }
+    crate::log::verify_foreign_keys(connection)?;
+    crate::log::replay(connection, &basis)?;
     Ok(())
 }
 

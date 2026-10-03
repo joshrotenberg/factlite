@@ -78,6 +78,116 @@ pub(crate) struct NormalizedBatch {
 }
 
 impl Model {
+    pub fn apply_report(&self, report: &TxReport) -> Result<Self> {
+        use crate::store::corrupt;
+        let expected_after = SnapshotId::new(
+            self.catalog.snapshot.store().clone(),
+            self.catalog.snapshot.lineage().clone(),
+            self.catalog.snapshot.revision().next()?,
+        );
+        if report.before != self.catalog.snapshot || report.after != expected_after {
+            return Err(corrupt(
+                "transaction reports are not a contiguous retained lineage",
+            ));
+        }
+        let mut sorted = report.created_entities.clone();
+        sorted.sort();
+        sorted.dedup();
+        if sorted != report.created_entities || report.tempids.len() != sorted.len() {
+            return Err(corrupt("invalid report allocation list"));
+        }
+        let mut labels = BTreeMap::new();
+        for (label, id) in &report.tempids {
+            if labels.insert(id.clone(), label.clone()).is_some() {
+                return Err(corrupt("multiple labels alias an allocation"));
+            }
+        }
+        let labels: Vec<_> = sorted
+            .iter()
+            .map(|id| {
+                labels
+                    .get(id)
+                    .cloned()
+                    .ok_or_else(|| corrupt("report allocation mapping mismatch"))
+            })
+            .collect::<Result<_>>()?;
+        let (catalog, delta) = self
+            .catalog
+            .stage(&report.schema_added, &labels)
+            .map_err(|err| corrupt(err.to_string()))?;
+        if delta.schema_added != report.schema_added || delta.tempids != report.tempids {
+            return Err(corrupt(
+                "report declarations do not match catalog allocations",
+            ));
+        }
+        let mut facts = self.facts.clone();
+        for event in &report.effective_delta {
+            let effective = match event.operation {
+                Operation::Retract => facts.remove(&event.fact),
+                Operation::Assert => facts.insert(event.fact.clone()),
+            };
+            if !effective {
+                return Err(corrupt("fact log contains an ineffective event"));
+            }
+        }
+        if effective_changes(&self.facts, &facts) != report.effective_delta {
+            return Err(corrupt(
+                "fact events are not canonical effective differences",
+            ));
+        }
+        let next = Self { catalog, facts };
+        next.validate_state()
+            .map_err(|err| corrupt(err.to_string()))?;
+        Ok(next)
+    }
+
+    fn validate_state(&self) -> Result<()> {
+        let schema = self.catalog.schema_at(self.catalog.snapshot.revision())?;
+        let mut one_counts: HashMap<(&EntityId, &AttrName), usize> = HashMap::new();
+        for fact in &self.facts {
+            self.catalog.require_known(&fact.entity)?;
+            if let Value::Ref(id) = &fact.value {
+                self.catalog.require_known(id)?;
+            }
+            let definition = schema.get(&fact.attribute).ok_or_else(|| {
+                Error::new(
+                    ErrorCode::UnknownAttribute,
+                    ErrorContext::Attribute {
+                        attribute: fact.attribute.clone(),
+                    },
+                    "stored fact has unknown attribute",
+                )
+            })?;
+            if definition.value_type() != fact.value.value_type() {
+                return Err(Error::new(
+                    ErrorCode::TypeMismatch,
+                    ErrorContext::TypeMismatch {
+                        expected: definition.value_type(),
+                        actual: fact.value.value_type(),
+                    },
+                    "stored fact has wrong type",
+                ));
+            }
+            if definition.cardinality() == Cardinality::One {
+                let count = one_counts
+                    .entry((&fact.entity, &fact.attribute))
+                    .or_default();
+                *count += 1;
+                if *count > 1 {
+                    return Err(Error::new(
+                        ErrorCode::ConflictingBatch,
+                        ErrorContext::EntityAttribute {
+                            entity: fact.entity.clone(),
+                            attribute: fact.attribute.clone(),
+                        },
+                        "stored state violates cardinality one",
+                    ));
+                }
+            }
+        }
+        self.validate_uniqueness()
+    }
+
     pub fn evaluate(&self, tx: &Tx) -> Result<(Self, TxReport)> {
         let tx = tx.clone().validate()?;
         if let Some(expected) = &tx.expected_head
@@ -311,35 +421,34 @@ impl Model {
                 && !one_values.contains_key(&(fact.entity.clone(), fact.attribute.clone()))
         });
         facts.extend(assertions);
-        let mut effective_delta: Vec<_> = self
-            .facts
-            .difference(&facts)
-            .cloned()
-            .map(|fact| FactDelta {
-                operation: Operation::Retract,
-                fact,
-            })
-            .chain(
-                facts
-                    .difference(&self.facts)
-                    .cloned()
-                    .map(|fact| FactDelta {
-                        operation: Operation::Assert,
-                        fact,
-                    }),
-            )
-            .collect();
-        effective_delta.sort_by(|a, b| {
-            a.operation
-                .cmp(&b.operation)
-                .then_with(|| a.fact.canonical_cmp(&b.fact))
-        });
+        let effective_delta = effective_changes(&self.facts, &facts);
         Ok(NormalizedBatch {
             next: Model { catalog, facts },
             catalog_delta,
             effective_delta,
         })
     }
+}
+
+fn effective_changes(before: &HashSet<Fact>, after: &HashSet<Fact>) -> Vec<FactDelta> {
+    let mut delta: Vec<_> = before
+        .difference(after)
+        .cloned()
+        .map(|fact| FactDelta {
+            operation: Operation::Retract,
+            fact,
+        })
+        .chain(after.difference(before).cloned().map(|fact| FactDelta {
+            operation: Operation::Assert,
+            fact,
+        }))
+        .collect();
+    delta.sort_by(|a, b| {
+        a.operation
+            .cmp(&b.operation)
+            .then_with(|| a.fact.canonical_cmp(&b.fact))
+    });
+    delta
 }
 
 #[cfg(test)]
