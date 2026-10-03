@@ -11,13 +11,6 @@ use crate::{
 };
 use rusqlite::{Connection, Transaction};
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Report persistence is integrated into public commits in item 2.3."
-    )
-)]
 pub(crate) fn persist_report(transaction: &Transaction<'_>, report: &TxReport) -> Result<()> {
     if read_head(transaction)? != report.before {
         return Err(corrupt(

@@ -1,9 +1,9 @@
 # Work status
 
-Step 1 and items 2.1–2.2 are complete. Durable files, exact reports/events, and
-revision-bounded replay are implemented. Next is item 2.3, public atomic commits.
-Database CLI commands remain pending. All reviews are self-reviews; remote CI
-has not run.
+Step 1 and items 2.1–2.3 are complete. Public atomic commits persist reports and
+retained history. Next is item 2.4, injected-failure and concurrent-writer evidence.
+Pinned reads and database CLI commands remain pending. Reviews are self-reviews;
+remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -160,6 +160,21 @@ has not run.
   rollback outcomes, and concurrency are items 2.3–2.4.
 - **What's next:** Item 2.3, one serialized SQLite write transaction per commit,
   request validation/evaluation, rollback classification, and public API tests.
+
+## 2.3 Serialized commit — done
+
+- **Done:** Public `Store::commit`, serialized head capture/evaluation/report/event
+  persistence, explicit rollback, fresh no-change revisions, and commit outcome
+  evidence. Sixty tests passed, including twenty-two 1,024-case properties and
+  four new public commit integration scenarios. Full checks passed.
+- **Decisions:** Keep the transaction guard until COMMIT errors are inspected;
+  drop-time rollback cannot provide explicit outcome evidence. Failed pre-write
+  validation and successful rollback report RolledBack; unconfirmed COMMIT
+  completion reports Unknown. Reject keyed requests until exact retries exist.
+- **Blockers:** None locally. Injected SQL/COMMIT failures and competing writers
+  are next; actual power-loss/crash recovery remains later hardening.
+- **What's next:** Item 2.4, faults at every persistence stage, commit-error paths,
+  bounded busy behavior, and competing conditional updates/connections.
 
 ## Environment notes
 

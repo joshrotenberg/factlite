@@ -93,6 +93,21 @@ scenario testing. See `testing.md` for the verification policy.
   broken rows. Production connections always enable them and reopen verifies
   existing foreign-key consistency.
 
+## Atomic commit outcomes
+
+- `Store::commit` validates structure, begins IMMEDIATE, captures/replays pre-head,
+  evaluates the request, and persists report/events/head together. It returns
+  reports only after successful COMMIT. New no-change transactions advance head.
+- Commit failures carry optional outcome evidence: RolledBack if no write was
+  possible or explicit rollback succeeded; Unknown when a COMMIT error ended the
+  transaction without conclusive outcome, or cleanup failed. Non-commit errors
+  have no commit outcome. SQLite source errors remain attached.
+- Retain the transaction guard through manual COMMIT execution to inspect its
+  state; rusqlite's consuming commit method drops its guard and ignores rollback
+  cleanup errors. There is no application cache published before commit.
+- Keyed requests are rejected in this build. Exact retry lookup/persistence and
+  original-report replay must land together in step 4 before keys are accepted.
+
 ## Schema and allocation
 
 - Attribute names contain exactly one slash separating nonempty namespace and

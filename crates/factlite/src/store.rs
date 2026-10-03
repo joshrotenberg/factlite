@@ -6,7 +6,9 @@ use std::{
 
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
-use crate::{Error, ErrorCode, ErrorContext, Result, Revision, SnapshotId};
+use crate::{
+    CommitOutcome, Error, ErrorCode, ErrorContext, Result, Revision, SnapshotId, Tx, TxReport,
+};
 
 const APPLICATION_ID: i32 = 0x464c4954;
 const FORMAT_VERSION: i32 = 1;
@@ -68,6 +70,60 @@ pub struct Store {
 }
 
 impl Store {
+    /// Validates and commits one declarative batch against serialized pre-head.
+    /// Fresh no-change requests receive revisions. Retry keys are explicitly
+    /// rejected until exact idempotency is implemented. Failures expose outcome
+    /// evidence, including confirmed rollback and uncertain COMMIT outcomes.
+    pub fn commit(&self, request: Tx) -> Result<TxReport> {
+        let request = request
+            .validate()
+            .map_err(|err| err.with_commit_outcome(CommitOutcome::RolledBack))?;
+        if request.idempotency_key().is_some() {
+            return Err(Error::invalid(
+                "idempotency_key",
+                "idempotency keys are not supported by this build",
+            )
+            .with_commit_outcome(CommitOutcome::RolledBack));
+        }
+        let mut connection = self
+            .connection()
+            .map_err(|err| err.with_commit_outcome(CommitOutcome::RolledBack))?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|source| {
+                Error::storage("begin commit", source)
+                    .with_commit_outcome(CommitOutcome::RolledBack)
+            })?;
+        let result = (|| -> Result<TxReport> {
+            let basis = read_head(&transaction)?;
+            let model = crate::log::replay(&transaction, &basis)?;
+            let (_, report) = model.evaluate(&request)?;
+            crate::log::persist_report(&transaction, &report)?;
+            Ok(report)
+        })();
+        let report = match result {
+            Ok(report) => report,
+            Err(error) => return Err(abort_commit(transaction, error)),
+        };
+        // Keep the guard until COMMIT's outcome is inspected; consuming rusqlite's
+        // commit method would hide errors from its drop-time rollback attempt.
+        match transaction.execute_batch("COMMIT") {
+            Ok(()) => {
+                drop(transaction);
+                Ok(report)
+            }
+            Err(source) => {
+                let error = Error::storage("commit", source);
+                if transaction.is_autocommit() {
+                    drop(transaction);
+                    Err(error.with_commit_outcome(CommitOutcome::Unknown))
+                } else {
+                    Err(abort_commit(transaction, error))
+                }
+            }
+        }
+    }
+
     /// Opens or atomically initializes a file with WAL, FULL sync, and a two-second
     /// busy timeout. Unsupported/non-Factlite files fail before schema changes.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -141,6 +197,18 @@ impl Store {
         self.connection
             .lock()
             .map_err(|_| corrupt("store connection lock poisoned"))
+    }
+}
+
+fn abort_commit(transaction: rusqlite::Transaction<'_>, error: Error) -> Error {
+    if transaction.is_autocommit() {
+        drop(transaction);
+        return error.with_commit_outcome(CommitOutcome::RolledBack);
+    }
+    match transaction.rollback() {
+        Ok(()) => error.with_commit_outcome(CommitOutcome::RolledBack),
+        Err(source) => Error::storage("rollback after failed commit", source)
+            .with_commit_outcome(CommitOutcome::Unknown),
     }
 }
 
