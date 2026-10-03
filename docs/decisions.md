@@ -39,3 +39,15 @@ scenario testing. See `testing.md` for the verification policy.
 - A temporary, documented dead-code expectation covers the catalog while it is
   integrated incrementally. Remove it when the evaluator becomes its production
   caller; the catalog is not a second public backend.
+
+## Owned requests
+
+- The builder owns its full request and validates declarations, temporary-label
+  use, and scalar metadata. It preserves operation order and duplicates, and
+  normalizes each expectation's exact typed set. Duplicate expectation entries
+  remain submitted entries; state validation evaluates them all against pre-head.
+- Schema, identity membership, cardinality conflicts, expected head, and
+  expectations are resolved during evaluation/commit. They cannot run before
+  retry lookup once idempotency exists. Building never borrows a SQL transaction.
+- Repeated builder calls setting a metadata map key, expected head, or retry key
+  replace that field. Wire duplicate JSON keys remain errors in item 4.1.

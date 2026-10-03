@@ -34,7 +34,7 @@ items. Every item closes with done, decisions, blockers, and what's next in
   cardinality/uniqueness rules, known empty entities, historical creation
   revisions, identical redeclarations, and transactional new definitions.
   Test unknown/empty entities and incompatible definitions.
-- [ ] **1.3 Request structure and builder.** Owned requests, metadata, new
+- [x] **1.3 Request structure and builder.** Owned requests, metadata, new
   labels, assert/retract, expectations, head expectation, and optional retry
   key. Restrict metadata to typed scalars excluding references. Structural
   validation catches duplicate declarations and malformed requests without

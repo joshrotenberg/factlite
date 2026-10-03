@@ -1,7 +1,7 @@
 # Work status
 
-Repository setup and items 1.1–1.2 are complete. Next is item 1.3, owned requests
-and builder. Persistence is not implemented yet. All reviews are self-reviews;
+Repository setup and items 1.1–1.3 are complete. Next is item 1.4, pure batch
+normalization. Persistence is not implemented yet. All reviews are self-reviews;
 remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -86,6 +86,18 @@ remote CI has not run.
   catalog unchanged. Catalog remains private pending evaluator integration.
 - **Blockers:** None locally. Durable catalog persistence is step 2 work.
 - **What's next:** Item 1.3, owned transaction data and structural validation.
+
+## 1.3 Request structure and builder — done
+
+- **Done:** Owned typed requests/builders, declarations, operations, expectations,
+  head fences, scalar metadata, and retry-key fields. Structural validation rejects
+  duplicates/undeclared labels/reference metadata. Twenty-two tests passed,
+  including ten 1,024-case properties and public request integration checks.
+- **Decisions:** Normalize expected sets; preserve submitted operation order and
+  duplicates for future retry identity. State-dependent validation waits for
+  commit, after retry lookup. Builder field replacement is explicitly documented.
+- **Blockers:** None locally. Serialization and actual retries remain step 4.
+- **What's next:** Item 1.4, resolve and normalize batches against a reference state.
 
 ## Environment notes
 

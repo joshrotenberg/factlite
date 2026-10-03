@@ -80,6 +80,14 @@ pub enum Value {
 }
 
 impl Value {
+    // Deterministic report/set encoding only; public comparisons still reject
+    // mixed types. Within a validated attribute all values have one type.
+    pub(crate) fn canonical_cmp(&self, other: &Self) -> Ordering {
+        self.value_type()
+            .cmp(&other.value_type())
+            .then_with(|| self.compare(other).expect("matching type tags"))
+    }
+
     /// Constructs a validated float value.
     pub fn f64(value: f64) -> Result<Self> {
         FiniteF64::new(value).map(Self::F64)
