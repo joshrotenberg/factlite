@@ -16,10 +16,10 @@ items. Every item closes with done, decisions, blockers, and what's next in
 - [x] **0.2 Record the contract and roadmap.** Preserve the handoff unchanged,
   document the working contract and workflow, break all steps into items, and
   review links, scope, and item dependencies before merge.
-- [ ] **0.3 Scaffold the workspace.** One Rust library crate and one CLI crate,
+- [x] **0.3 Scaffold the workspace.** One Rust library crate and one CLI crate,
   explicit edition/toolchain, lockfile, unpublished packages, and no database
   API placeholders presented as working behavior.
-- [ ] **0.4 Establish verification.** One local check script and equivalent CI
+- [x] **0.4 Establish verification.** One local check script and equivalent CI
   configuration for formatting, warnings, tests, and documentation. Run locally
   and review before merging. Clearly distinguish scaffolding checks from
   semantic acceptance evidence.

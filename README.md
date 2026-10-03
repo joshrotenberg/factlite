@@ -4,8 +4,9 @@ An embedded Rust library for a typed, SQLite-backed fact database with atomic
 transactions and durable, revision-pinned reads. A thin CLI will exercise the
 same library.
 
-Factlite is being built incrementally. Repository setup is the current work;
-database APIs are not implemented yet.
+Factlite is being built incrementally. The library and CLI workspace is in place;
+database APIs are not implemented yet. The CLI currently supports only `--help`
+and `--version`; database command interchange will follow the design.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
@@ -24,5 +25,25 @@ appropriate checks, review the entire diff, address findings, and record the
 review and item status before merging with a merge commit. Never claim validation
 that did not run. Infrastructure-only checks establish build health, not database
 correctness.
+
+## Build and check
+
+Install [rustup](https://rustup.rs/). `rust-toolchain.toml` pins Rust 1.99.0 with
+Clippy and rustfmt. The workspace uses Rust edition 2024 and does not currently
+promise compatibility with older compilers.
+
+```sh
+./scripts/check.sh
+cargo run --locked -p factlite-cli -- --version
+cargo run --locked -p factlite-cli -- --help
+```
+
+The check script runs formatting, Clippy with warnings treated as errors, tests,
+and documentation with warnings treated as errors. GitHub Actions uses the same
+script when a remote is connected. There are no semantic tests yet.
+
+The lockfile is committed. The initial workspace has no external dependencies;
+SQLite and serialization dependencies will be selected in their respective
+implementation items.
 
 Remote hosting and licensing remain to be decided. Packages are not published.
