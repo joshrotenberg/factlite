@@ -1,9 +1,9 @@
 # Work status
 
-Step 1 and items 2.1–2.3 are complete. Public atomic commits persist reports and
-retained history. Next is item 2.4, injected-failure and concurrent-writer evidence.
-Pinned reads and database CLI commands remain pending. Reviews are self-reviews;
-remote CI has not run.
+Steps 1 and 2 are complete. Typed transactions, authoritative replay, atomic
+commits, and failure/concurrent-connection tests are implemented. Next is item
+3.1, revision-pinned Db ownership. Database CLI commands remain pending. Reviews
+are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -175,6 +175,20 @@ remote CI has not run.
   are next; actual power-loss/crash recovery remains later hardening.
 - **What's next:** Item 2.4, faults at every persistence stage, commit-error paths,
   bounded busy behavior, and competing conditional updates/connections.
+
+## 2.4 Failure and concurrency checks — done
+
+- **Done:** Eight SQL write fault locations, deferred COMMIT failure, ended-
+  transaction outcome classification, competing conditions, twelve concurrent
+  no-change writers, unrelated-change fencing, and bounded commit Busy errors.
+  Sixty-seven tests passed; twenty-two 1,024-case properties remain in the gate.
+- **Decisions:** Test hooks/temporary triggers stay test-only. Every injected
+  write fault preserves old head/report/metadata and leaves no schema/entities/
+  facts. COMMIT errors are classified conservatively. Separate connections
+  serialize revisions and only one competing condition succeeds.
+- **Blockers:** None locally. Physical power-loss/process-kill/IO recovery and
+  multi-process CLI behavior are later hardening; these tests do not claim them.
+- **What's next:** Item 3.1, shareable pinned views and full snapshot validation.
 
 ## Environment notes
 

@@ -13,6 +13,7 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 proptest = "1.9"
 tempfile = "3"
+rusqlite = { version = "0.40", features = ["hooks"] }
 
 [lints]
 workspace = true
