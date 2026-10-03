@@ -14,9 +14,11 @@ mod catalog;
 mod error;
 mod identity;
 mod schema;
+mod tx;
 mod value;
 
 pub use error::{Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
+pub use tx::{Change, EntityTerm, Expectation, Operation, Tx, TxBuilder, ValueTerm};
 pub use value::{FiniteF64, Value, ValueType};
