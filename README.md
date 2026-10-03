@@ -5,8 +5,9 @@ transactions and durable, revision-pinned reads. A thin CLI will exercise the
 same library.
 
 Factlite is being built incrementally. Typed values, schema definitions, owned
-requests, and the tested private semantic evaluator are in place. SQLite storage
-APIs are not implemented yet. The CLI currently supports only `--help`
+requests, and the tested private semantic evaluator are in place. SQLite files
+can be initialized/opened; atomic commits and pinned reads are still pending.
+The CLI currently supports only `--help`
 and `--version`; database command interchange will follow the design.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
@@ -44,7 +45,11 @@ and documentation with warnings treated as errors. GitHub Actions uses the same
 script when a remote is connected. See [testing policy](docs/testing.md) for unit,
 property, integration, and scenario coverage.
 
-The lockfile is committed. Proptest is a development dependency. SQLite and
-serialization dependencies will be selected in their implementation items.
+The lockfile is committed. Storage uses rusqlite with bundled SQLite and UUIDs
+for durable store/lineage identity. Proptest and tempfile support test coverage.
+
+Storage configures WAL, FULL synchronization, foreign keys, and a two-second
+busy timeout. A live store may have SQLite sidecar files; later backup support
+will use SQLite-safe mechanisms. See [storage decisions](docs/decisions.md).
 
 Remote hosting and licensing remain to be decided. Packages are not published.

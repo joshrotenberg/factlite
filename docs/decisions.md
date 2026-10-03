@@ -54,6 +54,25 @@ scenario testing. See `testing.md` for the verification policy.
 - Structured error context is boxed to keep error results compact while retaining
   exact expected/actual sets and ownership details.
 
+## SQLite file baseline
+
+- Use rusqlite 0.40 with bundled SQLite, and UUID v4 entropy for store/lineage IDs.
+  Store clones share an `Arc<Mutex<Connection>>`; separate opens rely on SQLite's
+  writer serialization. URI/in-memory modes are not part of the durable API.
+- Configure FULL synchronization before initialization and after enabling WAL,
+  foreign keys, and a two-second busy timeout. Bootstrap with BEGIN IMMEDIATE
+  and commit all schema/identity state together. Change journal mode outside
+  transactions, as SQLite requires.
+- File markers are application ID `0x464c4954` and format/user version 1. Only
+  empty files initialize; unrelated schemas, including view-only schemas, fail.
+  Unsupported newer formats fail before changing owned tables.
+- Revisions persist as eight-byte big-endian blobs so the full u64 domain orders
+  correctly in SQLite. Tables are authoritative transactions, schema/entity/fact
+  events, and store info. No current projection exists yet.
+- Open checks required tables, singleton identity, and head/log maximum. Item 2.2
+  adds full report/event/replay consistency; no complete corruption-validation
+  claim is made before then. SQLite source errors remain attached in Rust.
+
 ## Schema and allocation
 
 - Attribute names contain exactly one slash separating nonempty namespace and

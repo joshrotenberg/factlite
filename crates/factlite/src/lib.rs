@@ -17,6 +17,7 @@ mod model;
 #[cfg(test)]
 mod scenarios;
 mod schema;
+mod store;
 mod tx;
 mod value;
 
@@ -24,5 +25,6 @@ pub use error::{Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use model::{Fact, FactDelta, TxReport};
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
+pub use store::Store;
 pub use tx::{Change, EntityTerm, Expectation, Operation, Tx, TxBuilder, ValueTerm};
 pub use value::{FiniteF64, Value, ValueType};

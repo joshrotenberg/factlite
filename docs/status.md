@@ -1,9 +1,9 @@
 # Work status
 
-Step 1 is complete: typed semantic core, owned requests, pure batch evaluation,
-constraints, and reports. Next is item 2.1, SQLite storage format and open.
-Persistence and database CLI commands are not implemented yet. All reviews are
-self-reviews; remote CI has not run.
+Step 1 and item 2.1 are complete. Durable versioned files can be opened and
+initialized; next is item 2.2, authoritative event log and replay. Commit/read
+APIs and database CLI commands are still pending. Reviews are self-reviews;
+remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -129,6 +129,22 @@ self-reviews; remote CI has not run.
   and reopen require the upcoming SQLite implementation.
 - **What's next:** Item 2.1, select the SQLite binding and define/open a versioned
   durable file with explicit durability and busy behavior.
+
+## 2.1 Storage format and open — done
+
+- **Done:** File-backed store creation/open, persisted random store/lineage IDs,
+  full unsigned revision encoding, version/application markers, authoritative
+  table layout, configured WAL/FULL/FK/busy settings, and retained SQLite sources.
+  Forty-seven tests passed, including seventeen 1,024-case properties and six
+  public storage integration scenarios. Full checks passed.
+- **Decisions:** Rusqlite with bundled SQLite; v4 UUIDs for store/lineage entropy.
+  Eight-byte big-endian revision blobs preserve unsigned SQL ordering. A mutex
+  protects shared connections; separate opens use SQLite locks. Two-second busy
+  timeout. Initialization is atomic and requires an empty supported file.
+- **Blockers:** None locally. Full semantic-log verification is item 2.2;
+  transactions and pinned views follow. Remote hosting remains intentionally local.
+- **What's next:** Item 2.2, exact typed codecs, authoritative events, report
+  persistence, replay, and corruption checks against the reference evaluator.
 
 ## Environment notes
 

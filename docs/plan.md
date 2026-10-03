@@ -55,7 +55,7 @@ tested deterministically without committing to a public ID encoding prematurely.
 
 ## Step 2: Atomic SQLite persistence
 
-- [ ] **2.1 Storage format and open.** Select and document SQLite binding,
+- [x] **2.1 Storage format and open.** Select and document SQLite binding,
   durability policy, busy timeout, format version, store/lineage identity,
   and revision-zero creation. Reject unsupported formats and inconsistent files.
 - [ ] **2.2 Authoritative log and replay.** Persist commit records, complete

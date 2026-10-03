@@ -41,6 +41,11 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorContext {
+    /// Storage operation context; the Rust source error remains attached.
+    Storage {
+        /// Operation that failed.
+        operation: &'static str,
+    },
     /// Exact-head fencing failure.
     HeadMismatch {
         /// Caller-supplied fence.
@@ -110,6 +115,7 @@ pub struct Error {
     code: ErrorCode,
     context: Box<ErrorContext>,
     message: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl Error {
@@ -118,6 +124,7 @@ impl Error {
             code,
             context: Box::new(context),
             message: message.into(),
+            source: None,
         }
     }
 
@@ -127,6 +134,26 @@ impl Error {
             ErrorContext::InvalidInput { field },
             message,
         )
+    }
+
+    pub(crate) fn storage(operation: &'static str, source: rusqlite::Error) -> Self {
+        let code = match &source {
+            rusqlite::Error::SqliteFailure(err, _)
+                if matches!(
+                    err.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                ) =>
+            {
+                ErrorCode::Busy
+            }
+            _ => ErrorCode::Storage,
+        };
+        Self {
+            code,
+            context: Box::new(ErrorContext::Storage { operation }),
+            message: format!("{operation}: {source}"),
+            source: Some(Box::new(source)),
+        }
     }
 
     /// Returns the stable failure classification.
@@ -146,4 +173,16 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| source.as_ref() as &(dyn std::error::Error + 'static))
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(source: rusqlite::Error) -> Self {
+        Self::storage("sqlite", source)
+    }
+}
