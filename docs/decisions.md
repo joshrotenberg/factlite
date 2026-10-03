@@ -25,3 +25,17 @@
 
 The user requested unit, property, integration, and eventual `assert_cmd`
 scenario testing. See `testing.md` for the verification policy.
+
+## Schema and allocation
+
+- Attribute names contain exactly one slash separating nonempty namespace and
+  local name, with no whitespace/control characters. Unicode stays exact.
+- Definitions have private fields and a validated constructor. No API renames
+  or mutates committed type/cardinality/uniqueness. Schema projections are owned.
+- The private catalog tracks creation revisions independently of facts. Staging
+  clones the catalog; a failed schema/allocation batch cannot leak IDs or schema.
+  A staged no-op still advances its proposed revision. SQLite will later persist
+  the resulting events atomically.
+- A temporary, documented dead-code expectation covers the catalog while it is
+  integrated incrementally. Remove it when the evaluator becomes its production
+  caller; the catalog is not a second public backend.

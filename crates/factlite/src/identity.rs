@@ -59,6 +59,13 @@ pub struct EntityId {
 }
 
 impl EntityId {
+    pub(crate) fn allocated(store: StoreId, allocation: u64) -> Result<Self> {
+        if allocation == 0 {
+            return Err(Error::invalid("entity", "allocation zero is reserved"));
+        }
+        Ok(Self { store, allocation })
+    }
+
     /// Returns the store binding encoded in this identity.
     pub fn store(&self) -> &StoreId {
         &self.store

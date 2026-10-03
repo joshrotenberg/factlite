@@ -30,7 +30,7 @@ items. Every item closes with done, decisions, blockers, and what's next in
   transaction-local labels, revisions/snapshots, typed values, finite-float
   validation, zero normalization, equality, and same-type ordering. Test type
   distinctions, i64 boundaries, invalid floats, and foreign identities.
-- [ ] **1.2 Schema and allocation state.** Immutable attribute definitions,
+- [x] **1.2 Schema and allocation state.** Immutable attribute definitions,
   cardinality/uniqueness rules, known empty entities, historical creation
   revisions, identical redeclarations, and transactional new definitions.
   Test unknown/empty entities and incompatible definitions.

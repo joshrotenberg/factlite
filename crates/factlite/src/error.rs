@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::ValueType;
+use crate::{AttrName, EntityId, ValueType};
 
 /// A library operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -41,6 +41,16 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorContext {
+    /// An attribute that could not be resolved or declared.
+    Attribute {
+        /// Qualified attribute name.
+        attribute: AttrName,
+    },
+    /// An unallocated, not-yet-created, or foreign entity.
+    Entity {
+        /// Rejected entity identity.
+        entity: EntityId,
+    },
     /// The invalid input field.
     InvalidInput {
         /// Field identifying the input boundary.
