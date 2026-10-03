@@ -4,6 +4,10 @@ Read `Factlite-Design.md`, `docs/plan.md`, and `docs/status.md` before changing
 semantics. Preserve the supplied design as historical reference; put adopted
 implementation decisions in the plan or a focused decision document.
 
+Follow `docs/testing.md`: deterministic unit coverage, semantic property tests,
+public integration coverage, and `assert_cmd` scenarios once database CLI
+commands exist. Keep rolling from completed items into the next authorized item.
+
 Work on a bounded branch from `main`. Review the complete diff and run checks
 appropriate to the change before merging with `--no-ff`. Record review findings
 and validation in `docs/reviews/`, including limitations. Self-review must be

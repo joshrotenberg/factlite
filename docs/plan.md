@@ -26,7 +26,7 @@ items. Every item closes with done, decisions, blockers, and what's next in
 
 ## Step 1: Semantic core
 
-- [ ] **1.1 Typed values and identity.** Define store-bound entity IDs,
+- [x] **1.1 Typed values and identity.** Define store-bound entity IDs,
   transaction-local labels, revisions/snapshots, typed values, finite-float
   validation, zero normalization, equality, and same-type ordering. Test type
   distinctions, i64 boundaries, invalid floats, and foreign identities.
