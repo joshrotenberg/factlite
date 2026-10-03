@@ -20,3 +20,8 @@ paths. Crash, locking, backups, and process behavior need integration evidence.
 Repository hosting remains local during this session. Preserve Git history,
 reviews, lockfile, and documentation for a later tarball handoff; exclude build
 outputs, local toolchains, and transient databases when packaging is requested.
+
+The SQLite fault suite uses test-only hooks and temporary triggers; production
+code exposes neither. Its eight write fault locations plus two COMMIT paths
+prove transaction rollback/classification, not physical power-loss recovery.
+Concurrent-connection tests use barriers and no scheduling sleeps.

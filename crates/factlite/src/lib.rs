@@ -7,6 +7,8 @@
 mod catalog;
 mod codec;
 mod error;
+#[cfg(test)]
+mod faults;
 mod identity;
 mod log;
 mod model;

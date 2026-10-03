@@ -66,7 +66,7 @@ tested deterministically without committing to a public ID encoding prematurely.
   Verify rollback and fresh no-change revisions. Reserve storage for versioned
   canonical requests; requests with retry keys must be rejected until step 4
   is complete, rather than silently committing without retry protection.
-- [ ] **2.4 Failure and concurrency checks.** Exercise failures around writes,
+- [x] **2.4 Failure and concurrency checks.** Exercise failures around writes,
   competing connections, conditional-update contention, and busy classification.
   Distinguish confirmed rollback from uncertain outcomes.
 
