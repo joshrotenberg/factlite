@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{AttrName, EntityId, Fact, ValueType};
+use crate::{AttrName, EntityId, Fact, SnapshotId, Value, ValueType};
 
 /// A library operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -41,6 +41,33 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorContext {
+    /// Exact-head fencing failure.
+    HeadMismatch {
+        /// Caller-supplied fence.
+        expected: SnapshotId,
+        /// Committed pre-head.
+        actual: SnapshotId,
+    },
+    /// Failed exact attribute-set condition.
+    Precondition {
+        /// Existing entity.
+        entity: EntityId,
+        /// Pre-head attribute.
+        attribute: AttrName,
+        /// Sorted, distinct submitted set.
+        expected: Vec<Value>,
+        /// Sorted, distinct committed set.
+        actual: Vec<Value>,
+    },
+    /// Final-state duplicate unique ownership.
+    UniqueOwnership {
+        /// Unique attribute.
+        attribute: AttrName,
+        /// Exact conflicting typed value.
+        value: Value,
+        /// All owners, in identity order.
+        owners: Vec<EntityId>,
+    },
     /// A conflicting fact.
     Fact {
         /// Fully resolved fact.
@@ -81,7 +108,7 @@ pub enum ErrorContext {
 #[derive(Debug)]
 pub struct Error {
     code: ErrorCode,
-    context: ErrorContext,
+    context: Box<ErrorContext>,
     message: String,
 }
 
@@ -89,7 +116,7 @@ impl Error {
     pub(crate) fn new(code: ErrorCode, context: ErrorContext, message: impl Into<String>) -> Self {
         Self {
             code,
-            context,
+            context: Box::new(context),
             message: message.into(),
         }
     }

@@ -4,8 +4,9 @@ An embedded Rust library for a typed, SQLite-backed fact database with atomic
 transactions and durable, revision-pinned reads. A thin CLI will exercise the
 same library.
 
-Factlite is being built incrementally. The library and CLI workspace is in place;
-database APIs are not implemented yet. The CLI currently supports only `--help`
+Factlite is being built incrementally. Typed values, schema definitions, owned
+requests, and the tested private semantic evaluator are in place. SQLite storage
+APIs are not implemented yet. The CLI currently supports only `--help`
 and `--version`; database command interchange will follow the design.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
@@ -40,10 +41,10 @@ cargo run --locked -p factlite-cli -- --help
 
 The check script runs formatting, Clippy with warnings treated as errors, tests,
 and documentation with warnings treated as errors. GitHub Actions uses the same
-script when a remote is connected. There are no semantic tests yet.
+script when a remote is connected. See [testing policy](docs/testing.md) for unit,
+property, integration, and scenario coverage.
 
-The lockfile is committed. The initial workspace has no external dependencies;
-SQLite and serialization dependencies will be selected in their respective
-implementation items.
+The lockfile is committed. Proptest is a development dependency. SQLite and
+serialization dependencies will be selected in their implementation items.
 
 Remote hosting and licensing remain to be decided. Packages are not published.

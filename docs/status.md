@@ -1,8 +1,9 @@
 # Work status
 
-Repository setup and items 1.1–1.4 are complete. Next is item 1.5, constraints
-and reports. Persistence is not implemented yet. All reviews are self-reviews;
-remote CI has not run.
+Step 1 is complete: typed semantic core, owned requests, pure batch evaluation,
+constraints, and reports. Next is item 2.1, SQLite storage format and open.
+Persistence and database CLI commands are not implemented yet. All reviews are
+self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -112,6 +113,22 @@ remote CI has not run.
 - **Blockers:** None locally. Normalization is private and is not commit;
   expectations and final-state uniqueness are the next item.
 - **What's next:** Item 1.5, pre-head constraints and complete structured reports.
+
+## 1.5 Constraints and reports — done
+
+- **Done:** Exact pre-head conditions, head fencing, final-state uniqueness,
+  complete deterministic reports, structured failure context, and reference
+  scenarios. Thirty-nine tests passed, including sixteen 1,024-case properties.
+  A bounded exhaustive table covers 768 batches in both operation orders and
+  96 expectation cases. Full checks passed.
+- **Decisions:** Evaluate conditions before staging writes, and ownership after
+  complete normalization. All six value types share the same exact-set and
+  ownership rules. Reports retain before/after snapshots, IDs, schema, metadata,
+  and effective deltas. Large structured error context is boxed internally.
+- **Blockers:** None locally. Durable atomicity, process contention, retries,
+  and reopen require the upcoming SQLite implementation.
+- **What's next:** Item 2.1, select the SQLite binding and define/open a versioned
+  durable file with explicit durability and busy behavior.
 
 ## Environment notes
 

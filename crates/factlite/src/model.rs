@@ -1,12 +1,12 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
 };
 
 use crate::catalog::{Catalog, CatalogDelta};
 use crate::{
     AttrName, Cardinality, EntityId, EntityTerm, Error, ErrorCode, ErrorContext, Operation, Result,
-    SnapshotId, Tx, Value, ValueTerm,
+    SnapshotId, TempId, Tx, Uniqueness, Value, ValueTerm,
 };
 
 /// An effective typed entity/attribute/value fact.
@@ -38,6 +38,32 @@ pub struct FactDelta {
     pub fact: Fact,
 }
 
+/// Complete effective outcome, persisted atomically by the store.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TxReport {
+    /// Committed pre-head.
+    pub before: SnapshotId,
+    /// New committed revision; exact replay later returns this original token.
+    pub after: SnapshotId,
+    /// Temporary labels resolved to allocated store-bound IDs.
+    pub tempids: BTreeMap<TempId, EntityId>,
+    /// Newly allocated identities, including empty entities, in identity order.
+    pub created_entities: Vec<EntityId>,
+    /// Effective schema additions in qualified-name order.
+    pub schema_added: Vec<crate::AttributeDefinition>,
+    /// Effective changes in deterministic event order.
+    pub effective_delta: Vec<FactDelta>,
+    /// Exact caller scalar metadata.
+    pub metadata: BTreeMap<String, Value>,
+}
+
+impl TxReport {
+    /// Report encoding version.
+    pub const fn version(&self) -> u32 {
+        1
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Model {
     pub catalog: Catalog,
@@ -52,6 +78,123 @@ pub(crate) struct NormalizedBatch {
 }
 
 impl Model {
+    pub fn evaluate(&self, tx: &Tx) -> Result<(Self, TxReport)> {
+        let tx = tx.clone().validate()?;
+        if let Some(expected) = &tx.expected_head
+            && expected != &self.catalog.snapshot
+        {
+            return Err(Error::new(
+                ErrorCode::HeadMismatch,
+                ErrorContext::HeadMismatch {
+                    expected: expected.clone(),
+                    actual: self.catalog.snapshot.clone(),
+                },
+                "expected head differs from current head",
+            ));
+        }
+        let schema = self.catalog.schema_at(self.catalog.snapshot.revision())?;
+        for expectation in &tx.expectations {
+            self.catalog.require_known(&expectation.entity)?;
+            let definition = schema.get(&expectation.attribute).ok_or_else(|| {
+                Error::new(
+                    ErrorCode::UnknownAttribute,
+                    ErrorContext::Attribute {
+                        attribute: expectation.attribute.clone(),
+                    },
+                    "expectation attribute is unknown at pre-head",
+                )
+            })?;
+            for value in &expectation.values {
+                if value.value_type() != definition.value_type() {
+                    return Err(Error::new(
+                        ErrorCode::TypeMismatch,
+                        ErrorContext::TypeMismatch {
+                            expected: definition.value_type(),
+                            actual: value.value_type(),
+                        },
+                        "expectation value has the wrong type",
+                    ));
+                }
+                if let Value::Ref(id) = value {
+                    self.catalog.require_known(id)?;
+                }
+            }
+            if definition.cardinality() == Cardinality::One && expectation.values.len() > 1 {
+                return Err(Error::invalid(
+                    "expect",
+                    "cardinality-one expectation contains more than one distinct value",
+                ));
+            }
+            let mut actual: Vec<_> = self
+                .facts
+                .iter()
+                .filter(|fact| {
+                    fact.entity == expectation.entity && fact.attribute == expectation.attribute
+                })
+                .map(|fact| fact.value.clone())
+                .collect();
+            actual.sort_by(Value::canonical_cmp);
+            if actual != expectation.values {
+                return Err(Error::new(
+                    ErrorCode::PreconditionFailed,
+                    ErrorContext::Precondition {
+                        entity: expectation.entity.clone(),
+                        attribute: expectation.attribute.clone(),
+                        expected: expectation.values.clone(),
+                        actual,
+                    },
+                    "exact attribute-set expectation failed",
+                ));
+            }
+        }
+        let batch = self.normalize(&tx)?;
+        batch.next.validate_uniqueness()?;
+        let mut created_entities: Vec<_> = batch.catalog_delta.tempids.values().cloned().collect();
+        created_entities.sort();
+        let report = TxReport {
+            before: self.catalog.snapshot.clone(),
+            after: batch.next.catalog.snapshot.clone(),
+            tempids: batch.catalog_delta.tempids,
+            created_entities,
+            schema_added: batch.catalog_delta.schema_added,
+            effective_delta: batch.effective_delta,
+            metadata: tx.metadata,
+        };
+        Ok((batch.next, report))
+    }
+
+    fn validate_uniqueness(&self) -> Result<()> {
+        let mut by_attr: BTreeMap<AttrName, HashMap<Value, BTreeSet<EntityId>>> = BTreeMap::new();
+        for fact in &self.facts {
+            if self.catalog.schema[&fact.attribute].0.uniqueness() == Uniqueness::UniqueOne {
+                by_attr
+                    .entry(fact.attribute.clone())
+                    .or_default()
+                    .entry(fact.value.clone())
+                    .or_default()
+                    .insert(fact.entity.clone());
+            }
+        }
+        for (attribute, values) in by_attr {
+            if let Some((value, owners)) = values
+                .into_iter()
+                .filter(|(_, owners)| owners.len() > 1)
+                .min_by(|(a, _), (b, _)| a.canonical_cmp(b))
+            {
+                return Err(Error::new(
+                    ErrorCode::UniqueViolation,
+                    ErrorContext::UniqueOwnership {
+                        attribute,
+                        value,
+                        owners: owners.into_iter().collect(),
+                    },
+                    "unique value has multiple final-state owners",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn empty(snapshot: SnapshotId) -> Result<Self> {
         Ok(Self {
             catalog: Catalog::empty(snapshot)?,
@@ -59,8 +202,8 @@ impl Model {
         })
     }
 
-    // This is batch normalization, not commit. Preconditions and final-state
-    // uniqueness are enforced by evaluate in item 1.5 before exposing a report.
+    // Batch normalization is private; evaluate adds preconditions and final
+    // uniqueness before storage can expose a report.
     pub fn normalize(&self, tx: &Tx) -> Result<NormalizedBatch> {
         let (catalog, catalog_delta) = self.catalog.stage(&tx.schema, &tx.new_entities)?;
         let schema = catalog.schema_at(catalog.snapshot.revision())?;
