@@ -76,7 +76,7 @@ log and cannot become the historical authority.
 
 ## Step 3: Stable views and the A/B/reopen fixture
 
-- [ ] **3.1 Pinned `Db` ownership and tokens.** Capture head once, share durable
+- [x] **3.1 Pinned `Db` ownership and tokens.** Capture head once, share durable
   access without retaining a long-lived SQL transaction, validate full snapshot
   identities and bounds, and keep reads usable after dropping `Store`.
 - [ ] **3.2 Revision-bounded reads.** Schema, facts, flat pull, history, and

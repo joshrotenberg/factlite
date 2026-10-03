@@ -70,6 +70,18 @@ pub struct Store {
 }
 
 impl Store {
+    /// Captures committed head once and returns a stable, shareable database view.
+    pub fn db(&self) -> Result<crate::Db> {
+        Ok(crate::Db::pinned(self.clone(), self.head()?))
+    }
+
+    /// Opens an explicit retained snapshot, validating full identity and history.
+    pub fn db_at(&self, snapshot: &SnapshotId) -> Result<crate::Db> {
+        let db = crate::Db::pinned(self.clone(), snapshot.clone());
+        db.schema()?;
+        Ok(db)
+    }
+
     /// Validates and commits one declarative batch against serialized pre-head.
     /// Fresh no-change requests receive revisions. Retry keys are explicitly
     /// rejected until exact idempotency is implemented. Failures expose outcome

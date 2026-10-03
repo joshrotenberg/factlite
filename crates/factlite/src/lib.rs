@@ -6,6 +6,7 @@
 
 mod catalog;
 mod codec;
+mod db;
 mod error;
 #[cfg(test)]
 mod faults;
@@ -19,6 +20,7 @@ mod store;
 mod tx;
 mod value;
 
+pub use db::Db;
 pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use model::{Fact, FactDelta, TxReport};

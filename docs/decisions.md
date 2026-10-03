@@ -133,3 +133,12 @@ scenario testing. See `testing.md` for the verification policy.
   retry lookup once idempotency exists. Building never borrows a SQL transaction.
 - Repeated builder calls setting a metadata map key, expected head, or retry key
   replace that field. Wire duplicate JSON keys remain errors in item 4.1.
+
+## Pinned database ownership
+
+- Db holds a Store clone and an immutable full snapshot token. Capturing head
+  never leaves a SQL transaction open; each operation replays its pinned basis
+  in one short deferred transaction and returns owned results.
+- `db_at` verifies identity, lineage, retained revision bounds, and replayability.
+  Dropping Store leaves views usable; closing all handles and reopening with
+  the retained token recovers the same historical schema.
