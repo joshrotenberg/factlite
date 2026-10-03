@@ -7,7 +7,8 @@ same library.
 Factlite is being built incrementally. Typed values, schema definitions, owned
 requests, and the tested private semantic evaluator are in place. SQLite files
 can be initialized/opened and atomic commits persist exact reports and history.
-Pinned read APIs are still pending.
+`Store::db()` captures a stable view, and `db_at()` reopens a retained snapshot.
+Historical schema reads work; facts, pull, and history reads are next.
 The CLI currently supports only `--help`
 and `--version`; database command interchange will follow the design.
 

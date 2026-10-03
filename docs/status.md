@@ -1,8 +1,8 @@
 # Work status
 
 Steps 1 and 2 are complete. Typed transactions, authoritative replay, atomic
-commits, and failure/concurrent-connection tests are implemented. Next is item
-3.1, revision-pinned Db ownership. Database CLI commands remain pending. Reviews
+commits, failure/concurrent-connection tests, and pinned Db ownership are
+implemented. Next is item 3.2, revision-bounded reads. Database CLI commands remain pending. Reviews
 are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -189,6 +189,18 @@ are self-reviews; remote CI has not run.
 - **Blockers:** None locally. Physical power-loss/process-kill/IO recovery and
   multi-process CLI behavior are later hardening; these tests do not claim them.
 - **What's next:** Item 3.1, shareable pinned views and full snapshot validation.
+
+## 3.1 Pinned Db ownership and tokens — done
+
+- **Done:** Shareable pinned views, historical schema, full identity/bounds
+  validation, and durable use after dropping Store or closing/reopening all
+  handles. Seventy tests passed, including twenty-three 1,024-case properties.
+  Full checks passed; review: `reviews/0012-pinned-db-views.md`.
+- **Decisions:** Each read owns one short SQLite transaction and returns owned
+  data. Db retains a shared durable handle, never a long-lived transaction or
+  implicit refresh. Invalid/foreign/future snapshots fail without clamping.
+- **Blockers:** None locally. Remote CI has not run.
+- **What's next:** Item 3.2, facts, flat pull, bounded history and transactions.
 
 ## Environment notes
 
