@@ -73,6 +73,26 @@ scenario testing. See `testing.md` for the verification policy.
   adds full report/event/replay consistency; no complete corruption-validation
   claim is made before then. SQLite source errors remain attached in Rust.
 
+## Authoritative encoding and replay
+
+- Internal report encoding 1 begins with `FLR1`, uses bounded u64 byte/count
+  prefixes, canonical tokens, explicit enum tags, and canonical map ordering.
+  It is not the public JSON format or the future retry request encoding.
+- Stored type tags 0–5 represent bool/i64/f64/string/bytes/ref. Integers flip
+  the sign bit; floats flip positive sign bits and invert negative bits. Big-endian
+  blobs then preserve same-type numeric order. Strings/bytes use exact bytes;
+  references use canonical ID bytes. Decode rejects nonfinite or negative-zero
+  stored floats and other noncanonical values.
+- Retained reports and events must agree exactly, including ordinals. Replay
+  validates contiguous revisions, identity bindings, allocation/schema events,
+  effective deltas, final references/cardinality/uniqueness, and requested bounds.
+  Reopen runs this check in its existing short SQLite transaction.
+- No-op commits have reports/revisions and empty effective events. Persisted
+  reports retain caller metadata and original temporary mappings for later retry.
+- In the corruption test only, foreign keys are disabled explicitly to inject
+  broken rows. Production connections always enable them and reopen verifies
+  existing foreign-key consistency.
+
 ## Schema and allocation
 
 - Attribute names contain exactly one slash separating nonempty namespace and

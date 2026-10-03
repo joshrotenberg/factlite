@@ -58,7 +58,7 @@ tested deterministically without committing to a public ID encoding prematurely.
 - [x] **2.1 Storage format and open.** Select and document SQLite binding,
   durability policy, busy timeout, format version, store/lineage identity,
   and revision-zero creation. Reject unsupported formats and inconsistent files.
-- [ ] **2.2 Authoritative log and replay.** Persist commit records, complete
+- [x] **2.2 Authoritative log and replay.** Persist commit records, complete
   reports, schema/allocation events, and ordered effective fact events. Rebuild
   state through revision R and compare it with the pure evaluator.
 - [ ] **2.3 Serialized commit.** Begin a SQLite write transaction, validate

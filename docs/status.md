@@ -1,9 +1,9 @@
 # Work status
 
-Step 1 and item 2.1 are complete. Durable versioned files can be opened and
-initialized; next is item 2.2, authoritative event log and replay. Commit/read
-APIs and database CLI commands are still pending. Reviews are self-reviews;
-remote CI has not run.
+Step 1 and items 2.1–2.2 are complete. Durable files, exact reports/events, and
+revision-bounded replay are implemented. Next is item 2.3, public atomic commits.
+Database CLI commands remain pending. All reviews are self-reviews; remote CI
+has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -145,6 +145,21 @@ remote CI has not run.
   transactions and pinned views follow. Remote hosting remains intentionally local.
 - **What's next:** Item 2.2, exact typed codecs, authoritative events, report
   persistence, replay, and corruption checks against the reference evaluator.
+
+## 2.2 Authoritative log and replay — done
+
+- **Done:** Canonical typed BLOBs, versioned internal reports/definitions,
+  authoritative event/report writes, revision-bounded replay, and reopen
+  consistency checks. Fifty-six tests passed, including twenty-two 1,024-case
+  properties and randomized persisted revision sequences. Full checks passed.
+- **Decisions:** Internal binary encoding is distinct from public JSON. Decode
+  validates bounds, canonical spelling, finite floats, and exact report bytes.
+  Replay cross-checks reports against schema/entity/fact events, reconstructs the
+  catalog, and validates complete state. No current projection is required.
+- **Blockers:** None locally. Persistence helpers are private; public commits,
+  rollback outcomes, and concurrency are items 2.3–2.4.
+- **What's next:** Item 2.3, one serialized SQLite write transaction per commit,
+  request validation/evaluation, rollback classification, and public API tests.
 
 ## Environment notes
 

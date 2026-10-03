@@ -4,8 +4,10 @@
 //! use explicit revision tokens. SQLite persistence is added separately.
 
 mod catalog;
+mod codec;
 mod error;
 mod identity;
+mod log;
 #[cfg_attr(
     not(test),
     expect(
