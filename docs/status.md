@@ -1,8 +1,8 @@
 # Work status
 
-Repository setup and item 1.1 are complete. The next increment is item 1.2,
-schema and allocation state. Database persistence is not implemented yet.
-Reviews are self-reviews; no independent reviewer or remote CI has run.
+Repository setup and items 1.1–1.2 are complete. Next is item 1.3, owned requests
+and builder. Persistence is not implemented yet. All reviews are self-reviews;
+remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -73,6 +73,19 @@ Reviews are self-reviews; no independent reviewer or remote CI has run.
   and testing policy are recorded in `decisions.md` and `testing.md`.
 - **Blockers:** None locally. No remote is needed for the workflow.
 - **What's next:** Item 1.2, immutable schema and revision-aware allocation.
+
+## 1.2 Schema and allocation state — done
+
+- **Done:** Immutable validated attribute definitions, owned schema projections,
+  revision-aware creation catalogs, staged allocations, empty entities, and
+  unknown/foreign-ID validation. Eighteen tests passed, including nine properties
+  at 1,024 cases each. Full checks passed.
+- **Decisions:** Qualified names are exact namespace/name pairs. Identical
+  redeclarations are no-ops; conflicting definitions and duplicate request
+  declarations fail. Staging uses a separate value so failures leave the original
+  catalog unchanged. Catalog remains private pending evaluator integration.
+- **Blockers:** None locally. Durable catalog persistence is step 2 work.
+- **What's next:** Item 1.3, owned transaction data and structural validation.
 
 ## Environment notes
 
