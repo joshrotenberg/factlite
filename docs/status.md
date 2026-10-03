@@ -1,7 +1,7 @@
 # Work status
 
-Repository setup and items 1.1–1.3 are complete. Next is item 1.4, pure batch
-normalization. Persistence is not implemented yet. All reviews are self-reviews;
+Repository setup and items 1.1–1.4 are complete. Next is item 1.5, constraints
+and reports. Persistence is not implemented yet. All reviews are self-reviews;
 remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -98,6 +98,20 @@ remote CI has not run.
   commit, after retry lookup. Builder field replacement is explicitly documented.
 - **Blockers:** None locally. Serialization and actual retries remain step 4.
 - **What's next:** Item 1.4, resolve and normalize batches against a reference state.
+
+## 1.4 Pure batch normalization — done
+
+- **Done:** Resolved temporary graphs and schema; implemented set-valued batches,
+  cardinality-one replacement, duplicate/no-op collapse, exact-fact conflicts,
+  deterministic effective deltas, and private reference state. Twenty-nine tests
+  passed, including thirteen 1,024-case properties and four public integrations.
+- **Decisions:** Known IDs must exist at pre-head; newly declared entities are
+  addressed by temporary labels, even if a fabricated token guesses their future
+  allocation. Compare state differences to produce effective events. Catalog's
+  temporary dead-code expectation was removed after evaluator integration.
+- **Blockers:** None locally. Normalization is private and is not commit;
+  expectations and final-state uniqueness are the next item.
+- **What's next:** Item 1.5, pre-head constraints and complete structured reports.
 
 ## Environment notes
 

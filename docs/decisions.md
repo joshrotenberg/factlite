@@ -26,6 +26,21 @@
 The user requested unit, property, integration, and eventual `assert_cmd`
 scenario testing. See `testing.md` for the verification policy.
 
+## Batch normalization
+
+- A private normalizer stages schema/entities, resolves facts, validates types,
+  detects declarative conflicts, and computes old/new set differences. Its
+  output is a candidate, not a commit. Evaluation adds preconditions and final
+  uniqueness before reports are exposed to storage.
+- Concrete IDs and concrete reference targets must be known at pre-head.
+  Newly declared identities must use temporary labels, preventing guessed future
+  allocated tokens from being accepted accidentally.
+- Deterministic delta order is retract/assert, entity, attribute, typed value.
+  No-op operations never appear. Internal tag ordering serves event encoding;
+  it does not change public typed comparisons.
+- The catalog's pre-integration lint expectation is removed. The private model
+  has one temporary expectation until SQLite becomes its production caller.
+
 ## Schema and allocation
 
 - Attribute names contain exactly one slash separating nonempty namespace and
