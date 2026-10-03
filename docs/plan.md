@@ -39,7 +39,7 @@ items. Every item closes with done, decisions, blockers, and what's next in
   key. Restrict metadata to typed scalars excluding references. Structural
   validation catches duplicate declarations and malformed requests without
   storage access. Build does not execute a transaction.
-- [ ] **1.4 Pure batch normalization.** Given pre-state and a validated request,
+- [x] **1.4 Pure batch normalization.** Given pre-state and a validated request,
   calculate effective changes together. Test repeated operations, exact-fact
   add/retract conflicts, replacement, many-valued sets, and operation-order
   independence of final state. The reference state is a semantic oracle, not a

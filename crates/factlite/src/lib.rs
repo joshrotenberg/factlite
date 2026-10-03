@@ -3,22 +3,24 @@
 //! Values preserve their type, identities bind their store, and database views
 //! use explicit revision tokens. SQLite persistence is added separately.
 
+mod catalog;
+mod error;
+mod identity;
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "Private catalog is implemented and tested before evaluator integration in item 1.4."
+        reason = "Reference evaluator is tested before SQLite integration in step 2."
     )
 )]
-mod catalog;
-mod error;
-mod identity;
+mod model;
 mod schema;
 mod tx;
 mod value;
 
 pub use error::{Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
+pub use model::{Fact, FactDelta};
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
 pub use tx::{Change, EntityTerm, Expectation, Operation, Tx, TxBuilder, ValueTerm};
 pub use value::{FiniteF64, Value, ValueType};

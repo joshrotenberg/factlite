@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{AttrName, EntityId, ValueType};
+use crate::{AttrName, EntityId, Fact, ValueType};
 
 /// A library operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -41,6 +41,18 @@ pub enum ErrorCode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorContext {
+    /// A conflicting fact.
+    Fact {
+        /// Fully resolved fact.
+        fact: Fact,
+    },
+    /// A conflicting entity/attribute pair.
+    EntityAttribute {
+        /// Entity identity.
+        entity: EntityId,
+        /// Qualified attribute name.
+        attribute: AttrName,
+    },
     /// An attribute that could not be resolved or declared.
     Attribute {
         /// Qualified attribute name.
