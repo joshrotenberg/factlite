@@ -1,8 +1,8 @@
 # Work status
 
-Repository setup is complete. The next increment is item 1.1, typed values and
-identity. No database behavior is implemented yet. Both setup increments have
-recorded self-reviews; no independent reviewer or remote CI has run.
+Repository setup and item 1.1 are complete. The next increment is item 1.2,
+schema and allocation state. Database persistence is not implemented yet.
+Reviews are self-reviews; no independent reviewer or remote CI has run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -59,6 +59,20 @@ recorded self-reviews; no independent reviewer or remote CI has run.
   the repository has a remote destination.
 - **What's next:** Add meaningful typed-value and identity acceptance tests with
   item 1.1, then review and merge that increment separately.
+
+## 1.1 Typed values and identity — done
+
+- **Done:** Six exact value types, finite-float validation/normalization,
+  typed equality/hash, same-type comparisons, strict store/entity/lineage/
+  snapshot tokens, revisions, and temporary labels. Eleven tests passed,
+  including seven property suites with 1,024 cases each and two public
+  integration tests. Format, Clippy, tests, and docs passed.
+- **Decisions:** `FiniteF64` makes invalid floats unrepresentable through safe
+  constructors; mixed-type ordering errors instead of coercing. Parsing IDs
+  validates syntax only; item 1.2 supplies allocation membership. Token encodings
+  and testing policy are recorded in `decisions.md` and `testing.md`.
+- **Blockers:** None locally. No remote is needed for the workflow.
+- **What's next:** Item 1.2, immutable schema and revision-aware allocation.
 
 ## Environment notes
 
