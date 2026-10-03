@@ -41,6 +41,19 @@ scenario testing. See `testing.md` for the verification policy.
 - The catalog's pre-integration lint expectation is removed. The private model
   has one temporary expectation until SQLite becomes its production caller.
 
+## Constraints and reports
+
+- Conditions resolve entities and attributes against pre-head. Exact typed sets
+  normalize duplicates and reject incompatible types or one-valued sets with
+  multiple distinct values. Proposed writes cannot satisfy their own conditions.
+- Unique ownership is grouped in complete final state, allowing transfers/swaps.
+  Multiple conflicts choose a deterministic attribute/value and list all owners.
+- Reports include only effective additions/retractions and preserve scalar
+  metadata, before/after tokens, allocations, and added definitions. Storage will
+  persist them with the commit; the private evaluator has no persistence claims.
+- Structured error context is boxed to keep error results compact while retaining
+  exact expected/actual sets and ownership details.
+
 ## Schema and allocation
 
 - Attribute names contain exactly one slash separating nonempty namespace and

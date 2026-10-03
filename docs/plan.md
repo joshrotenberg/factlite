@@ -44,7 +44,7 @@ items. Every item closes with done, decisions, blockers, and what's next in
   add/retract conflicts, replacement, many-valued sets, and operation-order
   independence of final state. The reference state is a semantic oracle, not a
   public second backend.
-- [ ] **1.5 Constraints and reports.** Validate expectations against pre-state,
+- [x] **1.5 Constraints and reports.** Validate expectations against pre-state,
   references including forward references/cycles, and uniqueness against final
   state. Produce deterministic deltas, metadata, and failures with the design's
   stable error codes and structured context.
