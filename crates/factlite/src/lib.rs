@@ -1,20 +1,14 @@
 //! Typed facts and durable revision-pinned database views over SQLite.
 //!
 //! Values preserve their type, identities bind their store, and database views
-//! use explicit revision tokens. SQLite persistence is added separately.
+//! use explicit revision tokens. SQLite persists atomic reports and retained
+//! semantic history with explicit commit outcome evidence.
 
 mod catalog;
 mod codec;
 mod error;
 mod identity;
 mod log;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Reference evaluator is tested before SQLite integration in step 2."
-    )
-)]
 mod model;
 #[cfg(test)]
 mod scenarios;
@@ -23,7 +17,7 @@ mod store;
 mod tx;
 mod value;
 
-pub use error::{Error, ErrorCode, ErrorContext, Result};
+pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use model::{Fact, FactDelta, TxReport};
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};

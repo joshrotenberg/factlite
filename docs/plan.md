@@ -61,7 +61,7 @@ tested deterministically without committing to a public ID encoding prematurely.
 - [x] **2.2 Authoritative log and replay.** Persist commit records, complete
   reports, schema/allocation events, and ordered effective fact events. Rebuild
   state through revision R and compare it with the pure evaluator.
-- [ ] **2.3 Serialized commit.** Begin a SQLite write transaction, validate
+- [x] **2.3 Serialized commit.** Begin a SQLite write transaction, validate
   against its head, evaluate the batch, persist all records, and commit together.
   Verify rollback and fresh no-change revisions. Reserve storage for versioned
   canonical requests; requests with retry keys must be rejected until step 4

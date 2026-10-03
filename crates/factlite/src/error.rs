@@ -5,6 +5,16 @@ use crate::{AttrName, EntityId, Fact, SnapshotId, Value, ValueType};
 /// A library operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Outcome evidence for an unsuccessful commit call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommitOutcome {
+    /// This request did not commit; rollback/no-write is confirmed.
+    RolledBack,
+    /// The commit outcome could not be confirmed. Retrying requires the same key
+    /// once idempotency support is available; never silently reformulate intent.
+    Unknown,
+}
+
 /// Stable machine-readable failure classifications.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -116,6 +126,7 @@ pub struct Error {
     context: Box<ErrorContext>,
     message: String,
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    commit_outcome: Option<CommitOutcome>,
 }
 
 impl Error {
@@ -125,6 +136,7 @@ impl Error {
             context: Box::new(context),
             message: message.into(),
             source: None,
+            commit_outcome: None,
         }
     }
 
@@ -153,6 +165,7 @@ impl Error {
             context: Box::new(ErrorContext::Storage { operation }),
             message: format!("{operation}: {source}"),
             source: Some(Box::new(source)),
+            commit_outcome: None,
         }
     }
 
@@ -164,6 +177,16 @@ impl Error {
     /// Returns typed details about the failure.
     pub fn context(&self) -> &ErrorContext {
         &self.context
+    }
+
+    /// Returns commit outcome evidence, or None for a non-commit operation.
+    pub fn commit_outcome(&self) -> Option<CommitOutcome> {
+        self.commit_outcome
+    }
+
+    pub(crate) fn with_commit_outcome(mut self, outcome: CommitOutcome) -> Self {
+        self.commit_outcome = Some(outcome);
+        self
     }
 }
 
