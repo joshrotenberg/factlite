@@ -2,8 +2,8 @@
 
 Steps 1–3 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, the durable Ada/task fixture, and forced reader/writer isolation are
-implemented. Strict versioned wire decoding is complete. Next is item 4.2,
-canonical typed requests. Database CLI commands and
+implemented. Strict wire decoding and canonical typed requests are complete.
+Next is item 4.3, atomic exact retries. Database CLI commands and
 exact retries remain pending. Reviews are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -256,6 +256,20 @@ exact retries remain pending. Reviews are self-reviews; remote CI has not run.
 - **Blockers:** None locally. Decoding a keyed request does not enable retries;
   keyed commit remains rejected until lookup/persistence land together.
 - **What's next:** Item 4.2, versioned canonical typed request bytes and equality.
+
+## 4.2 Canonical request representation — done
+
+- **Done:** Read-only canonical request evidence, frozen version-one binary
+  encoding, full typed payload, raw normalized float bits, and golden boundaries.
+  Ninety-one tests passed, including thirty 1,024-case properties; full checks
+  passed. Review: `reviews/0017-canonical-typed-requests.md`.
+- **Decisions:** Exclude key, preserve declaration/operation/expectation-entry
+  arrays and temporary labels, normalize expected sets and metadata key order.
+  Compare complete bytes, never only a digest. Canonical encoding is independent
+  of JSON/report codecs and does not depend on head or resolved IDs.
+- **Blockers:** None locally. Canonical evidence is not yet persisted by commit.
+- **What's next:** Item 4.3, atomic key lookup before state validation, durable
+  canonical evidence, original-report replay, and concurrency/failure scenarios.
 
 ## Environment notes
 

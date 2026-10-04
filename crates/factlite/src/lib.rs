@@ -4,6 +4,7 @@
 //! use explicit revision tokens. SQLite persists atomic reports and retained
 //! semantic history with explicit commit outcome evidence.
 
+mod canonical;
 mod catalog;
 mod codec;
 mod db;
@@ -23,6 +24,7 @@ mod tx;
 mod value;
 pub mod wire;
 
+pub use canonical::CanonicalRequest;
 pub use db::{Db, Entity, FactEvent, FactFilter, PulledValue, TxRecord};
 pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
