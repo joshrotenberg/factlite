@@ -3,7 +3,7 @@
 Steps 1–5 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, strict interchange, exact retries, and the database CLI are implemented.
 The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 6.1, acceptance audit; bound historical SQL and reference parity are complete.
+item 6.2, process recovery; the acceptance audit identifies backup evidence next.
 Reviews are self-reviews;
 remote CI has not run.
 
@@ -354,6 +354,20 @@ remote CI has not run.
 - **Blockers:** None locally. No performance target or optimization claim.
 - **What's next:** Item 6.1, audit each acceptance row and identify exact remaining
   process-recovery/backup evidence before hardening and measurement.
+
+## 6.1 Acceptance matrix audit — done
+
+- **Done:** Mapped every original acceptance row to concrete test files/names in
+  `acceptance.md`, verified all 35 evidence links, and added durable all-six-type
+  uniqueness transfer/failure/retry/reopen coverage. All 127 tests passed,
+  including thirty-nine 1,024-case properties; full checks passed.
+  Review: `reviews/0024-acceptance-audit.md`.
+- **Decisions:** Existing semantic acceptance is covered; process-crash/lost-response
+  evidence follows in 6.2 and backup/read-only/faithful-restore evidence in 6.3.
+  Conditional projection tests remain conditional: no durable projection exists.
+- **Blockers:** None locally. The audit marks unfinished acceptance honestly.
+- **What's next:** Item 6.2, separate-process contention and termination around
+  COMMIT, preserving complete report/key/metadata recovery.
 
 ## Environment notes
 
