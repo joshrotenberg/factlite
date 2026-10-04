@@ -1,9 +1,9 @@
 # Work status
 
-Steps 1–4 are complete. Typed atomic commits, authoritative replay, owned pinned
+Steps 1–5 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, strict interchange, exact retries, and the database CLI are implemented.
 The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 5.4, historical SQL compilation; Rust/JSON/CLI query parity is complete.
+item 6.1, acceptance audit; bound historical SQL and reference parity are complete.
 Reviews are self-reviews;
 remote CI has not run.
 
@@ -341,6 +341,19 @@ remote CI has not run.
 - **Blockers:** None locally. No remote CI or independent review has run.
 - **What's next:** Item 5.4, bound SQL over an explicit historical relation with
   reference parity before making SQL the public execution path.
+
+## 5.4 Bound SQL compilation — done
+
+- **Done:** Bound joins over a pinned replay-derived TEMP relation, exact typed
+  predicates, distinct/order/limit and owned decoding. All 126 tests passed,
+  including thirty-nine 1,024-case properties; full checks passed.
+  Review: `reviews/0023-bound-historical-sql.md`.
+- **Decisions:** Numeric attribute IDs and generated aliases; bind all caller
+  values. Keep a reference fallback for large ASTs beyond conservative SQL
+  budgets. No durable current projection. Rebuild historical relation per query.
+- **Blockers:** None locally. No performance target or optimization claim.
+- **What's next:** Item 6.1, audit each acceptance row and identify exact remaining
+  process-recovery/backup evidence before hardening and measurement.
 
 ## Environment notes
 
