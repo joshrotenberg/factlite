@@ -1,11 +1,12 @@
 # Work status
 
-Steps 1–5 are complete. Typed atomic commits, authoritative replay, owned pinned
-reads, strict interchange, exact retries, and the database CLI are implemented.
-The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 6.4, representative measurements and evidence-based optimization decisions.
-Reviews are self-reviews;
-remote CI has not run.
+Steps 0–6 are complete locally. Typed atomic commits, authoritative replay,
+owned pinned reads, strict interchange, exact retries, historical SQL queries,
+CLI parity, process recovery and standalone backups are implemented and tested.
+The final gate passed 136 tests, including forty 1,024-case property suites.
+Workload measurements expose replay costs; no production latency target exists.
+Next is first-use review and a remote/tarball handoff when requested. Reviews
+are self-reviews; remote CI and independent review have not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -398,6 +399,24 @@ remote CI has not run.
 - **Blockers:** None locally. Remote CI and independent review have not run.
 - **What's next:** Item 6.4, reproducible current/historical/read/write workloads,
   latency measurements and only justified index/checkpoint/projection choices.
+
+## 6.4 Representative measurements — done
+
+- **Done:** Release workload runner with independent expected typed answers;
+  four graph/history configurations on workspace overlay and tmpfs, fifteen
+  samples per operation, raw median/p95 outputs and reproducible commands.
+  Custom boundary/small runs and invalid inputs/cleanup verified. All 136 tests
+  passed, including forty 1,024-case properties; full checks passed.
+  Review: `reviews/0027-workload-measurements.md`.
+- **Decisions:** Replay/validation is the dominant measured cost: 1,000 tasks at
+  revision 50 took about 182ms per head query versus 24ms at revision 1. Keep
+  existing indexes and correctness-first replay; choose cache/checkpoint budgets
+  after a real workload/latency target is established. See `measurements.md`.
+- **Blockers:** None locally. Production workload/SLA, remote and license remain
+  open decisions; no remote CI or independent review has run.
+- **What's next:** Planned local v1 sequence is complete. Review first-use
+  behavior/performance needs; package Git history, source, lockfile and reviews
+  into a tarball when requested for the next remote-connected session.
 
 ## Environment notes
 

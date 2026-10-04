@@ -139,9 +139,13 @@ that bridge when implementing 5.4; current tables alone cannot serve past views.
   reopen behavior. Validate projection rebuilding if a projection exists.
 - [x] **6.3 Backup and lineage.** SQLite-safe backups, token-preserving restore,
   documented writer retirement, and explicit unsupported divergent clones.
-- [ ] **6.4 Representative measurements.** Establish workloads and performance
+- [x] **6.4 Representative measurements.** Establish workloads and performance
   needs, then choose indexes/checkpoints/projections. Compare every optimized
   path with replay, including historical schema and concurrent reads.
+
+Item 6.4 establishes a measured baseline, with no invented production latency
+budget. Existing indexes/replay remain; cache/checkpoint/projection selection is
+deferred until an actual workload and budget are agreed. See `measurements.md`.
 
 JMESPath, server/NIF integration, and all other deferred scope remain outside the
 initial implementation. Licensing and remote destination are open repository

@@ -18,14 +18,15 @@ joined queries, including portable snapshots and exact retries. Rust and JSON
 queries share typed validation and results. Bound SQL joins use a temporary
 relation reconstructed from the pinned historical log; large ASTs retain the
 reference evaluator as a fallback. Process recovery and safe standalone backups
-are verified; read-only views preserve historical tokens. Workload measurements
-follow.
+are verified; read-only views preserve historical tokens. Reproducible workload
+measurements document replay costs and the current optimization decision.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
 - [Acceptance audit](docs/acceptance.md): tests mapped to the supplied contract.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
+- [Measurements](docs/measurements.md): reproducible workloads and replay costs.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 

@@ -5,7 +5,7 @@ acceptance tests” matrix. Entries name executable evidence, not plans presente
 as passing tests. Tests run through `scripts/check.sh`; all property suites run
 1,024 cases. Bounded enumeration is exhaustive for its stated finite space only.
 
-| Design area | Concrete evidence | Remaining evidence at item 6.1 |
+| Design area | Concrete evidence | Coverage and limits after hardening |
 | --- | --- | --- |
 | Atomicity | [faults.rs](../crates/factlite/src/faults.rs): `every_write_stage_rolls_back_reports_metadata_schema_allocations_facts_and_head`, deferred COMMIT rollback and uncertain-outcome classification; [store_commit.rs](../crates/factlite/tests/store_commit.rs): full report and late failure | [process_recovery.rs](../crates/factlite/src/process_recovery.rs): abrupt pre/post COMMIT termination and exact lost report recovery |
 | Stable views | [ada_task_fixture.rs](../crates/factlite/tests/ada_task_fixture.rs): every owned A/B/reopen read; [query_evaluation.rs](../crates/factlite/tests/query_evaluation.rs): joined A/B/reopen; [isolation.rs](../crates/factlite/src/isolation.rs): deterministic writer before replay and after query materialization | No durable projection exists; its head-check race is conditional on introducing one |
@@ -23,6 +23,8 @@ as passing tests. Tests run through `scripts/check.sh`; all property suites run
 | CLI parity | [cli_scenarios.rs](../crates/factlite-cli/tests/cli_scenarios.rs): actual assert_cmd processes, full typed reports/reads/query/error contexts, stdin/files, stdout/stderr/exit taxonomy and busy | Covered; eight-process contention also covered |
 
 The audit, process recovery and backup acceptance are complete.
-No performance target is specified by the design. Measurements and any justified
-optimization follow correctness hardening in 6.4. Compatible upgrade checks use
-the current frozen format/canonical version; no future migration is claimed.
+No performance target is specified by the design.
+[Measurements](measurements.md) record current/historical/read/write costs and
+the decision to defer storage optimization until a workload and budget are
+selected. Compatible upgrade checks use the current frozen format/canonical
+version; no future migration is claimed.

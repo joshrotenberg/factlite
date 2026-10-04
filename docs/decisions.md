@@ -339,3 +339,19 @@ scenario testing. See `testing.md` for the verification policy.
   the lineage requires identical complete retained history and retiring the old
   writer. Older incomplete restores and divergent writable clones are unsupported
   caller-enforced restrictions, with no automatic detection or relineaging API.
+
+## Measured optimization decision
+
+- Release workload runner checks independently expected typed joins and measures
+  head capture, validated read-only open, revision-1/head queries, fact reads and
+  new no-op commits. Record four task/history configurations with 15 samples each,
+  separately on tmpfs and workspace overlay; full raw JSON is checked in.
+- Replay/validation scales with retained revision count and state size. At 1,000
+  tasks/50 revisions, workspace head-query median is 181.939ms and validated open
+  178.738ms, versus 23.646ms for revision-1 query. These are observed local-container
+  costs, not an agreed latency goal or durability-device characterization.
+- Keep existing indexes and replay for now. No workload/SLA exists to select a
+  checkpoint cadence/cache budget, and the measurements do not justify extra SQL
+  indexes. Future performance work should target repeated replay with explicit
+  immutable-state/checkpoint design, reference parity and forced failure/isolation
+  checks. No speculative derived persistent state or format change was introduced.
