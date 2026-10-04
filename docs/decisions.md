@@ -105,8 +105,10 @@ scenario testing. See `testing.md` for the verification policy.
 - Retain the transaction guard through manual COMMIT execution to inspect its
   state; rusqlite's consuming commit method drops its guard and ignores rollback
   cleanup errors. There is no application cache published before commit.
-- Keyed requests are rejected in this build. Exact retry lookup/persistence and
-  original-report replay must land together in step 4 before keys are accepted.
+- Keyed requests became supported together with exact lookup/persistence in 4.3.
+  Retry lookup inside BEGIN IMMEDIATE precedes head/schema/entity/expectation
+  validation. Matching canonical bytes return the original report; different
+  bytes fail IdempotencyConflict. Fresh no-change requests still advance head.
 
 ## Schema and allocation
 
@@ -197,4 +199,18 @@ scenario testing. See `testing.md` for the verification policy.
   conflict under the same key. CanonicalRequest exposes immutable version/bytes.
 - Encoding is frozen apart from storage/report and public JSON codecs. Complete
   byte equality is the retry evidence; no digest-only decision. Key persistence
-  and lookup are item 4.3 so partially implemented retries cannot slip through.
+  and lookup landed together in item 4.3.
+
+## Retained retry evidence
+
+- Store canonical version/bytes and key on the transaction row in the same SQL
+  transaction as reports, schema, allocations, fact events, and head. The UNIQUE
+  key plus IMMEDIATE writer serialization makes concurrent retries allocate once.
+  Failures reserve no key; keys have no expiry or pruning in v1.
+- Retained decoding is length/count bounded, validates every typed input, and
+  requires byte-for-byte canonical re-encoding. Unknown retained canonical versions
+  fail UnsupportedFormat. Replay evaluates keyed requests against their original
+  pre-state and verifies exact report agreement, alongside report/event checks.
+- Matching retry lookup does not reevaluate current-state conditions. Reports
+  preserve original snapshots, IDs, metadata, and effective delta after later
+  commits and reopen. Same-key changed requests conflict before stale head checks.

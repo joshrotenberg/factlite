@@ -11,14 +11,18 @@ use crate::{
 };
 use rusqlite::{Connection, Transaction};
 
-pub(crate) fn persist_report(transaction: &Transaction<'_>, report: &TxReport) -> Result<()> {
+pub(crate) fn persist_report(
+    transaction: &Transaction<'_>,
+    report: &TxReport,
+    retry: Option<(&str, &crate::CanonicalRequest)>,
+) -> Result<()> {
     if read_head(transaction)? != report.before {
         return Err(corrupt(
             "persisted report pre-head does not match transaction basis",
         ));
     }
     let revision = revision_bytes(report.after.revision());
-    transaction.execute("INSERT INTO transactions(revision,report,report_encoding,request_version) VALUES(?1,?2,1,1)",rusqlite::params![revision.as_slice(),codec::encode_report(report)])?;
+    transaction.execute("INSERT INTO transactions(revision,report,report_encoding,request_version,canonical_version,canonical_request,idempotency_key) VALUES(?1,?2,1,1,?3,?4,?5)",rusqlite::params![revision.as_slice(),codec::encode_report(report),retry.map(|(_,canonical)| i64::from(canonical.version())),retry.map(|(_,canonical)| canonical.bytes()),retry.map(|(key,_)| key)])?;
     for (ordinal, definition) in report.schema_added.iter().enumerate() {
         transaction.execute(
             "INSERT INTO schema_events(revision,ordinal,attribute,definition) VALUES(?1,?2,?3,?4)",
@@ -87,26 +91,68 @@ pub(crate) fn replay(connection: &Connection, basis: &SnapshotId) -> Result<Mode
                 "unsupported retained transaction encoding",
             ));
         }
-        if key.is_some() || canonical_version.is_some() || canonical_request.is_some() {
-            return Err(Error::new(
-                ErrorCode::UnsupportedFormat,
-                ErrorContext::InvalidInput {
-                    field: "canonical encoding",
-                },
-                "retry records are not supported until retry implementation",
-            ));
-        }
         let report = codec::decode_report(&bytes)?;
         if decode_revision(&revision)? != report.after.revision() {
             return Err(corrupt("transaction row revision differs from report"));
         }
         check_events(connection, &revision, &report)?;
+        match (key, canonical_version, canonical_request) {
+            (None, None, None) => {}
+            (Some(_), Some(version), Some(bytes)) => {
+                let request = crate::canonical_decode::decode_request(version, &bytes)?;
+                let (_, expected) = model.evaluate(&request).map_err(|error| {
+                    corrupt(format!(
+                        "retained retry request cannot produce its report: {error}"
+                    ))
+                })?;
+                if expected != report {
+                    return Err(corrupt("retained retry request and report disagree"));
+                }
+            }
+            _ => return Err(corrupt("incomplete retained retry evidence")),
+        }
         model = model.apply_report(&report)?;
     }
     if &model.catalog.snapshot != basis {
         return Err(corrupt("retained log does not reach requested revision"));
     }
     Ok(model)
+}
+
+pub(crate) fn retry_report(
+    connection: &Connection,
+    key: &str,
+    canonical: &crate::CanonicalRequest,
+) -> Result<Option<TxReport>> {
+    use rusqlite::OptionalExtension;
+    let row = connection.query_row("SELECT revision,report,report_encoding,request_version,canonical_version,canonical_request FROM transactions WHERE idempotency_key=?1",[key],|row| Ok((row.get::<_,Vec<u8>>(0)?,row.get::<_,Vec<u8>>(1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?,row.get::<_,i64>(4)?,row.get::<_,Vec<u8>>(5)?))).optional()?;
+    let Some((revision, report, encoding, request_version, version, bytes)) = row else {
+        return Ok(None);
+    };
+    crate::canonical_decode::decode_request(version, &bytes)?;
+    if version != i64::from(canonical.version()) || bytes != canonical.bytes() {
+        return Err(Error::new(
+            ErrorCode::IdempotencyConflict,
+            ErrorContext::InvalidInput {
+                field: "idempotency_key",
+            },
+            "retry key already belongs to a different submitted request",
+        ));
+    }
+    if encoding != 1 || request_version != 1 {
+        return Err(Error::new(
+            ErrorCode::UnsupportedFormat,
+            ErrorContext::InvalidInput {
+                field: "transaction encoding",
+            },
+            "unsupported retained transaction encoding",
+        ));
+    }
+    let report = codec::decode_report(&report)?;
+    if decode_revision(&revision)? != report.after.revision() {
+        return Err(corrupt("retry revision differs from original report"));
+    }
+    Ok(Some(report))
 }
 
 fn check_events(connection: &Connection, revision: &[u8], report: &TxReport) -> Result<()> {
@@ -235,7 +281,7 @@ mod tests {
             .unwrap();
         let model = replay(&sql, &read_head(&sql).unwrap()).unwrap();
         let (next, report) = model.evaluate(tx).unwrap();
-        persist_report(&sql, &report).unwrap();
+        persist_report(&sql, &report, None).unwrap();
         sql.commit().unwrap();
         (next, report)
     }

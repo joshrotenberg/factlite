@@ -83,20 +83,14 @@ impl Store {
     }
 
     /// Validates and commits one declarative batch against serialized pre-head.
-    /// Fresh no-change requests receive revisions. Retry keys are explicitly
-    /// rejected until exact idempotency is implemented. Failures expose outcome
+    /// Fresh no-change requests receive revisions. Exact keyed retries return the
+    /// original report before current-state validation. Failures expose outcome
     /// evidence, including confirmed rollback and uncertain COMMIT outcomes.
     pub fn commit(&self, request: Tx) -> Result<TxReport> {
         let request = request
             .validate()
             .map_err(|err| err.with_commit_outcome(CommitOutcome::RolledBack))?;
-        if request.idempotency_key().is_some() {
-            return Err(Error::invalid(
-                "idempotency_key",
-                "idempotency keys are not supported by this build",
-            )
-            .with_commit_outcome(CommitOutcome::RolledBack));
-        }
+        let canonical = request.canonical_request();
         let mut connection = self
             .connection()
             .map_err(|err| err.with_commit_outcome(CommitOutcome::RolledBack))?;
@@ -107,10 +101,19 @@ impl Store {
                     .with_commit_outcome(CommitOutcome::RolledBack)
             })?;
         let result = (|| -> Result<TxReport> {
+            if let Some(key) = request.idempotency_key()
+                && let Some(report) = crate::log::retry_report(&transaction, key, &canonical)?
+            {
+                return Ok(report);
+            }
             let basis = read_head(&transaction)?;
             let model = crate::log::replay(&transaction, &basis)?;
             let (_, report) = model.evaluate(&request)?;
-            crate::log::persist_report(&transaction, &report)?;
+            crate::log::persist_report(
+                &transaction,
+                &report,
+                request.idempotency_key().map(|key| (key, &canonical)),
+            )?;
             Ok(report)
         })();
         let report = match result {

@@ -3,8 +3,8 @@
 Steps 1–3 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, the durable Ada/task fixture, and forced reader/writer isolation are
 implemented. Strict wire decoding and canonical typed requests are complete.
-Next is item 4.3, atomic exact retries. Database CLI commands and
-exact retries remain pending. Reviews are self-reviews; remote CI has not run.
+Atomic exact retries are complete. Next is item 4.4, the database CLI and
+separate-process fixture. Reviews are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -270,6 +270,20 @@ exact retries remain pending. Reviews are self-reviews; remote CI has not run.
 - **Blockers:** None locally. Canonical evidence is not yet persisted by commit.
 - **What's next:** Item 4.3, atomic key lookup before state validation, durable
   canonical evidence, original-report replay, and concurrency/failure scenarios.
+
+## 4.3 Atomic retry lookup — done
+
+- **Done:** Serialized key lookup before state checks, atomic key/canonical/report
+  persistence, exact original reports after later commits/reopen, bounded retained
+  canonical decoding, and request/report coherence checks during replay. All 101
+  tests passed, including thirty-three 1,024-case properties; full checks passed.
+- **Decisions:** Complete byte equality determines replay/conflict. Same-key races
+  allocate once; different requests have one winner. Failed SQL/COMMIT requests
+  leave keys reusable. No key expiry/pruning. Existing unkeyed files still work.
+  Review: `reviews/0018-atomic-exact-retries.md`.
+- **Blockers:** None locally. CLI/process retry parity is next.
+- **What's next:** Item 4.4, functional commands, versioned stdout/structured
+  stderr, and complete create/start/reopen/retry scenarios using assert_cmd.
 
 ## Environment notes
 

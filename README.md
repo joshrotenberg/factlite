@@ -10,6 +10,9 @@ can be initialized/opened and atomic commits persist exact reports and history.
 `Store::db()` captures a stable view, and `db_at()` reopens a retained snapshot.
 Schema, facts, flat pull, history, and transaction enumeration use that pinned
 basis and return owned results.
+Exact keyed retries return the original report before current-state validation,
+without allocating or advancing revision again. Strict versioned JSON decoders
+share the Rust request/value invariants.
 The CLI currently supports only `--help`
 and `--version`; database command interchange will follow the design.
 

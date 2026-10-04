@@ -5,6 +5,7 @@
 //! semantic history with explicit commit outcome evidence.
 
 mod canonical;
+mod canonical_decode;
 mod catalog;
 mod codec;
 mod db;

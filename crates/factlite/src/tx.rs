@@ -113,7 +113,7 @@ impl Tx {
     pub fn expected_head(&self) -> Option<&SnapshotId> {
         self.expected_head.as_ref()
     }
-    /// Optional exact-retry key. Requires retry-capable commit implementation.
+    /// Optional exact-retry key, scoped to the store lineage.
     pub fn idempotency_key(&self) -> Option<&str> {
         self.idempotency_key.as_deref()
     }
