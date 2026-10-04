@@ -83,7 +83,7 @@ log and cannot become the historical authority.
   transaction enumeration all read the same basis. Test historical unknown
   attributes, known empty entities, omitted absent fields, deterministic value
   ordering, no future events, and no-change transaction records.
-- [ ] **3.3 A/B/reopen acceptance fixture.** Atomically create Ada/task/schema,
+- [x] **3.3 A/B/reopen acceptance fixture.** Atomically create Ada/task/schema,
   capture A, conditionally replace status at B, reopen, and recover both views.
   Validate failed conditions, unrelated changes, and expected-head fencing.
 - [ ] **3.4 Reader/writer isolation.** Force a writer between dependent reads;
