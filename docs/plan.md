@@ -137,7 +137,7 @@ that bridge when implementing 5.4; current tables alone cannot serve past views.
 - [x] **6.2 Recovery and process behavior.** Multiple processes, crash/commit
   boundaries, bounded busy handling, corruption/format errors, and compatible
   reopen behavior. Validate projection rebuilding if a projection exists.
-- [ ] **6.3 Backup and lineage.** SQLite-safe backups, token-preserving restore,
+- [x] **6.3 Backup and lineage.** SQLite-safe backups, token-preserving restore,
   documented writer retirement, and explicit unsupported divergent clones.
 - [ ] **6.4 Representative measurements.** Establish workloads and performance
   needs, then choose indexes/checkpoints/projections. Compare every optimized

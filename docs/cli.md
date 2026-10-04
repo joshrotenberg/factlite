@@ -41,7 +41,7 @@ order and temporary labels. Retry the same request/key after an ambiguous respon
 
 `--file -` reads a request from stdin. Reads accept mutually exclusive `--at`
 compact tokens or `--at-file PATH|-` portable JSON snapshots; omission captures
-head once. `facts` and `history` accept exact `--entity`, `--attr`, and tagged JSON
+head once. Read commands use a read-only database connection. `facts` and `history` accept exact `--entity`, `--attr`, and tagged JSON
 `--value` filters. `history`/`transactions` default `--after` to 0, excluding that
 revision and including the pinned basis. Pull's comma-separated `--attrs` list
 projects exactly those names; an empty string projects none.
@@ -94,3 +94,11 @@ Results are `{"version":1,"columns":[...],"rows":[[TAGGED_VALUE,...],...]}`.
 Entity columns use Ref. Projection removes duplicate tuples before ordering and
 limit. Supply a total order, such as title plus task identity, for predictable
 limited results. Missing facts fail a pattern; no null values are invented.
+
+## Backup
+
+`backup --to PATH` emits the full head token copied by SQLite and creates a
+validated standalone file at a new destination. It copies all retained history,
+including WAL commits, without replacing an existing path or sidecar. Read it
+with the usual schema/facts/pull/history/transactions/query commands. See
+[backup and lineage rules](backup.md) before resuming writes from a restored copy.

@@ -740,3 +740,75 @@ fn concurrent_cli_processes_share_exact_retry_reports_and_serialize_conditions()
         2
     );
 }
+
+#[test]
+fn cli_backup_is_standalone_and_read_commands_do_not_modify_the_artifact() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.sqlite");
+    let backup = dir.path().join("copy with spaces.sqlite");
+    success(binary().arg("init").arg(&path));
+    let a = transact(
+        &path,
+        &serde_json::from_str(include_str!("../../../examples/create.json")).unwrap(),
+    );
+    failure(db(&path).args(["backup"]), 2, "InvalidRequest");
+    failure(
+        db(&path).args(["backup", "--to", "x", "--at", "x"]),
+        2,
+        "InvalidRequest",
+    );
+    let copied = success(db(&path).arg("backup").arg("--to").arg(&backup));
+    assert_eq!(copied, a["after"]);
+    let original_bytes = std::fs::read(&backup).unwrap();
+    let query = include_str!("../../../examples/query.json");
+    assert_eq!(
+        success(
+            db(&backup)
+                .args(["query", "--file", "-"])
+                .write_stdin(query)
+        )["rows"],
+        json!([])
+    );
+    assert_eq!(
+        success(db(&backup).arg("transactions"))["transactions"][0]["report"],
+        a
+    );
+    assert_eq!(
+        success(db(&backup).arg("schema"))["schema"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(
+        success(db(&backup).arg("facts"))["facts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(std::fs::read(&backup).unwrap(), original_bytes);
+    for suffix in ["-wal", "-shm", "-journal"] {
+        assert!(
+            !dir.path()
+                .join(format!("copy with spaces.sqlite{suffix}"))
+                .exists()
+        );
+    }
+    failure(
+        db(&path).arg("backup").arg("--to").arg(&backup),
+        5,
+        "Storage",
+    );
+    assert_eq!(std::fs::read(&backup).unwrap(), original_bytes);
+    let noop = transact(&path, &json!({"version":1}));
+    assert_eq!(noop["after"]["revision"], "2");
+    assert_eq!(
+        success(db(&backup).arg("transactions"))["transactions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(success(binary().arg("init").arg(&path)), noop["after"]);
+}

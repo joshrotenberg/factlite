@@ -8,11 +8,12 @@ use std::{
     process::ExitCode,
 };
 
-use factlite::{ErrorCode, FactFilter, Revision, Store, wire};
+use factlite::{Db, ErrorCode, FactFilter, Revision, Store, wire};
 use serde_json::json;
 
 const HELP: &str = "Usage:
   factlite init PATH
+  factlite --db PATH backup --to PATH
   factlite --db PATH transact --file PATH|-
   factlite --db PATH pull --entity ID --attrs ATTR[,ATTR...] [VIEW]
   factlite --db PATH schema [VIEW]
@@ -104,6 +105,7 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
             .ok_or_else(|| invalid("missing database command"))?,
     )?;
     let allowed: &[&str] = match command.as_str() {
+        "backup" => &["--to"],
         "transact" => &["--file"],
         "query" => &["--file", "--at", "--at-file"],
         "pull" => &["--entity", "--attrs", "--at", "--at-file"],
@@ -142,6 +144,7 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
         return Err(invalid("only one input may consume stdin"));
     }
     let required: &[&str] = match command.as_str() {
+        "backup" => &["--to"],
         "transact" | "query" => &["--file"],
         "pull" => &["--entity", "--attrs"],
         _ => &[],
@@ -185,6 +188,13 @@ fn run(command: Command) -> Result<String> {
             command,
             mut options,
         } => {
+            if command == "backup" {
+                let destination =
+                    PathBuf::from(options.remove("--to").expect("required during parse"));
+                return Ok(wire::encode_snapshot(
+                    &open_existing(&path)?.backup(destination)?,
+                ));
+            }
             if command == "transact" {
                 let file = PathBuf::from(options.remove("--file").expect("required during parse"));
                 let request = wire::decode_tx(&read_input(&file)?)?;
@@ -225,10 +235,9 @@ fn run(command: Command) -> Result<String> {
                         .collect::<Result<Vec<_>>>()
                 })
                 .transpose()?;
-            let store = open_existing(&path)?;
             let db = match at {
-                Some(snapshot) => store.db_at(&snapshot)?,
-                None => store.db()?,
+                Some(snapshot) => Db::open_read_only_at(&path, &snapshot)?,
+                None => Db::open_read_only(&path)?,
             };
             let filter = FactFilter {
                 entity: entity.clone(),

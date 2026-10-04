@@ -318,3 +318,24 @@ scenario testing. See `testing.md` for the verification policy.
   exactly one winner and seven confirmed rollback errors. Bounded busy, malformed
   storage and unsupported format checks remain in the existing gate.
 - These are process/WAL recovery tests, not physical disk or power-failure tests.
+
+## Safe backup and read-only access
+
+- Enable rusqlite's backup feature; promote the already locked tempfile dependency
+  to production for exclusive same-directory staging and no-replace publication.
+  Fix one source read snapshot, validate it, run SQLite backup, validate destination
+  full history/token, enforce DELETE journal mode, close/sync, publish without
+  replacing existing paths, and sync its directory on Unix. No live-file copying.
+- Return the snapshot actually copied. An independent WAL writer can advance
+  concurrently without leaking newer revisions into the copy. Preexisting main
+  paths or sidecars fail; a raced-in destination survives unchanged. Ordinary
+  errors clean staging. Portable publication follows tempfile's documented
+  guarantees; directory sync errors may happen after publication.
+- Db::open_read_only and open_read_only_at return pinned owned views backed by
+  SQLITE_OPEN_READ_ONLY, without creating/init/WAL-setting main database writes.
+  TEMP query DML remains allowed. CLI read commands adopt these constructors;
+  init/transact retain writer access. I/O errors keep their source and context.
+- Backup IDs/lineage/tokens/reports/retry evidence are preserved exactly. Resuming
+  the lineage requires identical complete retained history and retiring the old
+  writer. Older incomplete restores and divergent writable clones are unsupported
+  caller-enforced restrictions, with no automatic detection or relineaging API.

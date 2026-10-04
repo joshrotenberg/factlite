@@ -148,6 +148,16 @@ impl Error {
         )
     }
 
+    pub(crate) fn io(operation: &'static str, source: std::io::Error) -> Self {
+        Self {
+            code: ErrorCode::Storage,
+            context: Box::new(ErrorContext::Storage { operation }),
+            message: format!("{operation}: {source}"),
+            source: Some(Box::new(source)),
+            commit_outcome: None,
+        }
+    }
+
     pub(crate) fn storage(operation: &'static str, source: rusqlite::Error) -> Self {
         let code = match &source {
             rusqlite::Error::SqliteFailure(err, _)

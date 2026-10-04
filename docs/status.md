@@ -3,7 +3,7 @@
 Steps 1–5 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, strict interchange, exact retries, and the database CLI are implemented.
 The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 6.3, SQLite-safe backups, read-only views and faithful restore rules.
+item 6.4, representative measurements and evidence-based optimization decisions.
 Reviews are self-reviews;
 remote CI has not run.
 
@@ -382,6 +382,22 @@ remote CI has not run.
 - **Blockers:** None locally.
 - **What's next:** Item 6.3, safe consistent backup publication, read-only access,
   token-preserving faithful restore and explicit lineage operational rules.
+
+## 6.3 Backup and lineage — done
+
+- **Done:** Fixed-snapshot SQLite backup, validated standalone no-replace
+  publication, read-only historical constructors, CLI backup and read-only reads.
+  Forced concurrent writer, failure/race cleanup, faithful retired-writer restore
+  and all-type backup history/query property pass. All 136 tests passed, including
+  forty 1,024-case properties; full checks passed.
+  Review: `reviews/0026-backup-lineage.md`.
+- **Decisions:** Preserve every token/identity/report/key; capture the copied head.
+  Caller must retire the prior writer and preserve identical complete committed
+  history before resuming lineage. No divergent clones, incomplete restore,
+  automatic clone detection or physical power-loss guarantee. See `backup.md`.
+- **Blockers:** None locally. Remote CI and independent review have not run.
+- **What's next:** Item 6.4, reproducible current/historical/read/write workloads,
+  latency measurements and only justified index/checkpoint/projection choices.
 
 ## Environment notes
 
