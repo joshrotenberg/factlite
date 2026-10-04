@@ -303,3 +303,18 @@ scenario testing. See `testing.md` for the verification policy.
   occur both before replay and between materialization and query reads. Failures
   during TEMP writes roll back and leave the connection reusable. This is a
   historical correctness bridge; performance decisions follow measurements.
+
+## Process recovery evidence
+
+- Test-only child re-entry pauses at the pre-COMMIT hook or after successful
+  COMMIT, before a report can be returned. Cache pressure and a large canonical
+  request/report ensure WAL frames exist at both checkpoints. Parent handshakes,
+  abrupt kills and reopened full-state/retry assertions replace scheduling sleeps.
+- Pre-COMMIT termination leaves the old report, schema, entities, facts, metadata
+  and key state. Post-COMMIT termination recovers the complete original report
+  through the same key despite its stale head fence. All subsequent retries match.
+- Separate assert_cmd processes start behind barriers. Eight same-key creates
+  return identical reports and allocate once; eight conditioned updates have
+  exactly one winner and seven confirmed rollback errors. Bounded busy, malformed
+  storage and unsupported format checks remain in the existing gate.
+- These are process/WAL recovery tests, not physical disk or power-failure tests.

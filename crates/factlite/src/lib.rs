@@ -17,6 +17,8 @@ mod identity;
 mod isolation;
 mod log;
 mod model;
+#[cfg(test)]
+mod process_recovery;
 mod query;
 mod query_eval;
 mod query_sql;

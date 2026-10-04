@@ -3,7 +3,7 @@
 Steps 1–5 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, strict interchange, exact retries, and the database CLI are implemented.
 The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 6.2, process recovery; the acceptance audit identifies backup evidence next.
+item 6.3, SQLite-safe backups, read-only views and faithful restore rules.
 Reviews are self-reviews;
 remote CI has not run.
 
@@ -368,6 +368,20 @@ remote CI has not run.
 - **Blockers:** None locally. The audit marks unfinished acceptance honestly.
 - **What's next:** Item 6.2, separate-process contention and termination around
   COMMIT, preserving complete report/key/metadata recovery.
+
+## 6.2 Recovery and process behavior — done
+
+- **Done:** Deterministic pre/post COMMIT process termination with verified WAL
+  spill, complete old/new state recovery and exact lost-response retries. Eight
+  CLI processes prove same-key allocation once and one conditioned-update winner.
+  All 129 tests passed, including thirty-nine 1,024-case properties; full checks
+  passed. Review: `reviews/0025-process-recovery.md`.
+- **Decisions:** Test-only child/hook controls, bounded pipe handshake, abrupt kill
+  and cleanup; no scheduling sleeps or physical power-loss claim. Existing busy,
+  format and corruption coverage remains. No projection requires rebuilding.
+- **Blockers:** None locally.
+- **What's next:** Item 6.3, safe consistent backup publication, read-only access,
+  token-preserving faithful restore and explicit lineage operational rules.
 
 ## Environment notes
 
