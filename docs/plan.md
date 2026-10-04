@@ -95,7 +95,7 @@ log and cannot become the historical authority.
 - [x] **4.1 Versioned wire decoding.** Define Rust/JSON equivalence and strict
   parsing of tagged values, decimal integers/revisions, finite float strings,
   decoded bytes, defaults, unknown fields, and duplicate JSON keys.
-- [ ] **4.2 Canonical request representation.** Exclude the key, include version,
+- [x] **4.2 Canonical request representation.** Exclude the key, include version,
   metadata/head/schema/labels/operations, normalize sets/zeros/defaults, preserve
   operation order, and store canonicalization version plus exact bytes. Test
   alternate decimal/byte spellings and deliberate reorder conflicts.

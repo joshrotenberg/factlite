@@ -179,3 +179,22 @@ scenario testing. See `testing.md` for the verification policy.
 - Interchange lives in `wire`, apart from SQLite/storage encoding. Typed tokens
   validate syntax on decode; db_at checks retained availability. Malformed snapshot
   fields fail InvalidSnapshot; malformed JSON itself fails InvalidRequest.
+
+## Canonical request version 1
+
+- Header FLC1, then four-byte big-endian request version, then fixed fields:
+  schema, labels, changes, expectations, optional head, metadata. Collection counts
+  and byte/text lengths are eight-byte unsigned big-endian. Defaults are encoded.
+  The retry key is excluded. No current state or resolved temporary IDs enter.
+- Schema entries encode exact name/type/cardinality/uniqueness; entity terms and
+  value terms have separate concrete/temporary tags. Value tags are bool=0,
+  i64=1, f64=2, string=3, bytes=4, ref=5. Integers are signed big-endian eight-byte
+  values; floats are normalized raw IEEE binary64 big-endian bits. Strings/bytes
+  remain exact. References and full head tokens use canonical identity text.
+- Submitted arrays remain ordered, including duplicates in changes and expectation
+  entries. Expected value sets are structurally sorted/deduplicated; metadata keys
+  use exact lexical order. Renaming labels or reordering equivalent operations can
+  conflict under the same key. CanonicalRequest exposes immutable version/bytes.
+- Encoding is frozen apart from storage/report and public JSON codecs. Complete
+  byte equality is the retry evidence; no digest-only decision. Key persistence
+  and lookup are item 4.3 so partially implemented retries cannot slip through.
