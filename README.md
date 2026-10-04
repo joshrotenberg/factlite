@@ -1,7 +1,7 @@
 # Factlite
 
 An embedded Rust library for a typed, SQLite-backed fact database with atomic
-transactions and durable, revision-pinned reads. A thin CLI will exercise the
+transactions and durable, revision-pinned reads. A thin CLI exercises the
 same library.
 
 Factlite is being built incrementally. Typed values, schema definitions, owned
@@ -13,13 +13,14 @@ basis and return owned results.
 Exact keyed retries return the original report before current-state validation,
 without allocating or advancing revision again. Strict versioned JSON decoders
 share the Rust request/value invariants.
-The CLI currently supports only `--help`
-and `--version`; database command interchange will follow the design.
+The CLI supports init, transact, schema, facts, pull, history, and transactions,
+including portable snapshots and exact retries. Joined queries are next.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
+- [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 
 The user has authorized incremental implementation and the branch, work, review,
 merge workflow. The handoff's earlier requirement for separate authorization is

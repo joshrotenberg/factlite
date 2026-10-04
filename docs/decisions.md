@@ -214,3 +214,19 @@ scenario testing. See `testing.md` for the verification policy.
 - Matching retry lookup does not reevaluate current-state conditions. Reports
   preserve original snapshots, IDs, metadata, and effective delta after later
   commits and reopen. Same-key changed requests conflict before stale head checks.
+
+## CLI version 1
+
+- Thin std argument parsing delegates storage/semantics to the public library.
+  Initialization is explicit; other commands require an existing path. Options
+  reject unknown, duplicate, missing, or command-inapplicable flags before open.
+  Native paths retain platform encoding; typed flags/JSON require UTF-8.
+- Responses use public wire encoding and the supplied report/pull shapes. Other
+  read envelopes contain version plus named arrays. History revisions/ordinals
+  are decimal strings; transaction entries contain revision and full report.
+  Unknown pull emits a null entity. No progress output appears on stdout.
+- CLI owns exit taxonomy: invalid/type/entity/attribute/snapshot=2, batch/unique/
+  condition/head/retry conflict=3, busy=4, storage/I/O/unsupported stored format=5.
+  Errors carry stable code, typed context, and available commit outcome evidence.
+  A stdout failure after commit is not rollback evidence; same-key retries recover
+  original reports. Help/version are human-readable exceptions to JSON output.

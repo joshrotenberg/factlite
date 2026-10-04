@@ -104,7 +104,7 @@ log and cannot become the historical authority.
   Persist the original report and key atomically. Test stale replay, changed
   requests, concurrent same-key submissions, failure without key reservation,
   and exact original reports/IDs after reopen.
-- [ ] **4.4 Thin CLI and fixture parity.** Implement init/transact/pull/history/
+- [x] **4.4 Thin CLI and fixture parity.** Implement init/transact/pull/history/
   transactions/schema commands as needed, stdin/file input, versioned JSON output,
   structured stderr errors, and documented exit codes. Exercise the complete
   create/start/reopen/retry fixture in separate processes.

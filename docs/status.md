@@ -1,10 +1,10 @@
 # Work status
 
-Steps 1–3 are complete. Typed atomic commits, authoritative replay, owned pinned
-reads, the durable Ada/task fixture, and forced reader/writer isolation are
-implemented. Strict wire decoding and canonical typed requests are complete.
-Atomic exact retries are complete. Next is item 4.4, the database CLI and
-separate-process fixture. Reviews are self-reviews; remote CI has not run.
+Steps 1–4 are complete. Typed atomic commits, authoritative replay, owned pinned
+reads, strict interchange, exact retries, and the database CLI are implemented.
+The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
+item 5.1, query AST and historical type checking. Reviews are self-reviews;
+remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -285,11 +285,30 @@ separate-process fixture. Reviews are self-reviews; remote CI has not run.
 - **What's next:** Item 4.4, functional commands, versioned stdout/structured
   stderr, and complete create/start/reopen/retry scenarios using assert_cmd.
 
+## 4.4 Thin CLI and fixture parity — done
+
+- **Done:** Seven database commands, stdin/files, portable/compact pinned tokens,
+  lossless JSON responses, structured stderr, and documented exit taxonomy.
+  Six assert_cmd scenarios include the complete design fixture, exact full-report
+  Rust parity, all types, every stable error code, and process reopen. All 107
+  tests passed, including thirty-three 1,024-case properties; full checks passed.
+- **Decisions:** CLI initialization is explicit; parse/validate inputs before
+  opening. Native file paths survive non-UTF8 Unix names. Every database command
+  emits one JSON result; help/version remain human-readable. Executed the documented
+  tutorial successfully. Review: `reviews/0019-cli-design-fixture-parity.md`.
+- **Blockers:** None locally. Sandbox socket access was needed by assert_cmd's
+  timeout helper and supplied for the successful gate; remote CI has not run.
+- **What's next:** Item 5.1, bounded typed query AST, bindings/parameters, historical
+  schema checking, selected ordering, and rejected incompatible uses.
+
 ## Environment notes
 
 The local toolchain lives outside Git in `/workspace/.factlite-tools`. For this
 environment, source `/workspace/.factlite-tools/env.sh` before running Cargo.
 Standard development machines can use their usual rustup installation.
+The managed sandbox must permit local sockets when running assert_cmd timeouts;
+the successful check invocation granted network/socket access while Cargo stayed
+offline. The database and CLI require no outbound network access.
 
 ## Open repository decisions
 
