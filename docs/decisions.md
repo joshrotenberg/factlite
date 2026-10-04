@@ -230,3 +230,24 @@ scenario testing. See `testing.md` for the verification policy.
   Errors carry stable code, typed context, and available commit outcome evidence.
   A stdout failure after commit is not rollback evidence; same-key retries recover
   original reports. Help/version are human-readable exceptions to JSON output.
+
+## Query AST and validation
+
+- Query names are exact nonempty strings without NUL, never SQL fragments. The
+  AST has fixed attribute patterns, Var/Const/Param terms, typed input declarations,
+  comparisons, selected names, selected-field ordering, and optional u64 limit.
+  Negative Rust limits are unrepresentable; JSON will reject them at decoding.
+- Validate against historical schema before matching, including limit zero.
+  Entity positions are Ref; shared variables must have the same exact domain.
+  Constants and parameters must match the position's domain. Query reference
+  constants need no allocation check: absent facts simply fail to match.
+- Equality/inequality use exact typed equality, including unequal mixed numeric
+  types. Ranges require same-type operands. Predicates and projections require
+  pattern-bound variables. Projection rejects duplicates; ordering is selected-only.
+- Every declared input must be supplied with its exact type, even when unused;
+  supplied undeclared inputs fail. Validation is pure against owned Schema/Params;
+  Db validation obtains the schema through its common pinned read transaction.
+- Empty conjunctions/projections are allowed; execution will use the relational
+  identity row and distinct empty tuple where applicable. Limit occurs after
+  distinct/order. No stable tie order or page boundaries are promised for a
+  non-unique ordering. Reference evaluation precedes JSON and SQL execution.

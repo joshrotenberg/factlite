@@ -115,7 +115,7 @@ they must not accidentally become an undocumented public wire contract.
 
 ## Step 5: Basic joined queries
 
-- [ ] **5.1 AST and historical type checking.** Patterns, typed inputs/constants,
+- [x] **5.1 AST and historical type checking.** Patterns, typed inputs/constants,
   predicates, projection, order, and limit; validate bindings and ref/entity
   unification against the view's schema.
 - [ ] **5.2 Reference evaluation.** Match/filter/project/distinct/order/limit

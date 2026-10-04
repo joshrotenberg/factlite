@@ -3,7 +3,8 @@
 Steps 1–4 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, strict interchange, exact retries, and the database CLI are implemented.
 The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 5.1, query AST and historical type checking. Reviews are self-reviews;
+item 5.2, reference query evaluation; AST/historical type checking is complete.
+Reviews are self-reviews;
 remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -300,6 +301,20 @@ remote CI has not run.
   timeout helper and supplied for the successful gate; remote CI has not run.
 - **What's next:** Item 5.1, bounded typed query AST, bindings/parameters, historical
   schema checking, selected ordering, and rejected incompatible uses.
+
+## 5.1 AST and historical type checking — done
+
+- **Done:** Typed pattern/parameter/variable/constant AST, comparisons, selected
+  columns/order, unsigned limits, and validation against pinned historical schema.
+  All 112 tests passed, including thirty-five 1,024-case properties; full checks
+  passed. Review: `reviews/0020-query-ast-validation.md`.
+- **Decisions:** Entity positions unify only with Ref. Exact equality preserves
+  different types as unequal; ranges require identical domains. Every declared
+  parameter is required, including unused declarations. Validate before zero-limit
+  short-circuit. Query constants need type validity, not allocation membership.
+- **Blockers:** None locally. Validation deliberately performs no fact matching.
+- **What's next:** Item 5.2, conjunctive reference evaluation, distinct projection,
+  ordered limits, Ada/task joins, many-valued combinations, and pinned recovery.
 
 ## Environment notes
 
