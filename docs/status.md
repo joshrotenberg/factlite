@@ -2,8 +2,9 @@
 
 Steps 1 and 2 are complete. Typed transactions, authoritative replay, atomic
 commits, failure/concurrent-connection tests, and pinned Db ownership are
-implemented, together with revision-bounded read APIs. Next is item 3.3, the
-durable Ada/task A/B/reopen fixture. Database CLI commands remain pending. Reviews
+implemented, together with revision-bounded reads and the durable Ada/task
+A/B/reopen fixture. Next is item 3.4, forced reader/writer isolation. Database
+CLI commands remain pending. Reviews
 are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -216,6 +217,19 @@ are self-reviews; remote CI has not run.
 - **Blockers:** None locally. Query execution, interchange, and CLI are pending.
 - **What's next:** Item 3.3, the supplied Ada/task fixture through public durable
   APIs, including condition failures, unrelated changes, and head fences.
+
+## 3.3 A/B/reopen acceptance fixture — done
+
+- **Done:** The supplied graph, conditional todo-to-doing replacement, explicit
+  reference traversal, identical A reads after B and reopen, full reports,
+  metadata, and bounded status history. Condition failures and head fences are
+  verified through public durable APIs. Seventy-six tests and full checks passed.
+- **Decisions:** Close every handle before reopen. Keep query and exact-retry
+  assertions explicitly pending their APIs; no keyed fixture is accepted early.
+  Review: `reviews/0014-ada-task-reopen-fixture.md`.
+- **Blockers:** None locally. CLI/process and retry parity belong to step 4.
+- **What's next:** Item 3.4, force writer commits between dependent reads and
+  verify the operation retains one SQLite snapshot.
 
 ## Environment notes
 
