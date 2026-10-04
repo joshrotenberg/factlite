@@ -6,8 +6,7 @@ use std::{
 };
 
 use crate::{
-    Comparison, Db, Direction, Fact, Params, Query, QueryName, QueryResult, Result, Schema, Term,
-    Value,
+    Comparison, Direction, Fact, Params, Query, QueryName, QueryResult, Result, Schema, Term, Value,
 };
 
 type Binding = BTreeMap<QueryName, Value>;
@@ -143,20 +142,4 @@ pub(crate) fn evaluate(
         columns: query.select.clone(),
         rows,
     })
-}
-
-impl Db {
-    /// Match/filter/project/distinct/order/limit against this immutable view.
-    /// Every result is owned; entity columns are typed references. Include a
-    /// total ordering for predictable limits; unordered rows have unspecified order.
-    pub fn query(&self, query: &Query, params: &Params) -> Result<QueryResult> {
-        self.read(|_, model| {
-            evaluate(
-                query,
-                params,
-                &model.catalog.schema_at(self.snapshot().revision())?,
-                &model.facts,
-            )
-        })
-    }
 }

@@ -111,7 +111,8 @@ fn require_attribute<'a>(
 }
 
 /// Stable revision-pinned database value, owning a shared durable handle.
-/// It never writes, refreshes implicitly, or retains a long-lived SQL transaction.
+/// It never commits durable changes, refreshes implicitly, or retains a long-lived
+/// SQL transaction. Query may build a temporary relation inside a read operation.
 #[derive(Clone)]
 pub struct Db {
     store: Store,

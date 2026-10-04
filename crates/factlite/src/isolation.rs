@@ -73,6 +73,7 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
         "history",
         "transactions",
         "query",
+        "query-temp",
     ] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("interleaving.sqlite");
@@ -120,15 +121,11 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
             .connection()
             .unwrap()
             .authorizer(Some(move |context: AuthContext<'_>| {
-                // Preparing the first log read happens after read_head's SELECTs
-                // established the read snapshot. Force B before replay reads rows.
-                if matches!(
-                    context.action,
-                    AuthAction::Read {
-                        table_name: "transactions",
-                        ..
-                    }
-                ) && let Some(tx) = pending.take()
+                // Force B either before log replay or after the query's pinned
+                // relation is materialized, immediately before SQL reads it.
+                let table = if operation == "query-temp" { "factlite_query_facts" } else { "transactions" };
+                if matches!(context.action, AuthAction::Read { table_name, .. } if table_name == table)
+                    && let Some(tx) = pending.take()
                 {
                     *captured.lock().unwrap() = Some(writer.commit(tx));
                 }
@@ -144,7 +141,9 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
                 history_a
             ),
             "transactions" => assert_eq!(db.transactions(Revision::ZERO).unwrap(), transactions_a),
-            "query" => assert_eq!(db.query(&query, &crate::Params::new()).unwrap(), query_a),
+            "query" | "query-temp" => {
+                assert_eq!(db.query(&query, &crate::Params::new()).unwrap(), query_a)
+            }
             _ => unreachable!(),
         }
         store

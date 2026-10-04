@@ -123,7 +123,7 @@ they must not accidentally become an undocumented public wire contract.
   facts, type errors, duplicate tuples, zero limits, and total tie-breakers.
 - [x] **5.3 Public query parity.** Shared Rust/JSON conformance fixtures and CLI
   query command reproduce the design's results at A and B.
-- [ ] **5.4 Bound SQL compilation.** Resolve attributes and bind values without
+- [x] **5.4 Bound SQL compilation.** Resolve attributes and bind values without
   string interpolation. Decide an explicit historical SQL strategy and compare
   its answers with reference evaluation before enabling it.
 

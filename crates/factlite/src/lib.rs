@@ -19,6 +19,7 @@ mod log;
 mod model;
 mod query;
 mod query_eval;
+mod query_sql;
 #[cfg(test)]
 mod scenarios;
 mod schema;

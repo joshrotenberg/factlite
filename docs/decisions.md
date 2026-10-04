@@ -279,3 +279,27 @@ scenario testing. See `testing.md` for the verification policy.
   common semantic boundary for Rust and CLI. Results name columns and retain
   typed tuple values, including references in entity positions. CLI query reuses
   pinned view flags and rejects two stdin-consuming inputs before reading.
+
+## Historical SQL bridge
+
+- Db::query reconstructs its exact historical schema/facts inside the common
+  short read transaction, then materializes a connection-local TEMP relation.
+  Query never commits main-database writes or reads a newer current projection.
+  Drop the TEMP relation before success; transaction rollback removes it on error.
+- Resolve fixed qualified attributes to numeric IDs from the pinned schema. SQL
+  text uses only generated numeric aliases/positions and enum-selected operators.
+  Attribute IDs, concrete values, parameters, and limits are bound. Variable,
+  column, attribute, and parameter names never become SQL fragments.
+- Fixed attribute domains type each value column; per-type order-preserving BLOBs
+  retain exact comparisons. Entity columns use identical Ref encodings, allowing
+  entity/reference joins. Cross-type Eq/Ne compile to false/true rather than
+  comparing coincidentally identical bytes. No SQLite numeric/text coercion.
+- SQL uses DISTINCT projection, selected positional ordering, then bound limit.
+  SQLite cardinality is signed-64 bounded: larger u64 limits bind unlimited -1.
+  Preserve valid AST semantics with reference fallback above conservative budgets
+  of 32 patterns, 128 predicates, 256 selected columns or 256 order entries.
+- Deterministic fixtures and 1,024 randomized typed graph cases compare SQL to
+  the reference, with later writes and reopened old views. Forced writers now
+  occur both before replay and between materialization and query reads. Failures
+  during TEMP writes roll back and leave the connection reusable. This is a
+  historical correctness bridge; performance decisions follow measurements.
