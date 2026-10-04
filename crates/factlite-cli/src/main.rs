@@ -19,6 +19,7 @@ const HELP: &str = "Usage:
   factlite --db PATH facts [FILTER] [VIEW]
   factlite --db PATH history [FILTER] [--after REVISION] [VIEW]
   factlite --db PATH transactions [--after REVISION] [VIEW]
+  factlite --db PATH query --file PATH|- [VIEW]
   factlite --help | --version
 
 VIEW: --at SNAPSHOT_TOKEN or --at-file PATH|- (otherwise capture head once)
@@ -104,6 +105,7 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
     )?;
     let allowed: &[&str] = match command.as_str() {
         "transact" => &["--file"],
+        "query" => &["--file", "--at", "--at-file"],
         "pull" => &["--entity", "--attrs", "--at", "--at-file"],
         "schema" => &["--at", "--at-file"],
         "facts" => &["--entity", "--attr", "--value", "--at", "--at-file"],
@@ -134,8 +136,13 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
     if options.contains_key("--at") && options.contains_key("--at-file") {
         return Err(invalid("--at and --at-file are mutually exclusive"));
     }
+    if options.get("--file").is_some_and(|value| value == "-")
+        && options.get("--at-file").is_some_and(|value| value == "-")
+    {
+        return Err(invalid("only one input may consume stdin"));
+    }
     let required: &[&str] = match command.as_str() {
-        "transact" => &["--file"],
+        "transact" | "query" => &["--file"],
         "pull" => &["--entity", "--attrs"],
         _ => &[],
     };
@@ -188,6 +195,12 @@ fn run(command: Command) -> Result<String> {
             } else {
                 options.remove("--at").map(typed).transpose()?
             };
+            let query = options
+                .remove("--file")
+                .map(|file| -> Result<_> {
+                    Ok(wire::decode_query(&read_input(&PathBuf::from(file))?)?)
+                })
+                .transpose()?;
             let entity = options.remove("--entity").map(typed).transpose()?;
             let attribute = options.remove("--attr").map(typed).transpose()?;
             let value = options
@@ -223,6 +236,10 @@ fn run(command: Command) -> Result<String> {
                 value,
             };
             Ok(match command.as_str() {
+                "query" => {
+                    let (query, params) = query.expect("required during parse");
+                    wire::encode_query_result(&db.query(&query, &params)?)
+                }
                 "schema" => wire::encode_schema(&db.schema()?),
                 "facts" => wire::encode_facts(&db.facts(filter)?),
                 "pull" => wire::encode_entity(

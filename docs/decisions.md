@@ -266,3 +266,16 @@ scenario testing. See `testing.md` for the verification policy.
   returned tuple/result is owned. Unordered or non-total tie order is unspecified.
 - Db::query uses the common pinned read transaction. The forced WAL interleaving
   suite now covers query alongside the five original public read surfaces.
+
+## Query interchange
+
+- Version-one envelopes require query.match and query.select. Omitted inputs,
+  where/order, and params default empty; omitted limit is unbounded. Null, unknown
+  fields, duplicate keys, ambiguous terms, and temporary references fail strictly.
+- Terms use a single var/param tag or the existing lossless concrete-value tags.
+  Predicates use left/op/right with eq/ne/lt/le/gt/ge. Limit uses a nonnegative JSON
+  u64 integer. The design's exact joined example is checked in and executable.
+- JSON decoding checks structure; Db's historical type/binding validation is the
+  common semantic boundary for Rust and CLI. Results name columns and retain
+  typed tuple values, including references in entity positions. CLI query reuses
+  pinned view flags and rejects two stdin-consuming inputs before reading.

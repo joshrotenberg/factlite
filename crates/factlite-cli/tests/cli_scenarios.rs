@@ -72,6 +72,21 @@ fn design_create_start_reopen_retry_fixture_matches_rust_reads_and_full_reports(
     let person = a["tempids"]["person"].as_str().unwrap();
     let a_file = dir.path().join("A snapshot.json");
     std::fs::write(&a_file, a["after"].to_string()).unwrap();
+    let query_text = include_str!("../../../examples/query.json");
+    let query_file = dir.path().join("joined query.json");
+    std::fs::write(&query_file, query_text).unwrap();
+    let query_at = |basis: &Path| {
+        success(
+            db(&path)
+                .arg("query")
+                .arg("--file")
+                .arg(&query_file)
+                .arg("--at-file")
+                .arg(basis),
+        )
+    };
+    let empty_join = json!({"version":1,"columns":["task","title","name"],"rows":[]});
+    assert_eq!(query_at(&a_file), empty_join);
     let expected_a =
         json!({"version":1,"entity":{"id":task},"attributes":{"task/status":{"string":"todo"}}});
     assert_eq!(projection(&path, &a_file, task), expected_a);
@@ -88,6 +103,32 @@ fn design_create_start_reopen_retry_fixture_matches_rust_reads_and_full_reports(
     );
     let b_file = dir.path().join("B.json");
     std::fs::write(&b_file, b["after"].to_string()).unwrap();
+    let joined = json!({"version":1,"columns":["task","title","name"],"rows":[[{"ref":{"id":task}},{"string":"Design Factlite"},{"string":"Ada"}]]});
+    assert_eq!(query_at(&a_file), empty_join);
+    assert_eq!(query_at(&b_file), joined);
+    assert_eq!(
+        success(
+            db(&path)
+                .arg("query")
+                .args(["--file", "-"])
+                .arg("--at-file")
+                .arg(&b_file)
+                .write_stdin(query_text)
+        ),
+        joined
+    );
+    let (query, params) = wire::decode_query(query_text).unwrap();
+    let rust_store = Store::open(&path).unwrap();
+    let rust_b = rust_store
+        .db_at(&wire::decode_snapshot(&b["after"].to_string()).unwrap())
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Json>(&wire::encode_query_result(
+            &rust_b.query(&query, &params).unwrap()
+        ))
+        .unwrap(),
+        joined
+    );
     assert_eq!(projection(&path, &a_file, task), expected_a);
     assert_eq!(
         projection(&path, &b_file, task),
@@ -168,6 +209,8 @@ fn design_create_start_reopen_retry_fixture_matches_rust_reads_and_full_reports(
     assert_eq!(c["after"]["revision"], "3");
     assert_eq!(c["effective_delta"], json!([]));
     assert_eq!(transact(&path, &request_b), b);
+    assert_eq!(query_at(&a_file), empty_join);
+    assert_eq!(query_at(&b_file), joined);
     assert_eq!(projection(&path, &a_file, task), expected_a);
     let transactions = success(db(&path).arg("transactions"));
     assert_eq!(transactions["transactions"].as_array().unwrap().len(), 3);
@@ -522,4 +565,103 @@ fn write_constraints_and_head_fences_keep_typed_context_and_conflict_exit_codes(
     );
     assert_eq!(error["error"]["context"]["entity"], json!({"id":unknown}));
     assert_eq!(success(binary().arg("init").arg(&path)), created["after"]);
+}
+
+#[test]
+fn query_validation_errors_empty_rows_and_historical_schema_use_shared_semantics() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("queries.sqlite");
+    let zero = success(binary().arg("init").arg(&path));
+    let a = transact(
+        &path,
+        &serde_json::from_str(include_str!("../../../examples/create.json")).unwrap(),
+    );
+    let base: Json = serde_json::from_str(include_str!("../../../examples/query.json")).unwrap();
+    let mut cases = Vec::new();
+    let mut q = base.clone();
+    q["params"] = json!({});
+    cases.push((q, "InvalidRequest"));
+    let mut q = base.clone();
+    q["params"]["extra"] = json!({"bool":true});
+    cases.push((q, "InvalidRequest"));
+    let mut q = base.clone();
+    q["params"]["wanted"] = json!({"i64":"1"});
+    cases.push((q, "TypeMismatch"));
+    let mut q = base.clone();
+    q["query"]["limit"] = json!(-1);
+    cases.push((q, "InvalidRequest"));
+    let mut q = base.clone();
+    q["query"]["select"] = json!(["unbound"]);
+    cases.push((q, "InvalidRequest"));
+    let mut q = base.clone();
+    q["query"]["select"] = json!(["task", "task"]);
+    cases.push((q, "InvalidRequest"));
+    let mut q = base.clone();
+    q["query"]["order"] = json!([{"field":"person","direction":"asc"}]);
+    cases.push((q, "InvalidRequest"));
+    let mut q = base.clone();
+    q["query"]["match"][0][1] = json!("task/missing");
+    q["query"]["limit"] = json!(0);
+    cases.push((q, "UnknownAttribute"));
+    for (q, code) in cases {
+        failure(
+            db(&path)
+                .args(["query", "--file", "-"])
+                .write_stdin(q.to_string()),
+            2,
+            code,
+        );
+    }
+    failure(
+        db(&path).args(["query", "--file", "-", "--at", "invalid"]),
+        2,
+        "InvalidSnapshot",
+    );
+    failure(
+        db(&path)
+            .args(["query", "--file", "-", "--at-file", "-"])
+            .write_stdin(base.to_string()),
+        2,
+        "InvalidRequest",
+    );
+    let at_zero = wire::decode_snapshot(&zero.to_string())
+        .unwrap()
+        .to_string();
+    failure(
+        db(&path)
+            .args(["query", "--file", "-", "--at", &at_zero])
+            .write_stdin(base.to_string()),
+        2,
+        "UnknownAttribute",
+    );
+    let unit = json!({"version":1,"query":{"match":[],"select":[]}});
+    assert_eq!(
+        success(
+            db(&path)
+                .args(["query", "--file", "-"])
+                .write_stdin(unit.to_string())
+        ),
+        json!({"version":1,"columns":[],"rows":[[]]})
+    );
+    let mut q = base;
+    q["params"]["wanted"] = json!({"string":"todo"});
+    q["query"]["limit"] = json!(0);
+    assert_eq!(
+        success(
+            db(&path)
+                .args(["query", "--file", "-"])
+                .write_stdin(q.to_string())
+        )["rows"],
+        json!([])
+    );
+    q["query"]["limit"] = json!(u64::MAX);
+    assert_eq!(
+        success(
+            db(&path)
+                .args(["query", "--file", "-"])
+                .write_stdin(q.to_string())
+        )["rows"][0][0],
+        json!({"ref":{"id":a["tempids"]["task"]}})
+    );
+    assert_eq!(success(binary().arg("init").arg(&path)), a["after"]);
 }

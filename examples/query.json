@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "query": {
+    "inputs": {"wanted":"string"},
+    "match": [
+      [{"var":"task"},"task/status",{"param":"wanted"}],
+      [{"var":"task"},"task/title",{"var":"title"}],
+      [{"var":"task"},"task/owner",{"var":"person"}],
+      [{"var":"person"},"person/name",{"var":"name"}]
+    ],
+    "where": [],
+    "select": ["task","title","name"],
+    "order": [{"field":"title","direction":"asc"},{"field":"task","direction":"asc"}],
+    "limit": 20
+  },
+  "params": {"wanted":{"string":"doing"}}
+}
