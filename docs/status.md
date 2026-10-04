@@ -1,11 +1,9 @@
 # Work status
 
-Steps 1 and 2 are complete. Typed transactions, authoritative replay, atomic
-commits, failure/concurrent-connection tests, and pinned Db ownership are
-implemented, together with revision-bounded reads and the durable Ada/task
-A/B/reopen fixture. Next is item 3.4, forced reader/writer isolation. Database
-CLI commands remain pending. Reviews
-are self-reviews; remote CI has not run.
+Steps 1–3 are complete. Typed atomic commits, authoritative replay, owned pinned
+reads, the durable Ada/task fixture, and forced reader/writer isolation are
+implemented. Next is item 4.1, versioned wire decoding. Database CLI commands and
+exact retries remain pending. Reviews are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -230,6 +228,18 @@ are self-reviews; remote CI has not run.
 - **Blockers:** None locally. CLI/process and retry parity belong to step 4.
 - **What's next:** Item 3.4, force writer commits between dependent reads and
   verify the operation retains one SQLite snapshot.
+
+## 3.4 Reader/writer isolation — done
+
+- **Done:** Deterministically forced B between A's head check and log replay for
+  schema, facts, pull, history, and transactions. A separate boundary test verifies
+  SQL head/log consistency while a WAL writer commits. Seventy-eight tests and
+  full checks passed; review: `reviews/0015-reader-writer-isolation.md`.
+- **Decisions:** Test-only SQLite authorizer callbacks trigger the precise gap;
+  no scheduling sleeps or production hook APIs. Fresh views see B after the
+  operation; the old view stays A. No current projection exists to race yet.
+- **Blockers:** None locally. Remote CI and physical crash recovery remain later.
+- **What's next:** Item 4.1, strict versioned JSON request and snapshot parsing.
 
 ## Environment notes
 

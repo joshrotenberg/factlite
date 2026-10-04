@@ -25,3 +25,9 @@ The SQLite fault suite uses test-only hooks and temporary triggers; production
 code exposes neither. Its eight write fault locations plus two COMMIT paths
 prove transaction rollback/classification, not physical power-loss recovery.
 Concurrent-connection tests use barriers and no scheduling sleeps.
+
+Reader isolation tests force a separate WAL writer to commit between head reads
+and the first log read using test-only authorizer callbacks. All five public read
+surfaces keep A; an operation-boundary test also checks SQL head and log remain
+at A even with a deliberately broad log bound. No current projection exists yet;
+introducing one requires its own forced head-check/read race regression.
