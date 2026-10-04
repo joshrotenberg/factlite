@@ -31,3 +31,10 @@ and the first log read using test-only authorizer callbacks. All five public rea
 surfaces keep A; an operation-boundary test also checks SQL head and log remain
 at A even with a deliberately broad log bound. No current projection exists yet;
 introducing one requires its own forced head-check/read race regression.
+
+The CLI's six assert_cmd scenarios exercise separate processes, complete A/B/
+reopen/retry reports, Rust parity, all types and error codes, streams/exit codes,
+busy handling, native file paths, and stdin. Each subprocess has a 20-second
+timeout. In the managed sandbox, the wait-timeout helper needs local socket
+permissions; the gate was run with socket access and Cargo offline. The runnable
+documentation example was also executed in a temporary directory with jq.

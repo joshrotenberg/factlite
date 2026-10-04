@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "idempotency_key": "demo-create-v1",
+  "schema": [
+    {"name":"person/name","type":"string","cardinality":"one","unique":"none"},
+    {"name":"task/title","type":"string","cardinality":"one","unique":"none"},
+    {"name":"task/status","type":"string","cardinality":"one","unique":"none"},
+    {"name":"task/owner","type":"ref","cardinality":"one","unique":"none"}
+  ],
+  "new_entities": ["person", "task"],
+  "expect": [],
+  "changes": [
+    {"op":"assert","entity":{"temp":"person"},"attr":"person/name","value":{"string":"Ada"}},
+    {"op":"assert","entity":{"temp":"task"},"attr":"task/title","value":{"string":"Design Factlite"}},
+    {"op":"assert","entity":{"temp":"task"},"attr":"task/status","value":{"string":"todo"}},
+    {"op":"assert","entity":{"temp":"task"},"attr":"task/owner","value":{"ref":{"temp":"person"}}}
+  ],
+  "metadata": {"source":{"string":"design-example"}}
+}

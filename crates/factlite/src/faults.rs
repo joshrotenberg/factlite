@@ -148,6 +148,8 @@ fn ended_transaction_commit_error_is_conservatively_unknown() {
     let error = store.commit(request()).unwrap_err();
     assert_eq!(error.code(), ErrorCode::Storage);
     assert_eq!(error.commit_outcome(), Some(CommitOutcome::Unknown));
+    let wire: serde_json::Value = serde_json::from_str(&crate::wire::encode_error(&error)).unwrap();
+    assert_eq!(wire["error"]["commit_outcome"], "Unknown");
     store
         .connection()
         .unwrap()

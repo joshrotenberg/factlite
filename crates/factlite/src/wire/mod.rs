@@ -5,7 +5,12 @@
 //! no key/head fence; explicit null is not a default. Integers/revisions use
 //! decimal strings, floats finite round-trippable strings, bytes padded base64.
 
+mod output;
 mod strict;
+pub use output::{
+    encode_entity, encode_error, encode_facts, encode_history, encode_report, encode_schema,
+    encode_transactions,
+};
 
 use base64::{
     Engine, alphabet,
