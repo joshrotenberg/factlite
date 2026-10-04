@@ -99,7 +99,7 @@ log and cannot become the historical authority.
   metadata/head/schema/labels/operations, normalize sets/zeros/defaults, preserve
   operation order, and store canonicalization version plus exact bytes. Test
   alternate decimal/byte spellings and deliberate reorder conflicts.
-- [ ] **4.3 Atomic retry lookup.** Check key and canonical bytes inside the
+- [x] **4.3 Atomic retry lookup.** Check key and canonical bytes inside the
   writer transaction before current schema/head/entity/expectation checks.
   Persist the original report and key atomically. Test stale replay, changed
   requests, concurrent same-key submissions, failure without key reservation,

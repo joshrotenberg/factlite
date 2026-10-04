@@ -11,7 +11,7 @@ pub enum CommitOutcome {
     /// This request did not commit; rollback/no-write is confirmed.
     RolledBack,
     /// The commit outcome could not be confirmed. Retrying requires the same key
-    /// once idempotency support is available; never silently reformulate intent.
+    /// and request; never silently reformulate intent.
     Unknown,
 }
 

@@ -144,16 +144,14 @@ fn late_constraints_roll_back_schema_allocation_metadata_and_revision() {
 }
 
 #[test]
-fn keyed_requests_are_rejected_and_nochange_head_fences_are_strict() {
+fn keyed_retries_do_not_advance_head_and_nochange_head_fences_are_strict() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("keys.sqlite")).unwrap();
     let zero = store.head().unwrap();
-    let error = store
-        .commit(Tx::builder().idempotency_key("retry").build().unwrap())
-        .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::InvalidRequest);
-    assert_eq!(error.commit_outcome(), Some(CommitOutcome::RolledBack));
-    assert_eq!(store.head().unwrap(), zero);
+    let keyed = Tx::builder().idempotency_key("retry").build().unwrap();
+    let original = store.commit(keyed.clone()).unwrap();
+    assert_eq!(store.commit(keyed).unwrap(), original);
+    assert_eq!(store.head().unwrap(), original.after);
     let one = store.commit(Tx::default()).unwrap();
     assert!(one.effective_delta.is_empty());
     let error = store

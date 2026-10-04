@@ -33,6 +33,7 @@ fn request() -> Tx {
         .assert(a, "x/two".parse().unwrap(), Value::I64(2))
         .assert(b, "x/one".parse().unwrap(), Value::I64(3))
         .metadata("source", Value::String("fault-must-not-persist".into()))
+        .idempotency_key("fault-retry")
         .build()
         .unwrap()
 }
@@ -95,6 +96,11 @@ fn every_write_stage_rolls_back_reports_metadata_schema_allocations_facts_and_he
         }
         assert_eq!(Store::open(&path).unwrap().head().unwrap(), old.after);
         let valid = store.commit(request()).unwrap();
+        assert_eq!(store.commit(request()).unwrap(), valid);
+        assert_eq!(
+            Store::open(&path).unwrap().commit(request()).unwrap(),
+            valid
+        );
         assert_eq!(valid.after.revision(), old.after.revision().next().unwrap());
         assert_eq!(valid.created_entities.len(), 2);
         assert_eq!(valid.effective_delta.len(), 3);
