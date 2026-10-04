@@ -21,6 +21,7 @@ mod schema;
 mod store;
 mod tx;
 mod value;
+pub mod wire;
 
 pub use db::{Db, Entity, FactEvent, FactFilter, PulledValue, TxRecord};
 pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};

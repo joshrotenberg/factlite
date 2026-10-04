@@ -158,3 +158,24 @@ scenario testing. See `testing.md` for the verification policy.
   Transactions retain complete reports, metadata, and no-change revisions.
   Lower bounds above the basis fail InvalidRequest. The authoritative log is read
   within the same operation transaction as schema and replay validation.
+
+## Public wire version 1
+
+- Serde's recursive visitor parses objects before duplicate keys can be lost,
+  including escaped equivalent keys. Serde JSON's default recursion bound stays
+  enabled. Every typed object rejects unknown fields. Version is integer 1.
+- Requests use schema/new_entities/changes/expect/metadata, optional expected_head
+  and idempotency_key. Missing collections/maps default empty; missing optional
+  fields mean absent. Explicit null never supplies a default. Schema definitions
+  require all four fields. Structural validation is shared with the Rust builder.
+- i64 strings permit signed decimal digits, including leading zeros and plus;
+  unsigned revision strings permit decimal digits including leading zeros.
+  Encoders emit canonical decimal spelling. Overflow and numeric JSON values fail.
+  Floats use finite parsed f64 and round-trippable display; zero normalizes.
+- Bytes accept the standard alphabet with or without padding; reject invalid
+  trailing bits, whitespace, and URL-safe alphabet. Emit padded standard base64.
+  Temporary references are confined to transaction change inputs; metadata
+  excludes every reference. Values retain exact type distinctions.
+- Interchange lives in `wire`, apart from SQLite/storage encoding. Typed tokens
+  validate syntax on decode; db_at checks retained availability. Malformed snapshot
+  fields fail InvalidSnapshot; malformed JSON itself fails InvalidRequest.
