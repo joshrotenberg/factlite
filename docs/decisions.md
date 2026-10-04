@@ -142,3 +142,19 @@ scenario testing. See `testing.md` for the verification policy.
 - `db_at` verifies identity, lineage, retained revision bounds, and replayability.
   Dropping Store leaves views usable; closing all handles and reopening with
   the retained token recovers the same historical schema.
+
+## Revision-bounded reads
+
+- Fact filters combine exact entity/attribute/value restrictions. Named attributes
+  must exist at the basis; supplied values must match their declared type.
+  Value-only restrictions preserve type distinctions. Unknown/foreign entity
+  restrictions match nothing; pull returns None for them.
+- Flat pull projects exactly the supplied names, with duplicates collapsed and
+  an empty list projecting no fields. Absent fields are omitted, known empty
+  entities retain their ID, and references remain typed IDs. All names validate
+  before checking entity availability. Many values use same-type ordering.
+- Facts return deterministic entity/attribute/typed-value order. History returns
+  effective events in (after, basis], retaining original ordinals after filtering.
+  Transactions retain complete reports, metadata, and no-change revisions.
+  Lower bounds above the basis fail InvalidRequest. The authoritative log is read
+  within the same operation transaction as schema and replay validation.
