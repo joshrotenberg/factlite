@@ -62,3 +62,10 @@ and a private commit attempt. A 1,024-case property preserves all six value
 kinds, old schema/facts/events/queries and complete history; a faithful restore
 retires all source handles before continuing. CLI checks standalone artifact
 bytes and absence of new WAL sidecars after actual read subprocesses.
+
+The release workload example checks independent expected joined rows while
+measuring four graph/history configurations on both tmpfs and workspace files.
+Setup/assertions are outside measured operations. Custom one-task/one-revision
+and small workloads run, six invalid configurations fail, and scratch cleanup
+is verified. Benchmarks are separate from test counts and latency is not an SLA;
+raw results and environmental limits live in `measurements.md`.
