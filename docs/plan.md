@@ -86,7 +86,7 @@ log and cannot become the historical authority.
 - [x] **3.3 A/B/reopen acceptance fixture.** Atomically create Ada/task/schema,
   capture A, conditionally replace status at B, reopen, and recover both views.
   Validate failed conditions, unrelated changes, and expected-head fencing.
-- [ ] **3.4 Reader/writer isolation.** Force a writer between dependent reads;
+- [x] **3.4 Reader/writer isolation.** Force a writer between dependent reads;
   every public operation must use one consistent SQL snapshot. If a current
   projection is later introduced, force the design's head-check/read race too.
 

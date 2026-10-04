@@ -11,6 +11,8 @@ mod error;
 #[cfg(test)]
 mod faults;
 mod identity;
+#[cfg(test)]
+mod isolation;
 mod log;
 mod model;
 #[cfg(test)]
