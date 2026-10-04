@@ -66,7 +66,14 @@ fn operation_sql_snapshot_keeps_head_and_log_consistent_while_writer_commits() {
 
 #[test]
 fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
-    for operation in ["schema", "facts", "pull", "history", "transactions"] {
+    for operation in [
+        "schema",
+        "facts",
+        "pull",
+        "history",
+        "transactions",
+        "query",
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("interleaving.sqlite");
         let store = Store::open(&path).unwrap();
@@ -88,6 +95,16 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
         let pull_a = db.pull(&id, &["x/value".parse().unwrap()]).unwrap();
         let history_a = db.history(FactFilter::default(), Revision::ZERO).unwrap();
         let transactions_a = db.transactions(Revision::ZERO).unwrap();
+        let query = crate::Query {
+            patterns: vec![crate::Pattern {
+                entity: crate::Term::Var(crate::QueryName::new("e").unwrap()),
+                attribute: "x/value".parse().unwrap(),
+                value: crate::Term::Var(crate::QueryName::new("v").unwrap()),
+            }],
+            select: vec![crate::QueryName::new("v").unwrap()],
+            ..crate::Query::default()
+        };
+        let query_a = db.query(&query, &crate::Params::new()).unwrap();
         let writer = Store::open(&path).unwrap();
         let mut pending = Some(
             Tx::builder()
@@ -127,6 +144,7 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
                 history_a
             ),
             "transactions" => assert_eq!(db.transactions(Revision::ZERO).unwrap(), transactions_a),
+            "query" => assert_eq!(db.query(&query, &crate::Params::new()).unwrap(), query_a),
             _ => unreachable!(),
         }
         store

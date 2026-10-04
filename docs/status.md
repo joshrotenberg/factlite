@@ -3,7 +3,7 @@
 Steps 1–4 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, strict interchange, exact retries, and the database CLI are implemented.
 The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 5.2, reference query evaluation; AST/historical type checking is complete.
+item 5.3, public query parity; AST validation and reference evaluation are complete.
 Reviews are self-reviews;
 remote CI has not run.
 
@@ -315,6 +315,19 @@ remote CI has not run.
 - **Blockers:** None locally. Validation deliberately performs no fact matching.
 - **What's next:** Item 5.2, conjunctive reference evaluation, distinct projection,
   ordered limits, Ada/task joins, many-valued combinations, and pinned recovery.
+
+## 5.2 Reference evaluation — done
+
+- **Done:** Public Db::query, conjunctive joins including entity/reference
+  unification, exact comparisons, projection/distinct/order/limit, and immutable
+  historical results. All 117 tests passed, including thirty-six 1,024-case
+  properties; full checks passed. Review: `reviews/0021-reference-query-evaluation.md`.
+- **Decisions:** Evaluate over replayed facts as the correctness oracle. Empty
+  conjunctions have an identity row; distinct empty projection has at most one
+  tuple. Typed entities return Ref. No implicit tie ordering. Query uses the same
+  read transaction and now passes the forced writer interleaving too.
+- **Blockers:** None locally. Public JSON/CLI and SQL query execution are next.
+- **What's next:** Item 5.3, shared query envelopes and subprocess A/B parity.
 
 ## Environment notes
 

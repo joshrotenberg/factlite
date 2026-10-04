@@ -118,7 +118,7 @@ they must not accidentally become an undocumented public wire contract.
 - [x] **5.1 AST and historical type checking.** Patterns, typed inputs/constants,
   predicates, projection, order, and limit; validate bindings and ref/entity
   unification against the view's schema.
-- [ ] **5.2 Reference evaluation.** Match/filter/project/distinct/order/limit
+- [x] **5.2 Reference evaluation.** Match/filter/project/distinct/order/limit
   over replayed state. Test Ada/task joins, many-valued combinations, absent
   facts, type errors, duplicate tuples, zero limits, and total tie-breakers.
 - [ ] **5.3 Public query parity.** Shared Rust/JSON conformance fixtures and CLI
