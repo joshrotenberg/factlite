@@ -22,6 +22,7 @@ reference evaluator as a fallback. Hardening and safe backups follow.
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
+- [Acceptance audit](docs/acceptance.md): tests mapped to the supplied contract.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 
