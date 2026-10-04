@@ -32,7 +32,7 @@ surfaces keep A; an operation-boundary test also checks SQL head and log remain
 at A even with a deliberately broad log bound. No current projection exists yet;
 introducing one requires its own forced head-check/read race regression.
 
-The CLI's seven assert_cmd scenarios exercise separate processes, complete A/B/
+The CLI's eight assert_cmd scenarios exercise separate processes, complete A/B/
 reopen/retry reports, Rust parity, all types and error codes, streams/exit codes,
 busy handling, native file paths, and stdin. Each subprocess has a 20-second
 timeout. In the managed sandbox, the wait-timeout helper needs local socket
@@ -45,3 +45,11 @@ schema writes, and old-view reopen. Independent integration oracles still run
 through the public SQL path. The forced writer suite also commits after TEMP
 materialization and before SQL reads; no head projection is involved. TEMP write
 failure injection verifies cleanup and reuse without durable state changes.
+
+Process recovery re-enters one exact test in a child and handshakes through pipes,
+with a 20-second readiness bound and kill-on-drop cleanup. Cache pressure spills
+WAL frames; abrupt termination before COMMIT must retain only the old complete
+state. Termination after COMMIT but before returning a report must recover every
+original report/ID/key/metadata byte via retry. No production fault controls or
+physical power-loss claim. Eight actual CLI processes start behind barriers:
+same-key requests allocate once and conditional requests have exactly one winner.

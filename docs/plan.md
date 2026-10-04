@@ -134,7 +134,7 @@ that bridge when implementing 5.4; current tables alone cannot serve past views.
 
 - [x] **6.1 Acceptance matrix audit.** Map every design acceptance row to tests
   and remaining gaps, including all value types, schema, identity, and uniqueness.
-- [ ] **6.2 Recovery and process behavior.** Multiple processes, crash/commit
+- [x] **6.2 Recovery and process behavior.** Multiple processes, crash/commit
   boundaries, bounded busy handling, corruption/format errors, and compatible
   reopen behavior. Validate projection rebuilding if a projection exists.
 - [ ] **6.3 Backup and lineage.** SQLite-safe backups, token-preserving restore,

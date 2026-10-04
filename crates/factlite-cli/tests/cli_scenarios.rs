@@ -665,3 +665,78 @@ fn query_validation_errors_empty_rows_and_historical_schema_use_shared_semantics
     );
     assert_eq!(success(binary().arg("init").arg(&path)), a["after"]);
 }
+
+#[test]
+fn concurrent_cli_processes_share_exact_retry_reports_and_serialize_conditions() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("contenders.sqlite");
+    success(binary().arg("init").arg(&path));
+    let request = include_str!("../../../examples/create.json");
+    let barrier = Arc::new(Barrier::new(8));
+    let reports = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let barrier = barrier.clone();
+                let path = &path;
+                scope.spawn(move || {
+                    barrier.wait();
+                    success(
+                        db(path)
+                            .args(["transact", "--file", "-"])
+                            .write_stdin(request),
+                    )
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert!(reports.iter().all(|report| report == &reports[0]));
+    let task = reports[0]["tempids"]["task"].as_str().unwrap();
+    let barrier = Arc::new(Barrier::new(8));
+    let outputs = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..8).map(|index| { let barrier = barrier.clone(); let path = &path; scope.spawn(move || {
+            let request = json!({"version":1,"idempotency_key":format!("condition-{index}"),"expect":[{"entity":{"id":task},"attr":"task/status","values":[{"string":"todo"}]}],"changes":[{"op":"assert","entity":{"id":task},"attr":"task/status","value":{"string":format!("winner-{index}")}}]});
+            barrier.wait();
+            let mut command = db(path); command.args(["transact","--file","-"]).write_stdin(request.to_string());
+            let output = command.output().unwrap();
+            if output.status.success() {
+                assert!(output.stderr.is_empty());
+                let report: Json = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(report["after"]["revision"],"2");
+                Some((request,report))
+            } else {
+                use assert_cmd::assert::OutputAssertExt;
+                let assertion = output.assert().code(3).stdout("");
+                let error: Json = serde_json::from_slice(&assertion.get_output().stderr).unwrap();
+                assert_eq!(error["error"]["code"],"PreconditionFailed");
+                assert_eq!(error["error"]["commit_outcome"],"RolledBack");
+                None
+            }
+        }) }).collect();
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(transact(&path, &outputs[0].0), outputs[0].1);
+    assert_eq!(
+        transact(&path, &serde_json::from_str(request).unwrap()),
+        reports[0]
+    );
+    let reopened = Store::open(&path).unwrap();
+    assert_eq!(reopened.head().unwrap().revision(), Revision::new(2));
+    let records = reopened.db().unwrap().transactions(Revision::ZERO).unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records
+            .iter()
+            .map(|r| r.report.created_entities.len())
+            .sum::<usize>(),
+        2
+    );
+}
