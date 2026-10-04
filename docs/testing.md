@@ -32,7 +32,7 @@ surfaces keep A; an operation-boundary test also checks SQL head and log remain
 at A even with a deliberately broad log bound. No current projection exists yet;
 introducing one requires its own forced head-check/read race regression.
 
-The CLI's eight assert_cmd scenarios exercise separate processes, complete A/B/
+The CLI's nine assert_cmd scenarios exercise separate processes, complete A/B/
 reopen/retry reports, Rust parity, all types and error codes, streams/exit codes,
 busy handling, native file paths, and stdin. Each subprocess has a 20-second
 timeout. In the managed sandbox, the wait-timeout helper needs local socket
@@ -53,3 +53,12 @@ state. Termination after COMMIT but before returning a report must recover every
 original report/ID/key/metadata byte via retry. No production fault controls or
 physical power-loss claim. Eight actual CLI processes start behind barriers:
 same-key requests allocate once and conditional requests have exactly one winner.
+
+Backup evidence includes a deterministic writer committing B after the source
+snapshot A is fixed but before native SQLite copy; destination stays A and
+rejects B's future token. Failure and publication-race tests preserve existing
+files and clean staging. Read-only connection tests reject both raw main writes
+and a private commit attempt. A 1,024-case property preserves all six value
+kinds, old schema/facts/events/queries and complete history; a faithful restore
+retires all source handles before continuing. CLI checks standalone artifact
+bytes and absence of new WAL sidecars after actual read subprocesses.

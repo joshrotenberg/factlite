@@ -17,13 +17,16 @@ The CLI supports init, transact, schema, facts, pull, history, transactions, and
 joined queries, including portable snapshots and exact retries. Rust and JSON
 queries share typed validation and results. Bound SQL joins use a temporary
 relation reconstructed from the pinned historical log; large ASTs retain the
-reference evaluator as a fallback. Hardening and safe backups follow.
+reference evaluator as a fallback. Process recovery and safe standalone backups
+are verified; read-only views preserve historical tokens. Workload measurements
+follow.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
 - [Acceptance audit](docs/acceptance.md): tests mapped to the supplied contract.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
+- [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 
 The user has authorized incremental implementation and the branch, work, review,
@@ -60,7 +63,7 @@ The lockfile is committed. Storage uses rusqlite with bundled SQLite and UUIDs
 for durable store/lineage identity. Proptest and tempfile support test coverage.
 
 Storage configures WAL, FULL synchronization, foreign keys, and a two-second
-busy timeout. A live store may have SQLite sidecar files; later backup support
-will use SQLite-safe mechanisms. See [storage decisions](docs/decisions.md).
+busy timeout. A live store may have SQLite sidecar files; `Store::backup` uses SQLite
+to produce a validated standalone copy. See [storage decisions](docs/decisions.md).
 
 Remote hosting and licensing remain to be decided. Packages are not published.

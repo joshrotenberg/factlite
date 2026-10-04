@@ -120,6 +120,23 @@ pub struct Db {
 }
 
 impl Db {
+    /// Open an existing file through a read-only connection and pin its head.
+    /// This cannot initialize or commit main-database changes; queries may use
+    /// connection-local temporary tables. Backups preserve original tokens.
+    pub fn open_read_only(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Store::reader(path.as_ref())
+    }
+
+    /// Open a retained full snapshot through a read-only file connection.
+    /// Wrong identities, future bounds and unavailable history fail normally.
+    pub fn open_read_only_at(
+        path: impl AsRef<std::path::Path>,
+        snapshot: &SnapshotId,
+    ) -> Result<Self> {
+        let reader = Store::reader(path.as_ref())?;
+        reader.store.db_at(snapshot)
+    }
+
     pub(crate) fn pinned(store: Store, snapshot: SnapshotId) -> Self {
         Self { store, snapshot }
     }
@@ -246,5 +263,42 @@ impl Db {
         let result = operation(&transaction, &model)?;
         transaction.commit()?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn read_only_view_has_no_writable_connection_or_commit_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("read.sqlite");
+        let writer = Store::open(&path).unwrap();
+        let before = writer.head().unwrap();
+        let reader = Db::open_read_only(&path).unwrap();
+        let error = reader
+            .store
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM store_info", [])
+            .unwrap_err();
+        assert!(
+            matches!(error,rusqlite::Error::SqliteFailure(ref code,_) if code.code == rusqlite::ErrorCode::ReadOnly)
+        );
+        let error = reader.store.commit(crate::Tx::default()).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::Storage);
+        assert_eq!(
+            error.commit_outcome(),
+            Some(crate::CommitOutcome::RolledBack)
+        );
+        assert_eq!(*reader.snapshot(), before);
+        assert_eq!(writer.head().unwrap(), before);
+        assert_eq!(
+            reader
+                .query(&crate::Query::default(), &crate::Params::new())
+                .unwrap()
+                .rows,
+            vec![vec![]]
+        );
     }
 }

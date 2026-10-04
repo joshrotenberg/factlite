@@ -4,6 +4,7 @@
 //! use explicit revision tokens. SQLite persists atomic reports and retained
 //! semantic history with explicit commit outcome evidence.
 
+mod backup;
 mod canonical;
 mod canonical_decode;
 mod catalog;

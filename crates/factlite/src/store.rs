@@ -199,6 +199,29 @@ impl Store {
         })
     }
 
+    pub(crate) fn reader(path: &Path) -> Result<crate::Db> {
+        if path.as_os_str().is_empty() || path == Path::new(":memory:") {
+            return Err(Error::invalid(
+                "path",
+                "Factlite requires a durable file path",
+            ));
+        }
+        let mut connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
+        )?;
+        connection.busy_timeout(Duration::from_secs(2))?;
+        connection.pragma_update(None, "foreign_keys", true)?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        validate_existing(&transaction)?;
+        let basis = read_head(&transaction)?;
+        transaction.commit()?;
+        let store = Self {
+            connection: Arc::new(Mutex::new(connection)),
+        };
+        Ok(crate::Db::pinned(store, basis))
+    }
+
     /// Captures the latest committed head in one short SQLite read transaction.
     pub fn head(&self) -> Result<SnapshotId> {
         let mut connection = self.connection()?;
@@ -277,6 +300,23 @@ pub(crate) fn read_head(connection: &Connection) -> Result<SnapshotId> {
 
 fn table_names(connection: &Connection) -> Result<Vec<String>> {
     Ok(connection.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*' ORDER BY name")?.query_map([],|row|row.get(0))?.collect::<std::result::Result<_,_>>()?)
+}
+
+pub(crate) fn validate_existing(connection: &Connection) -> Result<()> {
+    let application: i32 =
+        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if application != APPLICATION_ID || version != FORMAT_VERSION {
+        return Err(Error::new(
+            ErrorCode::UnsupportedFormat,
+            ErrorContext::InvalidInput { field: "format" },
+            "file is not a supported Factlite database",
+        ));
+    }
+    if table_names(connection)? != TABLES {
+        return Err(corrupt("database tables do not match the supported format"));
+    }
+    validate_head(connection)
 }
 
 fn validate_head(connection: &Connection) -> Result<()> {
