@@ -1,7 +1,7 @@
 # CLI version 1
 
 Build with `cargo build --locked -p factlite-cli`; the binary is
-`target/debug/factlite`. `--help` lists commands. Query execution is pending step 5.
+`target/debug/factlite`. `--help` lists commands.
 
 Creation is explicit: `factlite init PATH` initializes or opens a supported file
 and emits its full head snapshot. Other commands require an existing database.
@@ -26,11 +26,14 @@ jq '.after' B.report.json > B.json
 factlite --db demo.sqlite pull --at-file A.json --entity "$task_id" --attrs task/status
 factlite --db demo.sqlite pull --at-file B.json --entity "$task_id" --attrs task/status
 factlite --db demo.sqlite history --at-file B.json --entity "$task_id" --attr task/status --after 0
+factlite --db demo.sqlite query --file examples/query.json --at-file A.json
+factlite --db demo.sqlite query --file examples/query.json --at-file B.json
 factlite --db demo.sqlite transactions --after 0
 factlite --db demo.sqlite transact --file start.json
 ```
 
-The pulls return todo/doing. Retrying start returns the complete original B report
+The pulls return todo/doing. The query returns no rows at A and the typed
+task/title/Ada tuple at B. Retrying start returns the complete original B report
 and creates no revision. Retrying create returns A's IDs/report without allocating
 again. Changed content under the same key conflicts; a fresh stale conditional
 request fails PreconditionFailed. Key identity preserves submitted operation
@@ -68,3 +71,26 @@ the original key/request. Source errors remain available through Rust APIs.
 The `assert_cmd` fixture exercises these commands as separate processes. It
 checks complete report/read parity with Rust, no-change/retry behavior, all value
 types, structured failures, busy bounds, paths with spaces, and Unix non-UTF8 paths.
+
+## Queries
+
+`query --file PATH|- [VIEW]` accepts the envelope in `examples/query.json`.
+`query.match` and `query.select` are required arrays. Inputs, where, order, and
+outer params default empty; limit defaults absent. Explicit null is invalid.
+Only one input may consume stdin: query and snapshot cannot both use `-`.
+
+A match is `[entity-term, "namespace/attribute", value-term]`. Terms are
+`{"var":"name"}`, `{"param":"name"}`, or a concrete tagged value; entity terms
+must have Ref type. Temporary references are transaction input only. Declared
+inputs use bool/i64/f64/string/bytes/ref and all must be supplied in params.
+
+Predicates use `{"left":TERM,"op":"eq","right":TERM}` with eq/ne/lt/le/gt/ge.
+Equality is exact typed equality; ranges require the same type. Variables in
+predicates and select must be pattern-bound; selected names must be unique.
+Order entries use `{"field":"selected-name","direction":"asc"}` or desc.
+Limit is a nonnegative JSON integer through u64::MAX; zero still validates.
+
+Results are `{"version":1,"columns":[...],"rows":[[TAGGED_VALUE,...],...]}`.
+Entity columns use Ref. Projection removes duplicate tuples before ordering and
+limit. Supply a total order, such as title plus task identity, for predictable
+limited results. Missing facts fail a pattern; no null values are invented.

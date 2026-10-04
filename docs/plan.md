@@ -121,7 +121,7 @@ they must not accidentally become an undocumented public wire contract.
 - [x] **5.2 Reference evaluation.** Match/filter/project/distinct/order/limit
   over replayed state. Test Ada/task joins, many-valued combinations, absent
   facts, type errors, duplicate tuples, zero limits, and total tie-breakers.
-- [ ] **5.3 Public query parity.** Shared Rust/JSON conformance fixtures and CLI
+- [x] **5.3 Public query parity.** Shared Rust/JSON conformance fixtures and CLI
   query command reproduce the design's results at A and B.
 - [ ] **5.4 Bound SQL compilation.** Resolve attributes and bind values without
   string interpolation. Decide an explicit historical SQL strategy and compare

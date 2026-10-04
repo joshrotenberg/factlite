@@ -3,7 +3,7 @@
 Steps 1–4 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, strict interchange, exact retries, and the database CLI are implemented.
 The A/B/reopen/retry fixture passes through Rust and separate processes. Next is
-item 5.3, public query parity; AST validation and reference evaluation are complete.
+item 5.4, historical SQL compilation; Rust/JSON/CLI query parity is complete.
 Reviews are self-reviews;
 remote CI has not run.
 
@@ -328,6 +328,19 @@ remote CI has not run.
   read transaction and now passes the forced writer interleaving too.
 - **Blockers:** None locally. Public JSON/CLI and SQL query execution are next.
 - **What's next:** Item 5.3, shared query envelopes and subprocess A/B parity.
+
+## 5.3 Public query parity — done
+
+- **Done:** Strict versioned query/params decoding, lossless encoding and named
+  typed result rows, query CLI, and executable design fixture. All 122 tests
+  passed, including thirty-eight 1,024-case properties; full checks passed.
+  Review: `reviews/0022-query-wire-cli-parity.md`.
+- **Decisions:** Share historical Rust validation for JSON/CLI. Require match and
+  select; default inputs/where/order/params empty. Use left/op/right predicates.
+  Reject malformed/duplicate/unknown fields and simultaneous stdin inputs.
+- **Blockers:** None locally. No remote CI or independent review has run.
+- **What's next:** Item 5.4, bound SQL over an explicit historical relation with
+  reference parity before making SQL the public execution path.
 
 ## Environment notes
 

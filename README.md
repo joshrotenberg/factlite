@@ -13,9 +13,9 @@ basis and return owned results.
 Exact keyed retries return the original report before current-state validation,
 without allocating or advancing revision again. Strict versioned JSON decoders
 share the Rust request/value invariants.
-The CLI supports init, transact, schema, facts, pull, history, and transactions,
-including portable snapshots and exact retries. Rust joined queries use the
-tested reference evaluator; JSON/CLI query interchange and bound SQL are next.
+The CLI supports init, transact, schema, facts, pull, history, transactions, and
+joined queries, including portable snapshots and exact retries. Rust and JSON
+queries share typed validation and results; bound historical SQL execution is next.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
