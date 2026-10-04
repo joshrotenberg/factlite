@@ -92,7 +92,7 @@ log and cannot become the historical authority.
 
 ## Step 4: Exact retries and the interchange boundary
 
-- [ ] **4.1 Versioned wire decoding.** Define Rust/JSON equivalence and strict
+- [x] **4.1 Versioned wire decoding.** Define Rust/JSON equivalence and strict
   parsing of tagged values, decimal integers/revisions, finite float strings,
   decoded bytes, defaults, unknown fields, and duplicate JSON keys.
 - [ ] **4.2 Canonical request representation.** Exclude the key, include version,

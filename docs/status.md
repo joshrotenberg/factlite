@@ -2,7 +2,8 @@
 
 Steps 1–3 are complete. Typed atomic commits, authoritative replay, owned pinned
 reads, the durable Ada/task fixture, and forced reader/writer isolation are
-implemented. Next is item 4.1, versioned wire decoding. Database CLI commands and
+implemented. Strict versioned wire decoding is complete. Next is item 4.2,
+canonical typed requests. Database CLI commands and
 exact retries remain pending. Reviews are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -240,6 +241,21 @@ exact retries remain pending. Reviews are self-reviews; remote CI has not run.
   operation; the old view stays A. No current projection exists to race yet.
 - **Blockers:** None locally. Remote CI and physical crash recovery remain later.
 - **What's next:** Item 4.1, strict versioned JSON request and snapshot parsing.
+
+## 4.1 Versioned wire decoding — done
+
+- **Done:** Strict version-one request/snapshot/value decoders and encoders,
+  recursive duplicate-key detection, field/tag checks, explicit defaults, typed
+  precision, normalized floats/bytes, and Rust/JSON durable commit parity.
+  Eighty-five tests passed, including twenty-seven 1,024-case properties; full
+  checks passed. Review: `reviews/0016-strict-versioned-json.md`.
+- **Decisions:** Keep interchange in a separate library module. Use validated
+  constructors rather than deserializing private identity/value fields. Accept
+  alternate decimal spellings and standard base64 padding, emit canonical forms;
+  explicit null is invalid. Preserve operation/declaration arrays.
+- **Blockers:** None locally. Decoding a keyed request does not enable retries;
+  keyed commit remains rejected until lookup/persistence land together.
+- **What's next:** Item 4.2, versioned canonical typed request bytes and equality.
 
 ## Environment notes
 
