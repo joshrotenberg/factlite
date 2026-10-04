@@ -2,7 +2,8 @@
 
 Steps 1 and 2 are complete. Typed transactions, authoritative replay, atomic
 commits, failure/concurrent-connection tests, and pinned Db ownership are
-implemented. Next is item 3.2, revision-bounded reads. Database CLI commands remain pending. Reviews
+implemented, together with revision-bounded read APIs. Next is item 3.3, the
+durable Ada/task A/B/reopen fixture. Database CLI commands remain pending. Reviews
 are self-reviews; remote CI has not run.
 
 ## 0.1 Inspect and initialize — done
@@ -201,6 +202,20 @@ are self-reviews; remote CI has not run.
   implicit refresh. Invalid/foreign/future snapshots fail without clamping.
 - **Blockers:** None locally. Remote CI has not run.
 - **What's next:** Item 3.2, facts, flat pull, bounded history and transactions.
+
+## 3.2 Revision-bounded reads — done
+
+- **Done:** Owned facts, flat projections, effective history with original event
+  ordinals, and complete transaction records including no-change commits and
+  metadata. Seventy-four tests passed, including twenty-four 1,024-case properties.
+  Full checks passed; review: `reviews/0013-revision-bounded-reads.md`.
+- **Decisions:** Validate filters against historical schema, preserve exact typed
+  values, sort facts and many values deterministically. Empty attribute lists
+  project no fields; unknown/foreign entities match no facts or pull None.
+  Reject lower bounds above the basis. All dependent SQL stays in one transaction.
+- **Blockers:** None locally. Query execution, interchange, and CLI are pending.
+- **What's next:** Item 3.3, the supplied Ada/task fixture through public durable
+  APIs, including condition failures, unrelated changes, and head fences.
 
 ## Environment notes
 

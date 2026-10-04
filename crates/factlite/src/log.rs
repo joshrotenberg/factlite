@@ -180,6 +180,32 @@ fn check_events(connection: &Connection, revision: &[u8], report: &TxReport) -> 
     Ok(())
 }
 
+// Called only inside Db's read transaction after validating/replaying its basis.
+pub(crate) fn reports_between(
+    connection: &Connection,
+    after: Revision,
+    basis: Revision,
+) -> Result<Vec<TxReport>> {
+    let mut statement = connection.prepare("SELECT revision,report FROM transactions WHERE revision>?1 AND revision<=?2 ORDER BY revision")?;
+    let rows = statement.query_map(
+        rusqlite::params![
+            revision_bytes(after).as_slice(),
+            revision_bytes(basis).as_slice()
+        ],
+        |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
+    )?;
+    let mut reports = Vec::new();
+    for row in rows {
+        let (revision, bytes) = row?;
+        let report = codec::decode_report(&bytes)?;
+        if decode_revision(&revision)? != report.after.revision() {
+            return Err(corrupt("transaction row revision differs from report"));
+        }
+        reports.push(report);
+    }
+    Ok(reports)
+}
+
 pub(crate) fn verify_foreign_keys(connection: &Connection) -> Result<()> {
     if connection
         .prepare("PRAGMA foreign_key_check")?

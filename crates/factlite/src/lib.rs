@@ -20,7 +20,7 @@ mod store;
 mod tx;
 mod value;
 
-pub use db::Db;
+pub use db::{Db, Entity, FactEvent, FactFilter, PulledValue, TxRecord};
 pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use model::{Fact, FactDelta, TxReport};
