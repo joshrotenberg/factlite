@@ -17,6 +17,7 @@ mod identity;
 mod isolation;
 mod log;
 mod model;
+mod query;
 #[cfg(test)]
 mod scenarios;
 mod schema;
@@ -30,6 +31,9 @@ pub use db::{Db, Entity, FactEvent, FactFilter, PulledValue, TxRecord};
 pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use model::{Fact, FactDelta, TxReport};
+pub use query::{
+    Comparison, Direction, Order, Params, Pattern, Predicate, Query, QueryName, QueryResult, Term,
+};
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
 pub use store::Store;
 pub use tx::{Change, EntityTerm, Expectation, Operation, Tx, TxBuilder, ValueTerm};
