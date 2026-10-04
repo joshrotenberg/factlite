@@ -251,3 +251,18 @@ scenario testing. See `testing.md` for the verification policy.
   identity row and distinct empty tuple where applicable. Limit occurs after
   distinct/order. No stable tie order or page boundaries are promised for a
   non-unique ordering. Reference evaluation precedes JSON and SQL execution.
+
+## Reference query evaluation
+
+- Validate the full query first, then join each conjunctive pattern on exact typed
+  bindings, filter predicates, project, remove duplicate tuples, order selected
+  fields, and limit. Zero limit returns empty only after validation. Missing facts
+  fail matching without inventing null values.
+- The private evaluator consumes a replayed fact set, not a public second backend.
+  Entity positions bind Value::Ref, including same-pattern self-edge unification.
+  Comparisons and ordering reuse the value domain's numerical/byte/identity rules.
+- Empty conjunction yields one empty binding. Projection onto no columns yields
+  the distinct empty tuple if any binding survives, otherwise zero rows. Every
+  returned tuple/result is owned. Unordered or non-total tie order is unspecified.
+- Db::query uses the common pinned read transaction. The forced WAL interleaving
+  suite now covers query alongside the five original public read surfaces.

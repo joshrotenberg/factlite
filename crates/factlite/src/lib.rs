@@ -18,6 +18,7 @@ mod isolation;
 mod log;
 mod model;
 mod query;
+mod query_eval;
 #[cfg(test)]
 mod scenarios;
 mod schema;
