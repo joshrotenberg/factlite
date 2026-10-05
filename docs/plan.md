@@ -150,3 +150,18 @@ deferred until an actual workload and budget are agreed. See `measurements.md`.
 JMESPath, server/NIF integration, and all other deferred scope remain outside the
 initial implementation. Licensing and remote destination are open repository
 decisions; neither changes the local semantic implementation sequence.
+
+## Step 7: First use, combined traces, and replay profiling
+
+- [x] **7.1 First-use API pass.** Add a library guide and executable Rust
+  workflow covering creation, pinned traversal, conditions, queries, exact
+  retries, backup and reopen. Run the example in the check script; fix concrete
+  usability issues found by using the public API.
+- [ ] **7.2 Combined stateful testing.** Compare mixed randomized operation
+  traces with an independent state oracle: schema, references, uniqueness,
+  conditions, retries, historical reads and reopen. Retain shrinking and at
+  least 1,024 property cases.
+- [ ] **7.3 Replay profiling.** Measure replay stages, choose one demonstrated
+  improvement, and verify optimized/reference parity, corruption detection,
+  rollback, isolation and recovery. Report observed costs without inventing an
+  SLA or adding an unmeasured cache/checkpoint.

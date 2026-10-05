@@ -29,6 +29,7 @@ measurements document replay costs and the current optimization decision.
 - [Measurements](docs/measurements.md): reproducible workloads and replay costs.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
+- [Rust guide](docs/rust.md): an executable application workflow and API choices.
 
 The user has authorized incremental implementation and the branch, work, review,
 merge workflow. The handoff's earlier requirement for separate authorization is
@@ -56,6 +57,7 @@ cargo run --locked -p factlite-cli -- --help
 ```
 
 The check script runs formatting, Clippy with warnings treated as errors, tests,
+the asserted Rust workflow example,
 and documentation with warnings treated as errors. GitHub Actions uses the same
 script when a remote is connected. See [testing policy](docs/testing.md) for unit,
 property, integration, and scenario coverage.

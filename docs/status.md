@@ -3,9 +3,11 @@
 Steps 0–6 are complete locally. Typed atomic commits, authoritative replay,
 owned pinned reads, strict interchange, exact retries, historical SQL queries,
 CLI parity, process recovery and standalone backups are implemented and tested.
-The final gate passed 136 tests, including forty 1,024-case property suites.
+The latest gate passed 137 tests, including forty 1,024-case property suites,
+plus the asserted Rust workflow example.
 Workload measurements expose replay costs; no production latency target exists.
-Next is first-use review and a remote/tarball handoff when requested. Reviews
+Step 7 continues with mixed stateful testing and measured replay improvement.
+A remote/tarball handoff follows when requested. Reviews
 are self-reviews; remote CI and independent review have not run.
 
 ## 0.1 Inspect and initialize — done
@@ -417,6 +419,21 @@ are self-reviews; remote CI and independent review have not run.
 - **What's next:** Planned local v1 sequence is complete. Review first-use
   behavior/performance needs; package Git history, source, lockfile and reviews
   into a tarball when requested for the next remote-connected session.
+
+## 7.1 First-use API pass — done
+
+- **Done:** Added `docs/rust.md`, an executable task workflow and a minimal
+  rustdoc example. The walkthrough covers forward references, pinned traversal,
+  conditional updates, joined queries, stale conditions/fences, exact retries,
+  no-change commits, portable tokens, backup, read-only access and reopen.
+  All 137 tests, the walkthrough and the full gate passed.
+  Self-review: `reviews/0028-rust-first-use.md`.
+- **Decisions:** Keep explicit typed constructors and current APIs; no concrete
+  semantic/API defect emerged. Run the asserted walkthrough in the standard
+  gate and document application error/recovery choices.
+- **Blockers:** None locally; remote and license are still unselected.
+- **What's next:** Combine operations in shrinking stateful traces against an
+  independent domain oracle (7.2), then profile replay (7.3).
 
 ## Environment notes
 
