@@ -30,6 +30,7 @@ measurements document replay costs and the current optimization decision.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 - [Rust guide](docs/rust.md): an executable application workflow and API choices.
+- [Handoff](docs/handoff.md): restore, verify, publish Git history and resume work.
 
 The user has authorized incremental implementation and the branch, work, review,
 merge workflow. The handoff's earlier requirement for separate authorization is

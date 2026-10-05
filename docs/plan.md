@@ -165,3 +165,15 @@ decisions; neither changes the local semantic implementation sequence.
   improvement, and verify optimized/reference parity, corruption detection,
   rollback, isolation and recovery. Report observed costs without inventing an
   SLA or adding an unmeasured cache/checkpoint.
+
+## Step 8: Handoff and remote preservation
+
+- [ ] **8.1 Prepare and verify the handoff.** Record restore/resume instructions;
+  package source, locked dependencies, reviews and complete reachable Git history
+  with branch names. Exclude machine state. Restore independently and compare
+  commit, tree, branch heads and tracked bytes; check Git integrity and run the
+  public Rust workflow from the restored checkout.
+- [ ] **8.2 Publish and verify.** Push to the selected remote without replacing
+  unrelated history, compare remote refs with local refs and verify a fresh
+  remote clone. Deliver the final archive, manifest and SHA-256 checksum for
+  the exact published commit. Report remote CI separately from local evidence.
