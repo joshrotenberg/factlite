@@ -168,7 +168,7 @@ decisions; neither changes the local semantic implementation sequence.
 
 ## Step 8: Handoff and remote preservation
 
-- [ ] **8.1 Prepare and verify the handoff.** Record restore/resume instructions;
+- [x] **8.1 Prepare and verify the handoff.** Record restore/resume instructions;
   package source, locked dependencies, reviews and complete reachable Git history
   with branch names. Exclude machine state. Restore independently and compare
   commit, tree, branch heads and tracked bytes; check Git integrity and run the

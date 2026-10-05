@@ -3,7 +3,7 @@
 The full intended local v1 contract and follow-up items 7.1–7.3 are implemented.
 Read `AGENTS.md`, `Factlite-Design.md`, `docs/plan.md` and `docs/status.md` before
 continuing. The original design remains unchanged. Implementation decisions,
-acceptance evidence and thirty item self-reviews are retained in `docs/`.
+acceptance evidence and recorded item self-reviews are retained in `docs/`.
 
 The last semantic gate passed 142 tests, including forty-two properties at
 1,024 cases each, the asserted Rust workflow, Clippy/formatting and warning-free
