@@ -69,3 +69,7 @@ Setup/assertions are outside measured operations. Custom one-task/one-revision
 and small workloads run, six invalid configurations fail, and scratch cleanup
 is verified. Benchmarks are separate from test counts and latency is not an SLA;
 raw results and environmental limits live in `measurements.md`.
+
+The Rust first-use workflow runs as part of the standard gate, with asserted
+graph/condition/query/retry/backup/reopen outcomes in a fresh temporary directory.
+The minimal crate documentation example is a compiled and executed rustdoc test.

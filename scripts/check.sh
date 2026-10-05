@@ -6,4 +6,5 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+cargo run --quiet --locked -p factlite --example task_workflow
 RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo doc --workspace --no-deps --locked
