@@ -161,7 +161,7 @@ decisions; neither changes the local semantic implementation sequence.
   traces with an independent state oracle: schema, references, uniqueness,
   conditions, retries, historical reads and reopen. Retain shrinking and at
   least 1,024 property cases.
-- [ ] **7.3 Replay profiling.** Measure replay stages, choose one demonstrated
+- [x] **7.3 Replay profiling.** Measure replay stages, choose one demonstrated
   improvement, and verify optimized/reference parity, corruption detection,
   rollback, isolation and recovery. Report observed costs without inventing an
   SLA or adding an unmeasured cache/checkpoint.

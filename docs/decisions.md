@@ -355,3 +355,24 @@ scenario testing. See `testing.md` for the verification policy.
   indexes. Future performance work should target repeated replay with explicit
   immutable-state/checkpoint design, reference parity and forced failure/isolation
   checks. No speculative derived persistent state or format change was introduced.
+
+## Verified evaluated-state reuse (7.3)
+
+- Stage profiling showed duplicate report application costs roughly half of
+  replay wall time in the larger keyed fixtures. Keyed replay already decodes
+  the retained canonical request, evaluates it at the preceding state, and
+  compares its complete generated report with the persisted report.
+- Reuse that evaluated state only after exact report equality and all event-row
+  checks. Evaluation establishes a valid final state and canonical declarations,
+  IDs, events and metadata. Inductively, starting from the empty valid catalog,
+  reapplying the identical report adds no validation evidence. Unkeyed reports
+  retain report application and full state validation.
+- Storage format, short SQL snapshots and failure publication behavior remain
+  unchanged. No mutable cache, checkpoint or projection exists. Retain the old
+  double-reconstruction path in test builds; compare typed mixed prefixes,
+  historical schema/entities/facts and subsequent allocations. Corruption tests
+  modify reports and matching event rows together to verify fail-closed behavior.
+- Fresh before/after workload medians and stage results are in `measurements.md`.
+  This removes demonstrated redundant work without choosing a cache budget or
+  claiming a production latency target. Full-history replay still scales with
+  retained revisions and live state size.

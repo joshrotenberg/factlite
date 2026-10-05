@@ -84,3 +84,12 @@ views; final reopen checks every basis and original retry report. A deterministi
 twenty-command scenario complements 1,024 shrinking traces of up to twelve
 commands. Small bounded traces keep failures reproducible; they do not enumerate
 every possible sequence or replace the separate concurrency/recovery suites.
+
+Evaluated-state reuse is compared with the original double-reconstruction replay
+in 1,024 typed mixed-prefix cases, plus deterministic all-six-type transitions
+and five tampering cases. Checks include future allocation behavior. Tampering
+changes report/event rows together while retaining original canonical evidence.
+The full gate reruns independent stateful, fault, isolation, crash/recovery,
+backup and CLI tests through the optimized public path. A deliberately ignored
+manual stage profile is run separately in release mode; its timings are benchmark
+evidence, not an additional ordinary semantic test or a latency assertion.
