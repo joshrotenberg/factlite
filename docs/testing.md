@@ -73,3 +73,14 @@ raw results and environmental limits live in `measurements.md`.
 The Rust first-use workflow runs as part of the standard gate, with asserted
 graph/condition/query/retry/backup/reopen outcomes in a fresh temporary directory.
 The minimal crate documentation example is a compiled and executed rustdoc test.
+
+Mixed stateful traces use a separate domain oracle (nodes, scalar slots, unique
+owners, reference targets and sets), not the private evaluator. They predict IDs,
+complete reports and sorted event differences before submission. Sixteen command
+kinds combine successful and rejected writes, schema evolution, forward cycles,
+empty allocations, conditions/fences, exact/changed retries, unkeyed no-ops and
+actual handle closure/reopen. Each step checks current and selected historical
+views; final reopen checks every basis and original retry report. A deterministic
+twenty-command scenario complements 1,024 shrinking traces of up to twelve
+commands. Small bounded traces keep failures reproducible; they do not enumerate
+every possible sequence or replace the separate concurrency/recovery suites.

@@ -3,10 +3,10 @@
 Steps 0–6 are complete locally. Typed atomic commits, authoritative replay,
 owned pinned reads, strict interchange, exact retries, historical SQL queries,
 CLI parity, process recovery and standalone backups are implemented and tested.
-The latest gate passed 137 tests, including forty 1,024-case property suites,
+The latest gate passed 139 tests, including forty-one 1,024-case property suites,
 plus the asserted Rust workflow example.
 Workload measurements expose replay costs; no production latency target exists.
-Step 7 continues with mixed stateful testing and measured replay improvement.
+Step 7 continues with measured replay improvement.
 A remote/tarball handoff follows when requested. Reviews
 are self-reviews; remote CI and independent review have not run.
 
@@ -434,6 +434,22 @@ are self-reviews; remote CI and independent review have not run.
 - **Blockers:** None locally; remote and license are still unselected.
 - **What's next:** Combine operations in shrinking stateful traces against an
   independent domain oracle (7.2), then profile replay (7.3).
+
+## 7.2 Combined stateful testing — done
+
+- **Done:** Added an independent domain oracle and a deterministic mixed
+  scenario plus 1,024 shrinking operation traces. Sixteen command kinds mix
+  schema, references/cycles, unique transfer, sets, conditions/fences, failures,
+  exact/changed retries, historical reads and real close/reopen. Expected IDs,
+  complete reports and event history are calculated before submission. All
+  139 tests and full checks passed. Review: `reviews/0029-mixed-stateful-traces.md`.
+- **Decisions:** Use small reproducible traces and a distinct domain model;
+  keep broader typed, concurrent, fault and recovery suites. Each failure is
+  followed by a clean commit under its key to test nonreservation. No production
+  defect emerged from these traces.
+- **Blockers:** None locally.
+- **What's next:** Measure replay stages and implement one justified improvement
+  with optimized/reference parity and the complete recovery/isolation gate (7.3).
 
 ## Environment notes
 

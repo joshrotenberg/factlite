@@ -157,7 +157,7 @@ decisions; neither changes the local semantic implementation sequence.
   workflow covering creation, pinned traversal, conditions, queries, exact
   retries, backup and reopen. Run the example in the check script; fix concrete
   usability issues found by using the public API.
-- [ ] **7.2 Combined stateful testing.** Compare mixed randomized operation
+- [x] **7.2 Combined stateful testing.** Compare mixed randomized operation
   traces with an independent state oracle: schema, references, uniqueness,
   conditions, retries, historical reads and reopen. Retain shrinking and at
   least 1,024 property cases.
