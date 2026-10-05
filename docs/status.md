@@ -1,12 +1,14 @@
 # Work status
 
-Steps 0–6 are complete locally. Typed atomic commits, authoritative replay,
+Steps 0–7 are complete locally. Typed atomic commits, authoritative replay,
 owned pinned reads, strict interchange, exact retries, historical SQL queries,
 CLI parity, process recovery and standalone backups are implemented and tested.
-The latest gate passed 139 tests, including forty-one 1,024-case property suites,
+The latest gate passed 142 tests, including forty-two 1,024-case properties,
 plus the asserted Rust workflow example.
-Workload measurements expose replay costs; no production latency target exists.
-Step 7 continues with measured replay improvement.
+The manual release profiler also passed separately. Verified keyed replay state
+reuse reduced head-query medians 18–53% across the measured workloads; full-log
+costs remain and no production latency target exists. The Rust workflow guide
+and independent mixed stateful traces are complete.
 A remote/tarball handoff follows when requested. Reviews
 are self-reviews; remote CI and independent review have not run.
 
@@ -450,6 +452,27 @@ are self-reviews; remote CI and independent review have not run.
 - **Blockers:** None locally.
 - **What's next:** Measure replay stages and implement one justified improvement
   with optimized/reference parity and the complete recovery/isolation gate (7.3).
+
+## 7.3 Replay profiling and verified state reuse — done
+
+- **Done:** Added release stage profiling and fresh before/after workloads.
+  Keyed replay now reuses its evaluated state after exact full-report equality;
+  event/canonical checks and unkeyed report application remain. Typed randomized
+  parity, future allocation and joint report/event tampering checks passed.
+  The full gate passed 142 tests, including forty-two 1,024-case properties,
+  the Rust walkthrough, and all fault/isolation/recovery/backup/CLI checks. The
+  manual profiler passed separately. Review: `reviews/0030-verified-replay-state-reuse.md`.
+- **Decisions:** Remove demonstrated duplicate work without changing storage or
+  SQL snapshot boundaries. At 1,000 tasks/50 revisions, head-query median changed
+  from 180.394 to 85.531ms; at 100/250, 89.986 to 43.527ms. Keep the original path
+  in test builds. These are warm-container observations, not an SLA; caches and
+  checkpoints still require workload/budget decisions. See `measurements.md`.
+- **Blockers:** None locally. Remote hosting and license remain open; reviews
+  are self-reviews and remote CI has not run.
+- **What's next:** All authorized items are complete locally. Prepare the Git,
+  source, lockfile and review tarball when requested for a remote-connected
+  session. Select remote/license and a production workload before further
+  performance scope or publication.
 
 ## Environment notes
 

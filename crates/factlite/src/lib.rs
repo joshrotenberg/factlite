@@ -46,6 +46,8 @@ mod query;
 mod query_eval;
 mod query_sql;
 #[cfg(test)]
+mod replay_checks;
+#[cfg(test)]
 mod scenarios;
 mod schema;
 mod store;

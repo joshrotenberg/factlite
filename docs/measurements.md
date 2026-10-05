@@ -62,7 +62,7 @@ latency differs, but both runs show the same strong dependence on replayed
 revision count and live state size. Historical revision-1 queries remain bounded
 by that old prefix after head advances.
 
-## Decision
+## Baseline decision (6.4)
 
 Retain the correctness-first replay path and existing indexes for this increment.
 No latency budget, expected production graph/history size, or concurrency target
@@ -85,3 +85,66 @@ snapshots; publish derived state only after successful commits, compare against
 replay, and repeat forced writer/failure/reopen/backup checks. No cache, checkpoint
 or durable projection was added, so no optimized storage path is presented as
 validated. There is no invented performance target to close this item against.
+
+## Replay profiling and evaluated-state reuse (7.3): 2026-10-05
+
+The next bounded improvement removes redundant reconstruction rather than
+introducing derived storage. Previously each keyed record evaluated its retained
+canonical request, checked the complete generated report, discarded the resulting
+state, then reconstructed and validated the same state from the report. Replay
+now retains the evaluated state after exact report equality. All format, identity,
+event-row and canonical-request checks still run; unkeyed records use report
+application. SQL transaction boundaries and the storage format are unchanged.
+
+Run the manual stage harness in release mode, with an absolute output directory
+(Cargo tests run from the crate directory):
+
+```sh
+mkdir -p target/benchmark-files
+FACTLITE_PROFILE_DIRECTORY="$PWD/target/benchmark-files" \
+  cargo test --release --locked -p factlite --lib \
+  log::profile::retained_replay_stage_profile -- --ignored --exact --nocapture
+```
+
+The harness always measures the original double reconstruction, even after the
+optimization. Each node has integer/title/reference facts, references form a
+cycle, and later keyed revisions are metadata-only commits. It warms once and
+takes fifteen samples inside one fixed SQL read snapshot. Setup is excluded.
+It preloads transaction rows, times decode, event checks, evaluation (including
+discarded-state cleanup) and report application separately, and checks revision,
+schema and final counts. Wall time includes assertions and remaining cleanup;
+phase medians need not sum to the wall median. This is stage instrumentation of
+a related fixture, not an exact breakdown of the task-query workload.
+
+[Recorded stages](benchmarks/2026-10-05-replay-stages.jsonl), in milliseconds:
+
+| Nodes / revision | Decode | Events | Request evaluation | Report application | Wall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000 / 50 | 5.298 | 5.172 | 64.032 | 83.710 | 170.244 |
+| 100 / 250 | 1.544 | 8.129 | 29.450 | 40.513 | 83.294 |
+
+The redundant report application is about half the profiled wall time. Fresh
+full workload runs compare pre-optimization `bb1d0a6` with item 7.3 on the same
+workspace overlay, using the runner and fifteen samples described above. The
+benchmark runs were separate from tests and other builds. Raw outputs:
+[before](benchmarks/2026-10-05-workspace-before.jsonl),
+[after](benchmarks/2026-10-05-workspace-after.jsonl).
+
+| Tasks / revision | Read-only open before → after | Head query before → after | Facts before → after | No-op commit before → after |
+| --- | ---: | ---: | ---: | ---: |
+| 10 / 10 | 1.115 → 0.900 | 1.099 → 0.898 | 0.884 → 0.639 | 2.095 → 1.601 |
+| 100 / 50 | 19.605 → 9.981 | 19.701 → 10.238 | 19.341 → 9.648 | 23.232 → 11.601 |
+| 1,000 / 50 | 177.585 → 82.630 | 180.394 → 85.531 | 176.707 → 81.259 | 200.195 → 92.159 |
+| 100 / 250 | 90.072 → 43.169 | 89.986 → 43.527 | 89.998 → 42.782 | 94.076 → 45.914 |
+
+All table times are medians in milliseconds. Head-query medians fell 18–53% in
+these four runs; at 1,000/50 its p95 changed from 182.865 to 86.481ms. These are
+observed warm-container measurements with the same environment limits as the
+baseline, not an SLA. Unkeyed records do not gain this shortcut, and even keyed
+replay still traverses all retained revisions. Immutable caches/checkpoints and
+production workload budgets remain future decisions.
+
+The original replay path remains in test builds for typed randomized parity and
+future-allocation checks. Independent domain traces, corruption, rollback,
+forced writer isolation, abrupt process recovery, backup and CLI checks are the
+semantic gate for this change. See `reviews/0030-verified-replay-state-reuse.md`.

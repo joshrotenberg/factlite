@@ -11,6 +11,10 @@ use crate::{
 };
 use rusqlite::{Connection, Transaction};
 
+#[cfg(test)]
+#[path = "replay_profile.rs"]
+mod profile;
+
 pub(crate) fn persist_report(
     transaction: &Transaction<'_>,
     report: &TxReport,
@@ -54,6 +58,20 @@ pub(crate) fn persist_report(
 }
 
 pub(crate) fn replay(connection: &Connection, basis: &SnapshotId) -> Result<Model> {
+    replay_impl::<true>(connection, basis)
+}
+
+// Retain the pre-optimization path for differential tests. Both paths perform
+// exactly the same format, identity, event and canonical-request checks.
+#[cfg(test)]
+pub(crate) fn replay_reference(connection: &Connection, basis: &SnapshotId) -> Result<Model> {
+    replay_impl::<false>(connection, basis)
+}
+
+fn replay_impl<const REUSE_EVALUATED: bool>(
+    connection: &Connection,
+    basis: &SnapshotId,
+) -> Result<Model> {
     let head = read_head(connection)?;
     if head.store() != basis.store()
         || head.lineage() != basis.lineage()
@@ -96,11 +114,11 @@ pub(crate) fn replay(connection: &Connection, basis: &SnapshotId) -> Result<Mode
             return Err(corrupt("transaction row revision differs from report"));
         }
         check_events(connection, &revision, &report)?;
-        match (key, canonical_version, canonical_request) {
-            (None, None, None) => {}
+        model = match (key, canonical_version, canonical_request) {
+            (None, None, None) => model.apply_report(&report)?,
             (Some(_), Some(version), Some(bytes)) => {
                 let request = crate::canonical_decode::decode_request(version, &bytes)?;
-                let (_, expected) = model.evaluate(&request).map_err(|error| {
+                let (evaluated, expected) = model.evaluate(&request).map_err(|error| {
                     corrupt(format!(
                         "retained retry request cannot produce its report: {error}"
                     ))
@@ -108,10 +126,19 @@ pub(crate) fn replay(connection: &Connection, basis: &SnapshotId) -> Result<Mode
                 if expected != report {
                     return Err(corrupt("retained retry request and report disagree"));
                 }
+                // Evaluation has validated the batch and produced canonical
+                // declarations, allocations and effective differences. Exact
+                // report equality proves this is the same retained transition;
+                // reconstructing/validating it again adds no evidence.
+                if REUSE_EVALUATED {
+                    evaluated
+                } else {
+                    drop(evaluated);
+                    model.apply_report(&report)?
+                }
             }
             _ => return Err(corrupt("incomplete retained retry evidence")),
-        }
-        model = model.apply_report(&report)?;
+        };
     }
     if &model.catalog.snapshot != basis {
         return Err(corrupt("retained log does not reach requested revision"));
