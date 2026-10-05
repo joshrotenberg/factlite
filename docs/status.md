@@ -9,7 +9,8 @@ The manual release profiler also passed separately. Verified keyed replay state
 reuse reduced head-query medians 18–53% across the measured workloads; full-log
 costs remain and no production latency target exists. The Rust workflow guide
 and independent mixed stateful traces are complete.
-A remote/tarball handoff follows when requested. Reviews
+The handoff archive has been restored and verified; remote publication is next.
+Reviews
 are self-reviews; remote CI and independent review have not run.
 
 ## 0.1 Inspect and initialize — done
@@ -473,6 +474,23 @@ are self-reviews; remote CI and independent review have not run.
   source, lockfile and review tarball when requested for a remote-connected
   session. Select remote/license and a production workload before further
   performance scope or publication.
+
+## 8.1 Prepare and verify handoff — done
+
+- **Done:** Added `docs/handoff.md` with restore, verification, remote publishing
+  and resume instructions. Exported a clean checkout from a complete Git bundle,
+  retaining all branch names and reachable history. Independently restored it
+  and compared commit/tree, refs, commit count and every tracked file. Git
+  integrity, formatting, locked workspace metadata, the Rust workflow and CLI
+  version all passed in the restored checkout. Review: `reviews/0031-handoff-preparation.md`.
+- **Decisions:** Include `.git`, source, lockfile, guides, reviews and benchmark
+  evidence. Exclude build outputs, toolchains, databases, credentials and machine
+  Git configuration. Deliver a separate manifest and SHA-256 checksum; regenerate
+  the archive for the exact final published main commit.
+- **Blockers:** None for packaging. GitHub CLI authentication works for
+  `joshrotenberg`; publication and remote verification remain item 8.2.
+- **What's next:** Publish to the selected remote and compare all branch refs
+  plus a fresh clone before declaring the remote handoff complete.
 
 ## Environment notes
 
