@@ -6,13 +6,15 @@ use crate::{
 use proptest::prelude::*;
 use rusqlite::Connection;
 
-const TYPES: [ValueType; 6] = [
+const TYPES: [ValueType; 8] = [
     ValueType::Bool,
     ValueType::I64,
     ValueType::F64,
     ValueType::String,
     ValueType::Bytes,
     ValueType::Ref,
+    ValueType::Keyword,
+    ValueType::Inst,
 ];
 
 fn attribute(index: usize, cardinality: Cardinality) -> AttrName {
@@ -31,11 +33,18 @@ fn value(index: usize, number: u8, entities: &[EntityId]) -> Value {
         2 => Value::f64(number as f64 / 2.0 - 0.5).unwrap(),
         3 => Value::String(format!("v\0{number}")),
         4 => Value::Bytes(vec![number as u8; number as usize]),
-        _ => Value::Ref(entities[number as usize % entities.len()].clone()),
+        5 => Value::Ref(entities[number as usize % entities.len()].clone()),
+        6 => Value::keyword(if number % 2 == 0 {
+            format!("k{number}")
+        } else {
+            format!("ns/k{number}")
+        })
+        .unwrap(),
+        _ => Value::Inst((number - 2) * 86_400_000),
     }
 }
 
-/// Creates both cardinalities for all six types, plus four entities.
+/// Creates both cardinalities for all eight types, plus four entities.
 fn seed(store: &Store) -> Vec<EntityId> {
     let mut tx = Tx::builder();
     for (index, ty) in TYPES.into_iter().enumerate() {
@@ -110,7 +119,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
     #[test]
     fn indexed_state_equals_replay_at_every_revision_and_after_reopen(
-        steps in proptest::collection::vec((0_usize..6, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..24),
+        steps in proptest::collection::vec((0_usize..8, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..24),
     ) {
         let (_directory, path, head) = run(&steps, 3);
         let store = Store::open(&path).unwrap();
@@ -174,7 +183,7 @@ fn downgrade_to_v1(path: &std::path::Path) {
 
 #[test]
 fn format_one_upgrades_on_writable_open_and_preserves_every_view() {
-    let steps: Vec<Step> = (0..6)
+    let steps: Vec<Step> = (0..8)
         .flat_map(|ty| {
             [
                 (ty, false, 0, 1, true),
@@ -201,7 +210,7 @@ fn format_one_upgrades_on_writable_open_and_preserves_every_view() {
         let version: i32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         assert_parity(&connection, &head);
     }
     assert_eq!(
@@ -286,7 +295,7 @@ fn downgrade_to_v2(path: &std::path::Path) {
 
 #[test]
 fn format_two_gains_the_attribute_value_index_on_writable_open() {
-    let steps: Vec<Step> = (0..6).map(|ty| (ty, true, 1, 2, true)).collect();
+    let steps: Vec<Step> = (0..8).map(|ty| (ty, true, 1, 2, true)).collect();
     let (_directory, path, head) = run(&steps, 1);
     let before = Db::open_read_only_at(&path, &head)
         .unwrap()
@@ -310,7 +319,7 @@ fn format_two_gains_the_attribute_value_index_on_writable_open() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, indexes), (3, 1));
+        assert_eq!((version, indexes), (4, 1));
         assert_parity(&connection, &head);
     }
     assert_eq!(
@@ -439,7 +448,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
     #[test]
     fn sql_reads_equal_replayed_state_at_every_revision(
-        steps in proptest::collection::vec((0_usize..6, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..18),
+        steps in proptest::collection::vec((0_usize..8, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..18),
     ) {
         let (_directory, path, head) = run(&steps, 2);
         let store = Store::open(&path).unwrap();
@@ -581,7 +590,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
     #[test]
     fn interval_history_equals_log_history(
-        steps in proptest::collection::vec((0_usize..6, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..14),
+        steps in proptest::collection::vec((0_usize..8, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..14),
     ) {
         use crate::FactFilter;
         let (_directory, path, head) = run(&steps, 2);
@@ -628,4 +637,116 @@ proptest! {
             }
         }
     }
+}
+
+/// Rebuilds both fact tables with format 3's type-tag checks (0..=5).
+fn downgrade_to_v3(path: &std::path::Path) {
+    let connection = Connection::open(path).unwrap();
+    let old = |sql: String| sql.replace("BETWEEN 0 AND 7", "BETWEEN 0 AND 5");
+    let fact_events: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE name='fact_events'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    connection
+        .execute_batch(&format!(
+            "{};
+INSERT INTO fact_events_v3 SELECT * FROM fact_events;
+DROP TABLE fact_events;
+ALTER TABLE fact_events_v3 RENAME TO fact_events;
+{}
+INSERT INTO datoms_v3 SELECT * FROM datoms;
+DROP TABLE datoms;
+ALTER TABLE datoms_v3 RENAME TO datoms;
+{}
+{}
+UPDATE store_info SET format=3; PRAGMA user_version=3;",
+            old(fact_events).replacen("fact_events", "fact_events_v3", 1),
+            old(index::datoms_table("datoms_v3")),
+            index::OPEN_DDL,
+            index::AVET_DDL,
+        ))
+        .unwrap();
+    // The old checks really reject the new tags.
+    assert!(
+        connection
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='fact_events'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap()
+            .contains("BETWEEN 0 AND 5")
+    );
+}
+
+#[test]
+fn format_three_rebuilds_fact_tables_and_then_accepts_keywords_and_insts() {
+    let steps: Vec<Step> = (0..6).map(|ty| (ty, true, 1, 2, true)).collect();
+    let (_directory, path, head) = run(&steps, 1);
+    let before = Db::open_read_only_at(&path, &head)
+        .unwrap()
+        .history(Default::default(), Revision::ZERO)
+        .unwrap();
+    downgrade_to_v3(&path);
+    assert_eq!(
+        Db::open_read_only(&path).err().unwrap().code(),
+        ErrorCode::UnsupportedFormat
+    );
+    let store = Store::open(&path).unwrap();
+    {
+        let connection = store.connection().unwrap();
+        let version: i32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+        assert_parity(&connection, &head);
+    }
+    assert_eq!(
+        store
+            .db_at(&head)
+            .unwrap()
+            .history(Default::default(), Revision::ZERO)
+            .unwrap(),
+        before
+    );
+    let tx = Tx::builder()
+        .define_attribute(
+            AttributeDefinition::new(
+                "v/k".parse().unwrap(),
+                ValueType::Keyword,
+                Cardinality::One,
+                Uniqueness::None,
+            )
+            .unwrap(),
+        )
+        .define_attribute(
+            AttributeDefinition::new(
+                "v/at".parse().unwrap(),
+                ValueType::Inst,
+                Cardinality::One,
+                Uniqueness::None,
+            )
+            .unwrap(),
+        )
+        .new_entity(TempId::new("x").unwrap())
+        .assert(
+            TempId::new("x").unwrap(),
+            "v/k".parse().unwrap(),
+            Value::keyword("status/done").unwrap(),
+        )
+        .assert(
+            TempId::new("x").unwrap(),
+            "v/at".parse().unwrap(),
+            Value::Inst(1_730_851_200_000),
+        )
+        .build()
+        .unwrap();
+    let report = store.commit(tx).unwrap();
+    assert_eq!(report.effective_delta.len(), 2);
+    drop(store);
+    let reopened = Store::open(&path).unwrap();
+    assert_parity(&reopened.connection().unwrap(), &report.after);
 }

@@ -36,25 +36,11 @@ fn term_json(term: &Term) -> Json {
     }
 }
 fn ty(value: Json) -> Result<ValueType> {
-    match text(value, "inputs")?.as_str() {
-        "bool" => Ok(ValueType::Bool),
-        "i64" => Ok(ValueType::I64),
-        "f64" => Ok(ValueType::F64),
-        "string" => Ok(ValueType::String),
-        "bytes" => Ok(ValueType::Bytes),
-        "ref" => Ok(ValueType::Ref),
-        _ => Err(Error::invalid("inputs", "unknown input type")),
-    }
+    super::type_from_name(&text(value, "inputs")?)
+        .ok_or_else(|| Error::invalid("inputs", "unknown input type"))
 }
 fn ty_json(ty: ValueType) -> Json {
-    json!(match ty {
-        ValueType::Bool => "bool",
-        ValueType::I64 => "i64",
-        ValueType::F64 => "f64",
-        ValueType::String => "string",
-        ValueType::Bytes => "bytes",
-        ValueType::Ref => "ref",
-    })
+    json!(super::type_name(ty))
 }
 fn comparison(value: Json) -> Result<Comparison> {
     match text(value, "op")?.as_str() {

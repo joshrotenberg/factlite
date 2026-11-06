@@ -71,4 +71,4 @@ pub use query::{
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
 pub use store::{Store, StoreOptions};
 pub use tx::{Change, EntityTerm, Expectation, Operation, Tx, TxBuilder, ValueTerm};
-pub use value::{FiniteF64, Value, ValueType};
+pub use value::{FiniteF64, Keyword, Value, ValueType};

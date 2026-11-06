@@ -16,21 +16,26 @@ use crate::{
 };
 
 /// One interval per effective assertion: visible at R when
-/// `asserted <= R` and the fact is not retracted at or before R.
-pub(crate) const DDL: &str = "
-CREATE TABLE datoms (
+/// `asserted <= R` and the fact is not retracted at or before R. Type tags
+/// 0..=7 are bool, i64, f64, string, bytes, ref, keyword and inst.
+pub(crate) fn datoms_table(name: &str) -> String {
+    format!(
+        "CREATE TABLE {name} (
  entity TEXT NOT NULL REFERENCES entity_events(entity),
  attribute TEXT NOT NULL REFERENCES schema_events(attribute),
- type_tag INTEGER NOT NULL CHECK(type_tag BETWEEN 0 AND 5),
+ type_tag INTEGER NOT NULL CHECK(type_tag BETWEEN 0 AND 7),
  value BLOB NOT NULL,
  asserted BLOB NOT NULL REFERENCES transactions(revision)
   CHECK(typeof(asserted)='blob' AND length(asserted)=8),
  retracted BLOB REFERENCES transactions(revision)
   CHECK(retracted IS NULL OR (typeof(retracted)='blob' AND length(retracted)=8 AND retracted>asserted)),
  PRIMARY KEY(entity,attribute,type_tag,value,asserted)
-) WITHOUT ROWID;
-CREATE UNIQUE INDEX datoms_open ON datoms(entity,attribute,type_tag,value) WHERE retracted IS NULL;
-CREATE INDEX datoms_avet ON datoms(attribute,value,entity,asserted,retracted);";
+) WITHOUT ROWID;"
+    )
+}
+
+/// The partial unique index allows one open interval per fact.
+pub(crate) const OPEN_DDL: &str = "CREATE UNIQUE INDEX datoms_open ON datoms(entity,attribute,type_tag,value) WHERE retracted IS NULL;";
 
 /// Format 3 adds the attribute/value index, which serves revision-bounded
 /// reads by attribute or by attribute and value without the primary key's
@@ -38,6 +43,11 @@ CREATE INDEX datoms_avet ON datoms(attribute,value,entity,asserted,retracted);";
 /// not part of it.
 pub(crate) const AVET_DDL: &str =
     "CREATE INDEX datoms_avet ON datoms(attribute,value,entity,asserted,retracted);";
+
+/// The complete current datom table and indexes.
+pub(crate) fn ddl() -> String {
+    format!("{}\n{OPEN_DDL}\n{AVET_DDL}", datoms_table("datoms"))
+}
 
 /// Indexes on `datoms` that open requires, in name order.
 pub(crate) const INDEXES: [&str; 2] = ["datoms_avet", "datoms_open"];

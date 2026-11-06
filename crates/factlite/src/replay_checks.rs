@@ -26,6 +26,8 @@ fn scalar(index: usize, number: i64) -> Value {
         2 => Value::f64(number as f64 / 2.0).unwrap(),
         3 => Value::String(format!("雪\0{number}")),
         4 => Value::Bytes(number.to_be_bytes().to_vec()),
+        6 => Value::keyword(format!("k/v{}", number.unsigned_abs())).unwrap(),
+        7 => Value::Inst(number.wrapping_mul(1000)),
         _ => panic!("invalid scalar index"),
     }
 }
@@ -45,6 +47,8 @@ fn create(store: &Store, keyed: bool) -> crate::TxReport {
         ValueType::String,
         ValueType::Bytes,
         ValueType::Ref,
+        ValueType::Keyword,
+        ValueType::Inst,
     ]
     .into_iter()
     .enumerate()
@@ -99,8 +103,8 @@ fn trace(operations: &[(usize, i64, bool)], seed_keyed: bool) {
         seed.tempids[&label("new")].clone(),
     ];
     let target = seed.tempids[&label("target")].clone();
-    let mut owners = [0; 6];
-    let mut values: Vec<_> = (0..6).map(|index| value(index, 0, &target)).collect();
+    let mut owners = [0; 8];
+    let mut values: Vec<_> = (0..8).map(|index| value(index, 0, &target)).collect();
     let mut reports = vec![seed];
     for (step, (index, number, keyed)) in operations.iter().enumerate() {
         let old = owners[*index];
@@ -153,7 +157,7 @@ fn trace(operations: &[(usize, i64, bool)], seed_keyed: bool) {
 
 #[test]
 fn both_replayers_preserve_every_type_across_keyed_and_unkeyed_transitions() {
-    let operations: Vec<_> = (0..6)
+    let operations: Vec<_> = (0..8)
         .flat_map(|ty| [(ty, -1, true), (ty, 0, false), (ty, i64::MAX, true)])
         .collect();
     trace(&operations, true);
@@ -164,7 +168,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
     #[test]
     fn optimized_replay_equals_original_for_typed_mixed_prefixes(
-        operations in proptest::collection::vec((0_usize..6,-4_i64..5,any::<bool>()),0..8),
+        operations in proptest::collection::vec((0_usize..8,-4_i64..5,any::<bool>()),0..8),
         seed_keyed in any::<bool>(),
     ) {trace(&operations,seed_keyed);}
 }

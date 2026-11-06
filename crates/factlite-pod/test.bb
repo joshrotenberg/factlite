@@ -157,7 +157,28 @@
 (check "double filter matches double" (= [[x :t/double 1.0]] (f/facts conn {:attr :t/double :value 1.0})))
 (check "type mismatch" (= "TypeMismatch" (:code (failure #(f/facts conn {:attr :t/double :value 1})))))
 
-(doseq [[label value] [["keyword" :done] ["nil" nil] ["BigInt" 1N] ["ratio" 1/3] ["BigDecimal" 1.5M]
+(f/transact conn {:schema [{:name :t/kw :type :keyword :cardinality :many :unique :none}
+                           {:name :t/at :type :inst :cardinality :many :unique :none}]
+                  :changes [[:assert x :t/kw :status/done] [:assert x :t/kw :todo]
+                            [:assert x :t/at #inst "2026-11-05T12:00:00.000-00:00"]
+                            [:assert x :t/at #inst "1969-12-31T23:59:59.999-00:00"]]})
+(def typed-new (f/pull conn x [:t/kw :t/at]))
+(check "keywords round trip" (= [:status/done :todo] (:t/kw typed-new)))
+(check "insts round trip" (= [#inst "1969-12-31T23:59:59.999-00:00" #inst "2026-11-05T12:00:00.000-00:00"] (:t/at typed-new)))
+(check "insts are dates" (every? #(instance? java.util.Date %) (:t/at typed-new)))
+(check "keyword constant in query" (= [[x]] (:rows (f/q conn '{:match [[?e :t/kw :status/done]] :select [?e]}))))
+(check "inst range with an input"
+       (= [[#inst "2026-11-05T12:00:00.000-00:00"]]
+          (:rows (f/q conn '{:inputs {:since :inst} :match [[?e :t/at ?at]] :where [(>= ?at $since)] :select [?at]}
+                      {:since #inst "2000-01-01T00:00:00.000-00:00"}))))
+(check "inst min and max" (= [[#inst "1969-12-31T23:59:59.999-00:00" #inst "2026-11-05T12:00:00.000-00:00"]]
+                             (:rows (f/q conn '{:match [[?e :t/at ?at]] :select [(min ?at) (max ?at)]}))))
+(check "keyword is not a string" (= "TypeMismatch" (:code (failure #(f/transact conn {:changes [[:assert task :task/status :done]]})))))
+(check "inst is not a long" (= "TypeMismatch" (:code (failure #(f/transact conn {:changes [[:assert task :task/priority #inst "2026-01-01"]]})))))
+(check "invalid keyword text" (= "InvalidRequest" (:code (failure #(f/transact conn {:changes [[:assert x :t/kw (keyword "a b")]]})))))
+(check "keyword schema type" (= :keyword (:type (first (filter #(= :t/kw (:name %)) (f/schema conn))))))
+
+(doseq [[label value] [["nil" nil] ["BigInt" 1N] ["ratio" 1/3] ["BigDecimal" 1.5M]
                        ["NaN" Double/NaN] ["infinity" ##Inf] ["vector" ["a"]] ["set" #{"a"}]
                        ["char" \a] ["uuid" (random-uuid)]]]
   (check (str "rejects " label)

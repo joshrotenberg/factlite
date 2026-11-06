@@ -30,13 +30,15 @@ fn definition(attribute: &str, ty: ValueType) -> AttributeDefinition {
     )
     .unwrap()
 }
-const TYPES: [ValueType; 6] = [
+const TYPES: [ValueType; 8] = [
     ValueType::Bool,
     ValueType::I64,
     ValueType::F64,
     ValueType::String,
     ValueType::Bytes,
     ValueType::Ref,
+    ValueType::Keyword,
+    ValueType::Inst,
 ];
 fn schema() -> &'static Schema {
     static SCHEMA: OnceLock<Schema> = OnceLock::new();
@@ -284,7 +286,7 @@ fn unbound_comparisons_duplicate_columns_and_unselected_order_fail_even_with_zer
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
     #[test]
-    fn shared_variable_types_agree_iff_historical_domains_agree(a in 0_usize..6,b in 0_usize..6,reverse in any::<bool>()) {
+    fn shared_variable_types_agree_iff_historical_domains_agree(a in 0_usize..8,b in 0_usize..8,reverse in any::<bool>()) {
         let mut patterns = vec![pattern(&format!("x/type{a}"),var("value")),pattern(&format!("x/type{b}"),var("value"))];
         if reverse { patterns.reverse(); }
         let q = Query { patterns,select: vec![name("e"),name("value")],..Query::default() };
@@ -293,7 +295,7 @@ proptest! {
         if a != b { prop_assert_eq!(result.unwrap_err().code(),ErrorCode::TypeMismatch); }
     }
     #[test]
-    fn typed_ranges_require_equal_domains_while_equality_preserves_distinctions(a in 0_usize..6,b in 0_usize..6,operator in 0_usize..6) {
+    fn typed_ranges_require_equal_domains_while_equality_preserves_distinctions(a in 0_usize..8,b in 0_usize..8,operator in 0_usize..6) {
         let comparison = [Comparison::Eq,Comparison::Ne,Comparison::Lt,Comparison::Le,Comparison::Gt,Comparison::Ge][operator];
         let q = Query { patterns: vec![pattern(&format!("x/type{a}"),var("a")),pattern(&format!("x/type{b}"),var("b"))],predicates: vec![Predicate { left: var("a"),comparison,right: var("b") }],..Query::default() };
         let result = q.validate(schema(),&Params::new());

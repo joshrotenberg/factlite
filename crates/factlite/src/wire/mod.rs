@@ -65,6 +65,43 @@ impl Object {
         Ok(())
     }
 }
+/// The wire name of each value type.
+pub(crate) fn type_name(ty: ValueType) -> &'static str {
+    match ty {
+        ValueType::Bool => "bool",
+        ValueType::I64 => "i64",
+        ValueType::F64 => "f64",
+        ValueType::String => "string",
+        ValueType::Bytes => "bytes",
+        ValueType::Ref => "ref",
+        ValueType::Keyword => "keyword",
+        ValueType::Inst => "inst",
+    }
+}
+pub(crate) fn type_from_name(name: &str) -> Option<ValueType> {
+    [
+        ValueType::Bool,
+        ValueType::I64,
+        ValueType::F64,
+        ValueType::String,
+        ValueType::Bytes,
+        ValueType::Ref,
+        ValueType::Keyword,
+        ValueType::Inst,
+    ]
+    .into_iter()
+    .find(|ty| type_name(*ty) == name)
+}
+fn signed_decimal(value: Json, field: &'static str) -> Result<i64> {
+    let decimal = text(value, field)?;
+    let digits = decimal.strip_prefix(['+', '-']).unwrap_or(&decimal);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(Error::invalid(field, "expected signed decimal digits"));
+    }
+    decimal
+        .parse()
+        .map_err(|_| Error::invalid(field, "signed integer overflow"))
+}
 fn text(value: Json, field: &'static str) -> Result<String> {
     match value {
         Json::String(value) => Ok(value),
@@ -149,18 +186,9 @@ fn parse_value(value: Json, allow_temp: bool) -> Result<ValueTerm> {
                 .as_bool()
                 .ok_or_else(|| Error::invalid("bool", "expected a boolean"))?,
         ),
-        "i64" => {
-            let decimal = text(value, "i64")?;
-            let digits = decimal.strip_prefix(['+', '-']).unwrap_or(&decimal);
-            if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Err(Error::invalid("i64", "expected signed decimal digits"));
-            }
-            Value::I64(
-                decimal
-                    .parse()
-                    .map_err(|_| Error::invalid("i64", "signed integer overflow"))?,
-            )
-        }
+        "i64" => Value::I64(signed_decimal(value, "i64")?),
+        "inst" => Value::Inst(signed_decimal(value, "inst")?),
+        "keyword" => Value::Keyword(crate::Keyword::new(text(value, "keyword")?)?),
         "f64" => Value::f64(
             text(value, "f64")?
                 .parse()
@@ -211,6 +239,8 @@ pub(crate) fn value_json(value: &Value) -> Json {
             json!({"bytes":base64::engine::general_purpose::STANDARD.encode(value)})
         }
         Value::Ref(id) => json!({"ref":{"id":id.to_string()}}),
+        Value::Keyword(keyword) => json!({"keyword":keyword.as_str()}),
+        Value::Inst(millis) => json!({"inst":millis.to_string()}),
     }
 }
 fn value_term_json(value: &ValueTerm) -> Json {
@@ -231,15 +261,8 @@ pub fn encode_value(value: &Value) -> String {
 fn parse_definition(value: Json) -> Result<AttributeDefinition> {
     let mut object = Object::new(value, "schema")?;
     let name = text(object.required("name")?, "name")?.parse()?;
-    let ty = match text(object.required("type")?, "type")?.as_str() {
-        "bool" => ValueType::Bool,
-        "i64" => ValueType::I64,
-        "f64" => ValueType::F64,
-        "string" => ValueType::String,
-        "bytes" => ValueType::Bytes,
-        "ref" => ValueType::Ref,
-        _ => return Err(Error::invalid("type", "unknown value type")),
-    };
+    let ty = type_from_name(&text(object.required("type")?, "type")?)
+        .ok_or_else(|| Error::invalid("type", "unknown value type"))?;
     let cardinality = match text(object.required("cardinality")?, "cardinality")?.as_str() {
         "one" => Cardinality::One,
         "many" => Cardinality::Many,
@@ -254,14 +277,7 @@ fn parse_definition(value: Json) -> Result<AttributeDefinition> {
     AttributeDefinition::new(name, ty, cardinality, unique)
 }
 pub(crate) fn definition_json(definition: &AttributeDefinition) -> Json {
-    let ty = match definition.value_type() {
-        ValueType::Bool => "bool",
-        ValueType::I64 => "i64",
-        ValueType::F64 => "f64",
-        ValueType::String => "string",
-        ValueType::Bytes => "bytes",
-        ValueType::Ref => "ref",
-    };
+    let ty = type_name(definition.value_type());
     json!({"name":definition.name().as_str(),"type":ty,"cardinality":match definition.cardinality() { Cardinality::One => "one", Cardinality::Many => "many" },"unique":match definition.uniqueness() { Uniqueness::None => "none", Uniqueness::UniqueOne => "unique_one" }})
 }
 
