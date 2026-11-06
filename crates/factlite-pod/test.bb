@@ -173,6 +173,20 @@
 (check "bad arity" (= "InvalidRequest" (:code (failure #(f/head conn conn)))))
 (check "unknown opts key" (= "InvalidRequest" (:code (failure #(f/schema conn {:as-of 1})))))
 
+(def reader (f/open path {:read-only true :busy-timeout-ms 500}))
+(check "read-only head follows writer" (= (f/head conn) (f/head reader)))
+(check "read-only history" (= "todo" (:task/status (f/pull reader task [:task/status] {:at (:after a)}))))
+(check "read-only refuses commits" (= "InvalidRequest" (:code (failure #(f/transact reader {})))))
+(let [later (f/transact conn {:metadata {:after-reader true}})]
+  (check "read-only sees later commits" (= (:after later) (f/head reader))))
+(f/close reader)
+(let [instant (f/open path {:busy-timeout-ms 0})]
+  (check "busy timeout zero" (= (f/head conn) (f/head instant)))
+  (f/close instant))
+(check "rejects negative timeout" (= "InvalidRequest" (:code (failure #(f/open path {:busy-timeout-ms -1})))))
+(check "rejects unknown open option" (= "InvalidRequest" (:code (failure #(f/open path {:readonly true})))))
+(check "read-only open of missing file fails" (= "Storage" (:code (failure #(f/open (str path ".missing") {:read-only true})))))
+
 (f/close conn)
 (check "closed connection" (re-find #"closed" (::message (failure #(f/head conn)))))
 (def reopened (f/open path))

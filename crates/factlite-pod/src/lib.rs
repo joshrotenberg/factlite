@@ -15,7 +15,7 @@ mod convert;
 use babashka_pod::transit::Value as Clj;
 use babashka_pod::{Handle, Handles, Namespace, PodError};
 use convert::{Fields, Result, invalid, library_error};
-use factlite::{Db, Revision, SnapshotId, Store};
+use factlite::{Db, Revision, SnapshotId, Store, StoreOptions};
 
 /// The namespace this pod defines.
 pub const NAMESPACE: &str = "pod.joshrotenberg.factlite";
@@ -55,26 +55,77 @@ fn handle_out(handle: &Handle) -> Clj {
     ])
 }
 
-/// Clones the store out of the registry, so its lock is held only briefly.
-/// `Store` serializes its own connection use.
-fn store(stores: &Handles<Store>, value: &Clj) -> Result<Store> {
-    stores.with(&handle_in(value)?, |store| Ok(store.clone()))
+/// A writable store, or a read-only view whose reads move to the latest head
+/// explicitly on each call, over its own read-only connection.
+#[derive(Clone)]
+enum Conn {
+    Writer(Store),
+    Reader(Db),
+}
+
+impl Conn {
+    fn latest(&self) -> Result<Db> {
+        match self {
+            Conn::Writer(store) => store.db(),
+            Conn::Reader(db) => db.at_head(),
+        }
+        .map_err(library_error)
+    }
+
+    fn at(&self, snapshot: &SnapshotId) -> Result<Db> {
+        match self {
+            Conn::Writer(store) => store.db_at(snapshot),
+            Conn::Reader(db) => db.at(snapshot),
+        }
+        .map_err(library_error)
+    }
+}
+
+/// Clones the connection out of the registry, so its lock is held only
+/// briefly. `Store` and `Db` serialize their own connection use.
+fn conn(conns: &Handles<Conn>, value: &Clj) -> Result<Conn> {
+    conns.with(&handle_in(value)?, |conn| Ok(conn.clone()))
 }
 
 /// The view for a read: head, a full snapshot map, or a revision number
 /// resolved against this store's identity and lineage. Every form is
-/// validated by `Store::db_at`; a future revision fails `InvalidSnapshot`.
-fn view(store: &Store, at: Option<Clj>) -> Result<Db> {
+/// validated like `Store::db_at`; a future revision fails `InvalidSnapshot`.
+fn view(conn: &Conn, at: Option<Clj>) -> Result<Db> {
     let snapshot = match at {
-        None | Some(Clj::Nil) => return store.db().map_err(library_error),
+        None | Some(Clj::Nil) => return conn.latest(),
         Some(snapshot @ Clj::Map(_)) => convert::snapshot_in(&snapshot)?,
         Some(revision) => {
-            let head = store.head().map_err(library_error)?;
+            let head = conn.latest()?.snapshot().clone();
             let revision: Revision = convert::revision_in(&revision, "at")?;
             SnapshotId::new(head.store().clone(), head.lineage().clone(), revision)
         }
     };
-    store.db_at(&snapshot).map_err(library_error)
+    conn.at(&snapshot)
+}
+
+fn open_options(value: Option<&Clj>) -> Result<(bool, StoreOptions)> {
+    let mut fields = Fields::optional(value, "opts")?;
+    let read_only = match fields.take("read-only") {
+        None | Some(Clj::Bool(false)) => false,
+        Some(Clj::Bool(true)) => true,
+        Some(_) => return Err(invalid("read-only", ":read-only must be a boolean")),
+    };
+    let mut options = StoreOptions::new();
+    if let Some(timeout) = fields.take("busy-timeout-ms") {
+        let Clj::Int(millis) = timeout else {
+            return Err(invalid(
+                "busy-timeout-ms",
+                ":busy-timeout-ms must be a long",
+            ));
+        };
+        let millis = u64::try_from(millis)
+            .map_err(|_| invalid("busy-timeout-ms", ":busy-timeout-ms must not be negative"))?;
+        options = options
+            .with_busy_timeout(std::time::Duration::from_millis(millis))
+            .map_err(library_error)?;
+    }
+    fields.finish()?;
+    Ok((read_only, options))
 }
 
 fn after(fields: &mut Fields) -> Result<Revision> {
@@ -85,15 +136,18 @@ fn after(fields: &mut Fields) -> Result<Revision> {
 
 type Var = Box<dyn Fn(Vec<Clj>) -> std::result::Result<Clj, PodError> + Send + Sync>;
 
-fn vars(
-    stores: &Handles<Store>,
-) -> Vec<(&'static str, &'static str, &'static [&'static str], Var)> {
+fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'static str], Var)> {
     let s = stores.clone();
     let open: Var = Box::new(move |args| {
-        arity(&args, "open", 1, 1, "[path]")?;
+        arity(&args, "open", 1, 2, "[path] or [path opts]")?;
         let path = convert::text(&args[0], "path")?;
-        let store = Store::open(&path).map_err(library_error)?;
-        Ok(handle_out(&s.insert(store)))
+        let (read_only, options) = open_options(args.get(1))?;
+        let conn = if read_only {
+            Conn::Reader(Db::open_read_only_with(&path, &options).map_err(library_error)?)
+        } else {
+            Conn::Writer(Store::open_with(&path, &options).map_err(library_error)?)
+        };
+        Ok(handle_out(&s.insert(conn)))
     });
     let s = stores.clone();
     let close: Var = Box::new(move |args| {
@@ -104,13 +158,18 @@ fn vars(
     let s = stores.clone();
     let head: Var = Box::new(move |args| {
         arity(&args, "head", 1, 1, "[conn]")?;
-        let head = store(&s, &args[0])?.head().map_err(library_error)?;
-        Ok(convert::snapshot_out(&head))
+        let head = conn(&s, &args[0])?.latest()?;
+        Ok(convert::snapshot_out(head.snapshot()))
     });
     let s = stores.clone();
     let transact: Var = Box::new(move |args| {
         arity(&args, "transact", 2, 2, "[conn tx]")?;
-        let store = store(&s, &args[0])?;
+        let Conn::Writer(store) = conn(&s, &args[0])? else {
+            return Err(invalid(
+                "connection",
+                "a read-only connection cannot commit",
+            ));
+        };
         let tx = convert::tx_in(&args[1])?;
         let report = store.commit(tx).map_err(library_error)?;
         Ok(convert::report_out(&report))
@@ -118,9 +177,9 @@ fn vars(
     let s = stores.clone();
     let schema: Var = Box::new(move |args| {
         arity(&args, "schema", 1, 2, "[conn] or [conn opts]")?;
-        let store = store(&s, &args[0])?;
+        let conn = conn(&s, &args[0])?;
         let mut opts = Fields::optional(args.get(1), "opts")?;
-        let db = view(&store, opts.take("at"))?;
+        let db = view(&conn, opts.take("at"))?;
         opts.finish()?;
         let schema = db.schema().map_err(library_error)?;
         Ok(Clj::Vector(
@@ -136,7 +195,7 @@ fn vars(
             4,
             "[conn entity attrs] or [conn entity attrs opts]",
         )?;
-        let store = store(&s, &args[0])?;
+        let conn = conn(&s, &args[0])?;
         let id = convert::entity_id(&args[1])?;
         let attrs = match &args[2] {
             Clj::Vector(attrs) | Clj::List(attrs) | Clj::Set(attrs) => attrs
@@ -151,7 +210,7 @@ fn vars(
             }
         };
         let mut opts = Fields::optional(args.get(3), "opts")?;
-        let db = view(&store, opts.take("at"))?;
+        let db = view(&conn, opts.take("at"))?;
         opts.finish()?;
         let entity = db.pull(&id, &attrs).map_err(library_error)?;
         Ok(convert::entity_out(entity.as_ref()))
@@ -165,10 +224,10 @@ fn vars(
             3,
             "[conn], [conn filter] or [conn filter opts]",
         )?;
-        let store = store(&s, &args[0])?;
+        let conn = conn(&s, &args[0])?;
         let filter = convert::filter_in(args.get(1))?;
         let mut opts = Fields::optional(args.get(2), "opts")?;
-        let db = view(&store, opts.take("at"))?;
+        let db = view(&conn, opts.take("at"))?;
         opts.finish()?;
         let facts = db.facts(filter).map_err(library_error)?;
         Ok(Clj::Vector(facts.iter().map(convert::fact_out).collect()))
@@ -182,10 +241,10 @@ fn vars(
             3,
             "[conn], [conn filter] or [conn filter opts]",
         )?;
-        let store = store(&s, &args[0])?;
+        let conn = conn(&s, &args[0])?;
         let filter = convert::filter_in(args.get(1))?;
         let mut opts = Fields::optional(args.get(2), "opts")?;
-        let db = view(&store, opts.take("at"))?;
+        let db = view(&conn, opts.take("at"))?;
         let after = after(&mut opts)?;
         opts.finish()?;
         let events = db.history(filter, after).map_err(library_error)?;
@@ -194,9 +253,9 @@ fn vars(
     let s = stores.clone();
     let transactions: Var = Box::new(move |args| {
         arity(&args, "transactions", 1, 2, "[conn] or [conn opts]")?;
-        let store = store(&s, &args[0])?;
+        let conn = conn(&s, &args[0])?;
         let mut opts = Fields::optional(args.get(1), "opts")?;
-        let db = view(&store, opts.take("at"))?;
+        let db = view(&conn, opts.take("at"))?;
         let after = after(&mut opts)?;
         opts.finish()?;
         let records = db.transactions(after).map_err(library_error)?;
@@ -216,10 +275,10 @@ fn vars(
             4,
             "[conn query], [conn query params] or [conn query params opts]",
         )?;
-        let store = store(&s, &args[0])?;
+        let conn = conn(&s, &args[0])?;
         let (query, params) = convert::query_in(&args[1], args.get(2))?;
         let mut opts = Fields::optional(args.get(3), "opts")?;
-        let db = view(&store, opts.take("at"))?;
+        let db = view(&conn, opts.take("at"))?;
         opts.finish()?;
         let result = db.query(&query, &params).map_err(library_error)?;
         Ok(convert::result_out(&result))
@@ -227,8 +286,10 @@ fn vars(
     vec![
         (
             "open",
-            "Opens or creates a Factlite database file and returns a connection.",
-            &["[path]"],
+            "Opens or creates a Factlite database file and returns a connection. \
+             opts: :read-only true opens an existing file without write access; \
+             :busy-timeout-ms sets the lock wait (default 2000).",
+            &["[path]", "[path opts]"],
             open,
         ),
         (
@@ -297,7 +358,7 @@ fn vars(
 /// Builds the namespace with a fresh connection registry. Connections are
 /// closed when `close` is called or when the pod shuts down.
 pub fn namespace() -> Namespace {
-    let stores: Handles<Store> = Handles::new(KIND);
+    let stores: Handles<Conn> = Handles::new(KIND);
     let mut namespace = Namespace::new(NAMESPACE);
     for (name, doc, arglists, var) in vars(&stores) {
         namespace = namespace

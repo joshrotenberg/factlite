@@ -75,6 +75,46 @@ CREATE TABLE fact_events (
  PRIMARY KEY(revision,ordinal)
 );";
 
+/// Connection settings for [`Store::open_with`] and [`crate::Db::open_read_only_with`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StoreOptions {
+    busy_timeout: Duration,
+}
+
+impl Default for StoreOptions {
+    fn default() -> Self {
+        Self {
+            busy_timeout: Duration::from_secs(2),
+        }
+    }
+}
+
+impl StoreOptions {
+    /// The defaults: a two-second busy timeout.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// How long an operation waits for another connection's lock before failing
+    /// `Busy`. Zero fails at once. SQLite takes whole milliseconds up to
+    /// `i32::MAX`; longer timeouts and sub-millisecond remainders are rejected.
+    pub fn with_busy_timeout(mut self, timeout: Duration) -> Result<Self> {
+        if !timeout.as_nanos().is_multiple_of(1_000_000) || timeout.as_millis() > i32::MAX as u128 {
+            return Err(Error::invalid(
+                "busy_timeout",
+                "busy timeout must be whole milliseconds no greater than i32::MAX",
+            ));
+        }
+        self.busy_timeout = timeout;
+        Ok(self)
+    }
+
+    /// The configured busy timeout.
+    pub fn busy_timeout(&self) -> Duration {
+        self.busy_timeout
+    }
+}
+
 /// Writable durable store. Clones share one connection; other opens use SQLite locking.
 #[derive(Clone)]
 pub struct Store {
@@ -154,6 +194,11 @@ impl Store {
     /// Opens or atomically initializes a file with WAL, FULL sync, and a two-second
     /// busy timeout. Unsupported/non-Factlite files fail before schema changes.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with(path, &StoreOptions::default())
+    }
+
+    /// Like [`Store::open`], with explicit connection settings.
+    pub fn open_with(path: impl AsRef<Path>, options: &StoreOptions) -> Result<Self> {
         let path = path.as_ref();
         if path.as_os_str().is_empty() || path == Path::new(":memory:") {
             return Err(Error::invalid(
@@ -167,7 +212,7 @@ impl Store {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
         )?;
-        connection.busy_timeout(Duration::from_secs(2))?;
+        connection.busy_timeout(options.busy_timeout)?;
         connection.pragma_update(None, "foreign_keys", true)?;
         connection.pragma_update(None, "synchronous", "FULL")?;
         // An existing current-format store is validated in a deferred read
@@ -206,7 +251,7 @@ impl Store {
         })
     }
 
-    pub(crate) fn reader(path: &Path) -> Result<crate::Db> {
+    pub(crate) fn reader(path: &Path, options: &StoreOptions) -> Result<crate::Db> {
         if path.as_os_str().is_empty() || path == Path::new(":memory:") {
             return Err(Error::invalid(
                 "path",
@@ -217,7 +262,7 @@ impl Store {
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
         )?;
-        connection.busy_timeout(Duration::from_secs(2))?;
+        connection.busy_timeout(options.busy_timeout)?;
         connection.pragma_update(None, "foreign_keys", true)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
         validate_existing(&transaction)?;

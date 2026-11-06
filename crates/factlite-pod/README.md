@@ -87,7 +87,7 @@ reject unknown keys.
 
 | Var | Arguments | Returns |
 | --- | --- | --- |
-| `open` | `[path]` | a connection |
+| `open` | `[path]` `[path opts]` | a connection |
 | `close` | `[conn]` | nil |
 | `head` | `[conn]` | the latest snapshot |
 | `transact` | `[conn tx]` | the transaction report |
@@ -97,6 +97,17 @@ reject unknown keys.
 | `history` | `[conn]` `[conn filter]` `[conn filter opts]` | effective fact events |
 | `transactions` | `[conn]` `[conn opts]` | committed reports, including no-change commits |
 | `q` | `[conn query]` `[conn query params]` `[conn query params opts]` | `{:columns [...] :rows [...]}` |
+
+### Connections
+
+`open` creates the file if needed and returns a writable connection. Options:
+
+- `:read-only true` opens an existing file through a read-only SQLite
+  connection. Reads follow the latest head on each call; `transact` fails
+  `InvalidRequest`. Read-only opens of files in an older format fail
+  `UnsupportedFormat` until a writable open has upgraded them.
+- `:busy-timeout-ms n` sets how long operations wait for another process's
+  lock before failing `Busy` (default 2000; 0 fails at once).
 
 ### Transactions
 
@@ -189,5 +200,4 @@ process and keep the connection.
 
 ## Not exposed
 
-Read-only opens, backups, and the CLI's raw wire JSON are not exposed through
-the pod.
+Backups and the CLI's raw wire JSON are not exposed through the pod.

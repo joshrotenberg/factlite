@@ -234,3 +234,19 @@ strict wire decoders.
   translation in Rust, run a babashka script over stdio and socket transports,
   and run several pod processes committing to one file concurrently with no lost
   or merged writes.
+
+## Step 11: Consumer requests
+
+Requests from the clajent kit's pod trials, authorized by the user on
+2026-11-05. Aggregates and new value types were deferred in the original
+design and need a separate decision; they are not in this step.
+
+- [x] **11.1 Open options and read-only pod connections.** A validated
+  busy-timeout option for writable and read-only opens. Explicit refresh of a
+  read-only view to the latest head or a retained snapshot over its own
+  connection. Pod `open` accepts `:read-only` and `:busy-timeout-ms`.
+- [ ] **11.2 Lookup refs for reads.** Resolve an entity by a unique attribute's
+  value at a view's revision, and accept `[attr value]` in pod read positions.
+- [ ] **11.3 Indexed filtered history.** Answer entity- or attribute-filtered
+  history from datom intervals and per-revision events instead of decoding
+  every retained report, with parity against the log path.
