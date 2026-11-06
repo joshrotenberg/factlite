@@ -230,7 +230,9 @@ impl Store {
         // waits for them. Only initialization and the format-1 upgrade write,
         // so only they take the write lock, and they recheck the file once it
         // is held because another process may have changed it meanwhile.
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Deferred)
+            .map_err(|e| Error::storage("open: begin read", e))?;
         match file_kind(&transaction)? {
             FileKind::Current => {
                 validate_current(&transaction)?;
@@ -238,18 +240,21 @@ impl Store {
             }
             FileKind::Empty | FileKind::Older(_) => {
                 transaction.rollback()?;
-                let transaction =
-                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let transaction = connection
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(|e| Error::storage("open: begin write", e))?;
                 match file_kind(&transaction)? {
                     FileKind::Empty => initialize(&transaction)?,
                     FileKind::Older(version) => upgrade(&transaction, version)?,
                     FileKind::Current => {}
                 }
                 validate_current(&transaction)?;
-                transaction.commit()?;
+                transaction
+                    .commit()
+                    .map_err(|e| Error::storage("open: commit initialization", e))?;
             }
         }
-        connection.pragma_update(None, "journal_mode", "WAL")?;
+        enable_wal(&connection, options.busy_timeout)?;
         let mode: String = connection.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if mode != "wal" {
             return Err(corrupt("WAL journal mode could not be enabled"));
@@ -296,6 +301,29 @@ impl Store {
         self.connection
             .lock()
             .map_err(|_| corrupt("store connection lock poisoned"))
+    }
+}
+
+// Switching a rollback-journal file to WAL needs exclusive access. When other
+// connections are opening the same new file at once, SQLite can return
+// SQLITE_BUSY for this step without invoking the busy handler, so retry it
+// within the configured busy timeout. Once any connection has switched, the
+// pragma is a no-op that reports "wal".
+fn enable_wal(connection: &Connection, timeout: Duration) -> Result<()> {
+    let started = std::time::Instant::now();
+    let mut pause = Duration::from_millis(1);
+    loop {
+        match connection.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => return Ok(()),
+            Err(source) => {
+                let error = Error::storage("open: enable WAL", source);
+                if error.code() != ErrorCode::Busy || started.elapsed() >= timeout {
+                    return Err(error);
+                }
+                std::thread::sleep(pause.min(timeout.saturating_sub(started.elapsed())));
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
+        }
     }
 }
 

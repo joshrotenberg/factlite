@@ -209,22 +209,26 @@ fn opening_an_existing_store_neither_takes_nor_waits_for_the_write_lock() {
 
 #[test]
 fn concurrent_first_opens_initialize_one_store_identity() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("fresh.sqlite");
-    let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
-    let handles: Vec<_> = (0..6)
-        .map(|_| {
-            let path = path.clone();
-            let barrier = barrier.clone();
-            std::thread::spawn(move || {
-                barrier.wait();
-                Store::open(&path).unwrap().head().unwrap()
+    // Many threads opening one new file race on initialization and on the
+    // switch to WAL. Every open must succeed and agree on one identity.
+    for _ in 0..20 {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fresh.sqlite");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(32));
+        let handles: Vec<_> = (0..32)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    Store::open(&path).unwrap().head().unwrap()
+                })
             })
-        })
-        .collect();
-    let heads: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-    assert!(heads.iter().all(|head| head == &heads[0]));
-    assert_eq!(heads[0].revision(), Revision::ZERO);
+            .collect();
+        let heads: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(heads.iter().all(|head| head == &heads[0]));
+        assert_eq!(heads[0].revision(), Revision::ZERO);
+    }
 }
 
 #[test]
