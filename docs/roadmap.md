@@ -16,18 +16,13 @@ Published to the private repository `github.com/joshrotenberg/factlite` on
 2026-11-05. CI passed there. The user chose MIT OR Apache-2.0 on 2026-11-05;
 the crates and README carry it.
 
-## 2. Pod release packaging
+## 2. Pod release packaging: decided, not now
 
-- **Why:** The clajent kit runs the pod from a local release build. Only macOS
-  arm64 has been built and tested.
-- **Decision needed:** Whether to publish to the babashka pod registry, and
-  which platforms to build: macOS arm64 and x86_64, Linux x86_64 and aarch64,
-  Windows x86_64.
-- **Work once decided:** Per-platform builds with the babashka test run on
-  each, versioned release tags, and a registry manifest. The `babashka-pod`
-  repository already has release tooling for its own pods that could be
-  reused.
-- **Depends on:** a public repository or release host. The license is chosen.
+The user decided on 2026-11-05 not to publish to the babashka pod registry.
+The pod stays in this repository and is built from source
+(`cargo build --release -p factlite-pod`), as `crates/factlite-pod/README.md`
+describes. Revisit if another machine or user needs prebuilt binaries; only
+macOS arm64 has been built and tested so far.
 
 ## 3. Bounded open time
 
