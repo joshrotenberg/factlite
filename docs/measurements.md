@@ -224,3 +224,18 @@ Raw outputs: [before](benchmarks/2026-11-05-macos-before-9.2.jsonl),
 The selective joined query no longer depends on live state size. An
 unfiltered `facts` read still returns every visible fact. Commits are unchanged
 by this item.
+
+## Commits load only touched state (9.5): 2026-11-05
+
+`main` at `7fb07ea` against the 9.5 branch. Raw outputs:
+[before](benchmarks/2026-11-05-macos-before-9.5.jsonl),
+[after](benchmarks/2026-11-05-macos-after-9.5.jsonl). No-op commit medians:
+3.0 → 0.14 ms at 3,001 facts, 34.7 → 0.10 ms at 30,001, and 173.5 → 0.09 ms at
+120,001.
+
+Through the pod, on a backup copy of the clajent store, 200 iterations of a
+keyed 13-fact create (with a unique key) and a conditional finish had p50
+latencies of 0.52 ms and 0.23 ms, including the babashka round trip. That open
+also upgraded the file from format 2 to 3 and took 184 ms.
+
+Open is now the only operation linear in live state: 870 ms at 120,001 facts.

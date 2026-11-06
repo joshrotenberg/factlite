@@ -642,7 +642,7 @@ impl Model {
 
 #[cfg(test)]
 #[path = "model_reference.rs"]
-mod reference;
+pub(crate) mod reference;
 
 #[cfg(test)]
 pub(crate) mod tests {

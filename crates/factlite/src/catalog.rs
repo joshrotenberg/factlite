@@ -55,6 +55,23 @@ impl Catalog {
         }
     }
 
+    /// A catalog holding only some identities, with the store's true next
+    /// allocation. Commit evaluation needs membership only for identities a
+    /// request names.
+    pub fn partial(
+        snapshot: SnapshotId,
+        schema: BTreeMap<AttrName, (AttributeDefinition, Revision)>,
+        entities: BTreeMap<EntityId, Revision>,
+        next_allocation: Option<u64>,
+    ) -> Self {
+        Self {
+            snapshot,
+            schema,
+            entities,
+            next_allocation,
+        }
+    }
+
     pub fn next_allocation(&self) -> Option<u64> {
         self.next_allocation
     }

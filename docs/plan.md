@@ -210,6 +210,11 @@ state without changing semantics. The log stays authoritative.
   every invariant open validates. Retain the full-state transitions in test
   builds and require identical states, reports and errors on random batches
   and tampered reports, plus replay parity and the existing tampering cases.
+- [x] **9.5 Commits load only touched state.** Evaluate a commit against the
+  schema, the identities the request names, the next allocation, the visible
+  values of every entity/attribute it changes or expects, and the owners of
+  every unique value it asserts. Require identical reports and errors to
+  full-state evaluation and to the committed result on random requests.
 
 ## Step 10: Babashka pod
 

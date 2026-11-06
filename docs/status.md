@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 165 tests, including forty-six 1,024-case properties, plus the
+gate passed 167 tests, including forty-seven 1,024-case properties, plus the
 asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
 into the strict wire requests. Remote publication (8.2) and direct indexed reads
 (9.2) are open. Reviews are self-reviews; remote CI and independent review have not
@@ -588,6 +588,23 @@ run.
   reference fallback.
 - **Blockers:** None locally.
 - **What's next:** Item 9.5, commits loading only the state a request touches.
+
+## 9.5 Commits load only touched state: done
+
+- **Done:** Commits evaluate against the state a request can observe instead
+  of the full state at head. All 167 tests passed, including forty-seven
+  1,024-case properties; full checks passed.
+  Review: `reviews/0037-touched-commit-state.md`.
+- **Measured:** No-op commit at 120,001 facts fell from 173.5 ms to 0.09 ms.
+  Through the pod on the clajent store copy, a 13-fact create took 0.52 ms
+  (p50). See `measurements.md`.
+- **Decisions:** See `decisions.md`.
+- **Blockers:** None locally.
+- **What's next:** Open replays the whole log and is linear in revisions plus
+  live state (870 ms at 120,001 facts). Verified checkpoints would bound it if a
+  consumer needs faster opens. The smaller clajent requests remain open: lookup
+  refs, aggregates, keyword/inst types, a busy-timeout option, and read-only
+  open in the pod.
 
 ## Environment notes
 

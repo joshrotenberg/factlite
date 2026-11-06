@@ -341,6 +341,103 @@ fn fact_row(entity: String, attribute: String, tag: i64, bytes: &[u8]) -> Result
     })
 }
 
+/// The state a commit of `tx` at `head` can observe, and nothing else: the
+/// whole schema, the identities `tx` names, the next allocation, every visible
+/// value of each entity/attribute pair `tx` changes or expects, and every
+/// current owner of each unique value it asserts. Evaluation reads only those,
+/// so evaluating `tx` on this model equals evaluating it on the full state.
+pub(crate) fn model_for_request(
+    connection: &Connection,
+    head: &SnapshotId,
+    tx: &crate::Tx,
+) -> Result<Model> {
+    use crate::{EntityTerm, ValueTerm};
+    use std::collections::BTreeSet;
+    check_basis(connection, head)?;
+    let schema = definitions_at(connection, head)?;
+    let mut named = BTreeSet::new();
+    let mut pairs = BTreeSet::new();
+    let mut owned = Vec::new();
+    for change in &tx.changes {
+        if let EntityTerm::Id(id) = &change.entity {
+            named.insert(id.clone());
+            pairs.insert((id.clone(), change.attribute.clone()));
+        }
+        if let ValueTerm::Value(value) = &change.value {
+            if let Value::Ref(id) = value {
+                named.insert(id.clone());
+            }
+            let unique = schema
+                .get(&change.attribute)
+                .is_some_and(|(definition, _)| {
+                    definition.uniqueness() == crate::Uniqueness::UniqueOne
+                });
+            if unique && change.operation == Operation::Assert {
+                owned.push((change.attribute.clone(), value.clone()));
+            }
+        }
+    }
+    for expectation in &tx.expectations {
+        named.insert(expectation.entity.clone());
+        pairs.insert((expectation.entity.clone(), expectation.attribute.clone()));
+        for value in &expectation.values {
+            if let Value::Ref(id) = value {
+                named.insert(id.clone());
+            }
+        }
+    }
+    let mut entities = BTreeMap::new();
+    for id in named {
+        if let Some(created) = created(connection, &id)? {
+            entities.insert(id, created);
+        }
+    }
+    let mut facts = HashSet::new();
+    for (entity, attribute) in &pairs {
+        facts.extend(facts_matching(
+            connection,
+            head,
+            Some(entity),
+            Some(attribute),
+            None,
+        )?);
+    }
+    for (attribute, value) in &owned {
+        facts.extend(facts_matching(
+            connection,
+            head,
+            None,
+            Some(attribute),
+            Some(value),
+        )?);
+    }
+    Ok(Model::new(
+        Catalog::partial(head.clone(), schema, entities, next_allocation(connection)?),
+        facts,
+    ))
+}
+
+/// One past the greatest allocation. Identities of one store share a prefix
+/// and a fixed-width hex allocation, so text order is allocation order.
+fn next_allocation(connection: &Connection) -> Result<Option<u64>> {
+    use rusqlite::OptionalExtension;
+    let last: Option<String> = connection
+        .query_row(
+            "SELECT entity FROM entity_events ORDER BY entity DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(match last {
+        None => Some(1),
+        Some(last) => last
+            .parse::<EntityId>()
+            .map_err(|err| corrupt(err.to_string()))?
+            .allocation()
+            .checked_add(1),
+    })
+}
+
 /// Open-time cross-check: the indexed state at head equals full replay.
 pub(crate) fn verify_against(connection: &Connection, replayed: &Model) -> Result<()> {
     let indexed = model_at(connection, &replayed.catalog.snapshot)?;
