@@ -47,6 +47,7 @@ pub(crate) fn persist_report(
     for (ordinal, event) in report.effective_delta.iter().enumerate() {
         transaction.execute("INSERT INTO fact_events(revision,ordinal,operation,entity,attribute,type_tag,value) VALUES(?1,?2,?3,?4,?5,?6,?7)",rusqlite::params![revision.as_slice(),ordinal as i64,match event.operation{Operation::Retract=>0,Operation::Assert=>1},event.fact.entity.to_string(),event.fact.attribute.as_str(),codec::type_tag(event.fact.value.value_type()),codec::encode_value(&event.fact.value)])?;
     }
+    crate::index::apply(transaction, report)?;
     let updated = transaction.execute(
         "UPDATE store_info SET head=?1 WHERE singleton=1",
         [revision.as_slice()],

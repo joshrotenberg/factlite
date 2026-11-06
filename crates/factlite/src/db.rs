@@ -259,7 +259,7 @@ impl Db {
     ) -> Result<T> {
         let mut connection = self.store.connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
-        let model = crate::log::replay(&transaction, &self.snapshot)?;
+        let model = crate::index::model_at(&transaction, &self.snapshot)?;
         let result = operation(&transaction, &model)?;
         transaction.commit()?;
         Ok(result)

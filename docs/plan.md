@@ -177,3 +177,23 @@ decisions; neither changes the local semantic implementation sequence.
   unrelated history, compare remote refs with local refs and verify a fresh
   remote clone. Deliver the final archive, manifest and SHA-256 checksum for
   the exact published commit. Report remote CI separately from local evidence.
+
+## Step 9: Indexed temporal state
+
+Measurements in 6.4 and 7.3 show per-operation log replay dominating reads and
+commits as retained history grows. This step adds derived, verifiable temporal
+state without changing semantics. The log stays authoritative.
+
+- [x] **9.1 Temporal datom index.** Add a format-2 `datoms` table holding one
+  validity interval `[asserted, retracted)` per effective assertion, maintained
+  in the same SQLite transaction as each commit. Migrate format-1 files on
+  writable open. On every open, verify the table equals the intervals derived
+  from retained fact events, after full log validation. Load the state at R for
+  reads and commit evaluation from schema/entity events and the interval table
+  rather than replaying the log. Test index/replay parity for every revision of
+  randomized typed histories, migration, tampered or missing intervals, rollback
+  leaving no interval rows, and the forced writer interleaving for every read.
+- [ ] **9.2 Direct indexed reads.** Answer `facts`, `pull` and `query` with
+  revision-bounded SQL over the interval table, without loading the complete
+  state at R. Compare every path with the reference evaluator over replayed
+  state, including historical schema and the forced writer interleaving.

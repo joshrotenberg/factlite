@@ -11,8 +11,18 @@ use crate::{
 };
 
 const APPLICATION_ID: i32 = 0x464c4954;
-const FORMAT_VERSION: i32 = 1;
-const TABLES: [&str; 5] = [
+const FORMAT_VERSION: i32 = 2;
+/// Format 1 lacks the derived datom index; writable opens upgrade it in place.
+const FORMAT_V1: i32 = 1;
+const TABLES_V1: [&str; 5] = [
+    "entity_events",
+    "fact_events",
+    "schema_events",
+    "store_info",
+    "transactions",
+];
+const TABLES: [&str; 6] = [
+    "datoms",
     "entity_events",
     "fact_events",
     "schema_events",
@@ -107,7 +117,7 @@ impl Store {
                 return Ok(report);
             }
             let basis = read_head(&transaction)?;
-            let model = crate::log::replay(&transaction, &basis)?;
+            let model = crate::index::model_at(&transaction, &basis)?;
             let (_, report) = model.evaluate(&request)?;
             crate::log::persist_report(
                 &transaction,
@@ -171,11 +181,14 @@ impl Store {
         )?;
         if application == 0 && version == 0 && tables.is_empty() && user_objects == 0 {
             transaction.execute_batch(DDL)?;
+            transaction.execute_batch(crate::index::DDL)?;
             transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
             transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
             let store = format!("s1.{}", uuid::Uuid::new_v4().simple());
             let lineage = format!("l1.{}", uuid::Uuid::new_v4().simple());
             transaction.execute("INSERT INTO store_info(singleton,format,store_id,lineage_id,head) VALUES(1,?1,?2,?3,?4)",rusqlite::params![FORMAT_VERSION,store,lineage,revision_bytes(Revision::ZERO).as_slice()])?;
+        } else if application == APPLICATION_ID && version == FORMAT_V1 {
+            upgrade_v1(&transaction)?;
         } else if application != APPLICATION_ID || version != FORMAT_VERSION {
             return Err(Error::new(
                 ErrorCode::UnsupportedFormat,
@@ -236,6 +249,31 @@ impl Store {
             .lock()
             .map_err(|_| corrupt("store connection lock poisoned"))
     }
+}
+
+// Adds and derives the datom index for a format-1 file inside the open
+// transaction. Any failure rolls back, leaving the original file unchanged;
+// full validation of the upgraded file follows in the same transaction.
+fn upgrade_v1(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
+    if table_names(transaction)? != TABLES_V1 {
+        return Err(corrupt("database tables do not match the supported format"));
+    }
+    let format: i32 = transaction.query_row(
+        "SELECT format FROM store_info WHERE singleton=1",
+        [],
+        |row| row.get(0),
+    )?;
+    if format != FORMAT_V1 {
+        return Err(corrupt("stored format differs from file format marker"));
+    }
+    transaction.execute_batch(crate::index::DDL)?;
+    crate::index::rebuild(transaction)?;
+    transaction.execute(
+        "UPDATE store_info SET format=?1 WHERE singleton=1",
+        [FORMAT_VERSION],
+    )?;
+    transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
+    Ok(())
 }
 
 fn abort_commit(transaction: rusqlite::Transaction<'_>, error: Error) -> Error {
@@ -335,8 +373,9 @@ fn validate_head(connection: &Connection) -> Result<()> {
         ));
     }
     crate::log::verify_foreign_keys(connection)?;
-    crate::log::replay(connection, &basis)?;
-    Ok(())
+    let replayed = crate::log::replay(connection, &basis)?;
+    crate::index::verify(connection)?;
+    crate::index::verify_against(connection, &replayed)
 }
 
 #[cfg(test)]

@@ -139,8 +139,9 @@ scenario testing. See `testing.md` for the verification policy.
 ## Pinned database ownership
 
 - Db holds a Store clone and an immutable full snapshot token. Capturing head
-  never leaves a SQL transaction open; each operation replays its pinned basis
-  in one short deferred transaction and returns owned results.
+  never leaves a SQL transaction open; each operation loads its pinned basis
+  in one short deferred transaction and returns owned results. Until 9.1 this
+  load was a full replay; it now reads the verified datom index.
 - `db_at` verifies identity, lineage, retained revision bounds, and replayability.
   Dropping Store leaves views usable; closing all handles and reopening with
   the retained token recovers the same historical schema.
@@ -376,3 +377,41 @@ scenario testing. See `testing.md` for the verification policy.
   This removes demonstrated redundant work without choosing a cache budget or
   claiming a production latency target. Full-history replay still scales with
   retained revisions and live state size.
+
+## Temporal datom index (9.1)
+
+- Format 2 adds one derived table, `datoms`: a validity interval per effective
+  assertion with columns entity, attribute, type tag, value, `asserted` and
+  nullable `retracted` revisions. A fact is visible at R when `asserted <= R`
+  and `retracted` is null or greater than R. A retract-then-reassert cycle keeps
+  separate intervals. The primary key is (entity, attribute, tag, value,
+  asserted); a partial unique index allows at most one open interval per fact.
+- Columns reuse the fact-event encodings: canonical entity and attribute text
+  with foreign keys to their events, explicit type tags, and the per-type
+  order-preserving value blobs. Revision columns are eight-byte big-endian blobs
+  with checks. Numeric entity/attribute keys are deferred until measured.
+- `persist_report` applies the effective delta inside the commit transaction:
+  assertions insert an open interval and retractions close exactly one open
+  interval. Any failure rolls back with the rest of the commit. The table is a
+  deterministic function of retained fact events; it is never an authority.
+- Every open, writable or read-only, still validates the complete retained log by
+  replay, then requires stored intervals to equal those derived from fact events,
+  then requires the indexed state at head to equal the replayed state. Mismatch
+  fails closed with `Storage`. Open therefore stays proportional to history.
+- Reads and commit evaluation load the state at R from schema and entity events
+  bounded by R plus visible intervals, inside the operation's single SQLite
+  transaction, instead of replaying transactions. The catalog's next allocation
+  follows the maximum retained allocation, since allocation is contiguous from
+  one. Basis identity and bound checks are unchanged.
+- Integrity is established at open. Reads after open no longer revalidate the
+  whole log, so rows altered by external SQL writes while a store is open are
+  not detected until the next open. External writes to Factlite-owned tables
+  remain unsupported, as the design states.
+- A writable open of a format-1 file upgrades it in its existing IMMEDIATE open
+  transaction: create the table, derive intervals, set format 2, then run the
+  full format-2 validation. Any failure rolls back and leaves the format-1 file
+  unchanged. Read-only opens of format-1 files fail `UnsupportedFormat`, since
+  they cannot write the index. Formats above 2 fail closed as before.
+- Queries still materialize a TEMP relation from the loaded state. Answering
+  facts, pull and query with revision-bounded SQL directly over intervals is
+  item 9.2.

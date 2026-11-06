@@ -36,6 +36,9 @@ mod error;
 #[cfg(test)]
 mod faults;
 mod identity;
+mod index;
+#[cfg(test)]
+mod index_checks;
 #[cfg(test)]
 mod isolation;
 mod log;

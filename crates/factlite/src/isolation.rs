@@ -66,6 +66,10 @@ fn operation_sql_snapshot_keeps_head_and_log_consistent_while_writer_commits() {
 
 #[test]
 fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
+    // `store_info` forces B before the operation's SQL snapshot starts, so B is
+    // visible and only revision bounds keep results at A. Later tables force B
+    // after the snapshot has started, so B must be invisible to the operation.
+    let mut cases = Vec::new();
     for operation in [
         "schema",
         "facts",
@@ -73,8 +77,15 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
         "history",
         "transactions",
         "query",
-        "query-temp",
     ] {
+        cases.push((operation, "store_info"));
+        cases.push((operation, "datoms"));
+    }
+    for operation in ["history", "transactions"] {
+        cases.push((operation, "transactions"));
+    }
+    cases.push(("query", "factlite_query_facts"));
+    for (operation, table) in cases {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("interleaving.sqlite");
         let store = Store::open(&path).unwrap();
@@ -121,9 +132,6 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
             .connection()
             .unwrap()
             .authorizer(Some(move |context: AuthContext<'_>| {
-                // Force B either before log replay or after the query's pinned
-                // relation is materialized, immediately before SQL reads it.
-                let table = if operation == "query-temp" { "factlite_query_facts" } else { "transactions" };
                 if matches!(context.action, AuthAction::Read { table_name, .. } if table_name == table)
                     && let Some(tx) = pending.take()
                 {
@@ -141,7 +149,7 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
                 history_a
             ),
             "transactions" => assert_eq!(db.transactions(Revision::ZERO).unwrap(), transactions_a),
-            "query" | "query-temp" => {
+            "query" => {
                 assert_eq!(db.query(&query, &crate::Params::new()).unwrap(), query_a)
             }
             _ => unreachable!(),
@@ -155,7 +163,7 @@ fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
             .lock()
             .unwrap()
             .take()
-            .expect("writer hook must fire")
+            .unwrap_or_else(|| panic!("writer hook must fire for {operation}/{table}"))
             .unwrap();
         assert_eq!(b.before, a.after);
         assert_eq!(store.head().unwrap(), b.after);

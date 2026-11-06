@@ -35,6 +35,30 @@ impl Catalog {
         })
     }
 
+    /// Rebuilds a catalog from retained events through `snapshot`. Allocation is
+    /// contiguous from one, so the next allocation follows the maximum.
+    pub fn retained(
+        snapshot: SnapshotId,
+        schema: BTreeMap<AttrName, (AttributeDefinition, Revision)>,
+        entities: BTreeMap<EntityId, Revision>,
+    ) -> Self {
+        let next_allocation = entities
+            .keys()
+            .map(EntityId::allocation)
+            .max()
+            .map_or(Some(1), |last| last.checked_add(1));
+        Self {
+            snapshot,
+            schema,
+            entities,
+            next_allocation,
+        }
+    }
+
+    pub fn next_allocation(&self) -> Option<u64> {
+        self.next_allocation
+    }
+
     pub fn schema_at(&self, revision: Revision) -> Result<Schema> {
         self.validate_revision(revision)?;
         Ok(Schema {

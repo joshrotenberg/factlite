@@ -1,4 +1,4 @@
-//! Bound SQL over a temporary relation rebuilt from the pinned replay, never head.
+//! Bound SQL over a temporary relation built from the pinned state, never head.
 use std::collections::{BTreeMap, HashSet};
 
 use rusqlite::{Transaction, params, params_from_iter, types::Value as SqlValue};

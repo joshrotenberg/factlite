@@ -352,7 +352,7 @@ fn busy_and_unsupported_storage_have_distinct_exit_codes_and_empty_stdout() {
     let future = dir.path().join("future.sqlite");
     success(binary().arg("init").arg(&future));
     let connection = rusqlite::Connection::open(&future).unwrap();
-    connection.pragma_update(None, "user_version", 2).unwrap();
+    connection.pragma_update(None, "user_version", 3).unwrap();
     drop(connection);
     failure(db(&future).arg("schema"), 5, "UnsupportedFormat");
     let corrupt = dir.path().join("corrupt.sqlite");
