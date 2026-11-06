@@ -502,6 +502,42 @@ fn touched_trace(steps: &[crate::model::reference::tests::Step]) {
             ),
         }
     }
+    // Every lookup on the unique attributes, at every revision, equals a scan
+    // of the replayed state.
+    let head = store.head().unwrap();
+    for revision in 0..=head.revision().get() {
+        let basis = SnapshotId::new(
+            head.store().clone(),
+            head.lineage().clone(),
+            Revision::new(revision),
+        );
+        let replayed = {
+            let connection = store.connection().unwrap();
+            log::replay(&connection, &basis).unwrap()
+        };
+        let db = store.db_at(&basis).unwrap();
+        let mut candidates: Vec<(AttrName, Value)> = (0..5)
+            .map(|n| ("x/unique".parse().unwrap(), Value::I64(n)))
+            .collect();
+        for id in replayed.catalog.entities.keys() {
+            candidates.push(("x/owner".parse().unwrap(), Value::Ref(id.clone())));
+        }
+        for (attribute, value) in candidates {
+            let expected = replayed
+                .facts()
+                .iter()
+                .find(|fact| fact.attribute == attribute && fact.value == value)
+                .map(|fact| fact.entity.clone());
+            match db.lookup(&attribute, &value) {
+                Ok(actual) => assert_eq!(actual, expected, "{attribute} {value:?} at {basis}"),
+                // Before the seed commit the attributes do not exist yet.
+                Err(error) => {
+                    assert_eq!(revision, 0);
+                    assert_eq!(error.code(), crate::ErrorCode::UnknownAttribute);
+                }
+            }
+        }
+    }
     // The committed history still replays and verifies.
     drop(store);
     Store::open(directory.path().join("touched.sqlite")).unwrap();

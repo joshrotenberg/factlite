@@ -555,3 +555,22 @@ scenario testing. See `testing.md` for the verification policy.
   Read-only connections read at the latest head on each call, as writer
   connections do, and `transact` on them fails `InvalidRequest` before any
   storage access.
+
+## Lookup refs for reads (11.2)
+
+- `Db::lookup(attribute, value)` returns the entity whose `unique_one`
+  attribute has exactly that typed value at the view's revision, or None. A
+  missing attribute fails `UnknownAttribute`, a non-unique attribute
+  `InvalidRequest` (attribute context), and a wrong value type `TypeMismatch`.
+  It reads one attribute/value index range. It never creates, merges or upserts.
+- The CLI adds `lookup --attr ATTR --value TAGGED_JSON [VIEW]`, emitting
+  `{"version":1,"entity":{"id":...}}` or `{"version":1,"entity":null}`.
+- The pod accepts `[attr value]` wherever a read takes an entity (`pull`, and
+  `:entity` in `facts`/`history` filters) and adds a `lookup` var. A lookup
+  resolves on the same pinned view as the read. When it matches nothing, pull
+  returns nil and filters match nothing, while attributes, bounds and options
+  are still validated: the pod substitutes an identity bound to an all-zero
+  store, which no store has.
+- Transactions do not accept lookup refs. Resolving them at pre-head would add
+  request terms to the canonical encoding and retry identity; that needs its
+  own decision.

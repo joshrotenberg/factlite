@@ -623,10 +623,82 @@ pub(crate) fn query_in(
     wire::decode_query(&envelope.to_string()).map_err(library_error)
 }
 
-/// `{:entity {:id ...} :attr :a/b :value v}`, each key optional.
-pub(crate) fn filter_in(value: Option<&Clj>) -> Result<FactFilter> {
+/// An entity in a read: `{:id "e1..."}`, or a lookup ref `[attr value]` naming
+/// the entity whose unique attribute has that value at the read's revision.
+pub(crate) enum EntityRef {
+    Id(factlite::EntityId),
+    Lookup(AttrName, Value),
+}
+
+impl EntityRef {
+    /// The identity, or None for a lookup that matches no entity at `db`.
+    pub(crate) fn resolve(&self, db: &factlite::Db) -> Result<Option<factlite::EntityId>> {
+        match self {
+            EntityRef::Id(id) => Ok(Some(id.clone())),
+            EntityRef::Lookup(attribute, value) => {
+                db.lookup(attribute, value).map_err(library_error)
+            }
+        }
+    }
+}
+
+pub(crate) fn entity_ref(value: &Clj) -> Result<EntityRef> {
+    match unmeta(value) {
+        Clj::Vector(items) | Clj::List(items) if items.len() == 2 => {
+            let value = wire::decode_value(&value_in(&items[1], "value")?.to_string())
+                .map_err(library_error)?;
+            Ok(EntityRef::Lookup(attr(&items[0])?, value))
+        }
+        Clj::Map(_) => Ok(EntityRef::Id(entity_id(value)?)),
+        other => Err(invalid(
+            "entity",
+            format!(
+                "an entity is {{:id \"e1...\"}} or a lookup ref [attr value], got {}",
+                describe(other)
+            ),
+        )),
+    }
+}
+
+/// A read filter whose entity may be a lookup ref.
+pub(crate) struct Filter {
+    entity: Option<EntityRef>,
+    attribute: Option<AttrName>,
+    value: Option<Value>,
+}
+
+/// An identity bound to an all-zero store, which no store has (store
+/// identities are random version-4 UUIDs). A foreign entity restriction
+/// matches no facts, so an unmatched lookup still runs every other check.
+const NO_STORE_ENTITY: &str = "e1.00000000000000000000000000000000.0000000000000001";
+
+pub(crate) fn no_store_entity() -> Result<factlite::EntityId> {
+    NO_STORE_ENTITY.parse().map_err(library_error)
+}
+
+impl Filter {
+    /// The library filter at `db`. A lookup ref that matches no entity becomes
+    /// a foreign entity, which matches no facts.
+    pub(crate) fn resolve(self, db: &factlite::Db) -> Result<FactFilter> {
+        let entity = match &self.entity {
+            None => None,
+            Some(entity) => Some(match entity.resolve(db)? {
+                Some(id) => id,
+                None => no_store_entity()?,
+            }),
+        };
+        Ok(FactFilter {
+            entity,
+            attribute: self.attribute,
+            value: self.value,
+        })
+    }
+}
+
+/// `{:entity e :attr :a/b :value v}`, each key optional; `e` may be a lookup ref.
+pub(crate) fn filter_in(value: Option<&Clj>) -> Result<Filter> {
     let mut fields = Fields::optional(value, "filter")?;
-    let entity = fields.take("entity").as_ref().map(entity_id).transpose()?;
+    let entity = fields.take("entity").as_ref().map(entity_ref).transpose()?;
     let attribute = fields.take("attr").as_ref().map(attr).transpose()?;
     let value = fields
         .take("value")
@@ -636,7 +708,7 @@ pub(crate) fn filter_in(value: Option<&Clj>) -> Result<FactFilter> {
         })
         .transpose()?;
     fields.finish()?;
-    Ok(FactFilter {
+    Ok(Filter {
         entity,
         attribute,
         value,
@@ -645,6 +717,10 @@ pub(crate) fn filter_in(value: Option<&Clj>) -> Result<FactFilter> {
 
 // ---------------------------------------------------------------------------
 // Writing Clojure output
+
+pub(crate) fn id_out(id: &factlite::EntityId) -> Clj {
+    ref_id(&id.to_string())
+}
 
 fn ref_id(id: &str) -> Clj {
     map(vec![("id", string(id))])

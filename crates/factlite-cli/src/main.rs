@@ -16,6 +16,7 @@ const HELP: &str = "Usage:
   factlite --db PATH backup --to PATH
   factlite --db PATH transact --file PATH|-
   factlite --db PATH pull --entity ID --attrs ATTR[,ATTR...] [VIEW]
+  factlite --db PATH lookup --attr ATTR --value TAGGED_JSON [VIEW]
   factlite --db PATH schema [VIEW]
   factlite --db PATH facts [FILTER] [VIEW]
   factlite --db PATH history [FILTER] [--after REVISION] [VIEW]
@@ -109,6 +110,7 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
         "transact" => &["--file"],
         "query" => &["--file", "--at", "--at-file"],
         "pull" => &["--entity", "--attrs", "--at", "--at-file"],
+        "lookup" => &["--attr", "--value", "--at", "--at-file"],
         "schema" => &["--at", "--at-file"],
         "facts" => &["--entity", "--attr", "--value", "--at", "--at-file"],
         "history" => &[
@@ -147,6 +149,7 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
         "backup" => &["--to"],
         "transact" | "query" => &["--file"],
         "pull" => &["--entity", "--attrs"],
+        "lookup" => &["--attr", "--value"],
         _ => &[],
     };
     for option in required {
@@ -258,6 +261,11 @@ fn run(command: Command) -> Result<String> {
                     )?
                     .as_ref(),
                 ),
+                "lookup" => {
+                    let attribute = filter.attribute.as_ref().expect("required during parse");
+                    let value = filter.value.as_ref().expect("required during parse");
+                    wire::encode_lookup(db.lookup(attribute, value)?.as_ref())
+                }
                 "history" => wire::encode_history(&db.history(filter, after)?),
                 "transactions" => wire::encode_transactions(&db.transactions(after)?),
                 _ => unreachable!("command validated during parse"),

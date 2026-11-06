@@ -819,3 +819,46 @@ fn cli_backup_is_standalone_and_read_commands_do_not_modify_the_artifact() {
     );
     assert_eq!(success(binary().arg("init").arg(&path)), noop["after"]);
 }
+
+#[test]
+fn lookup_resolves_unique_values_at_a_view_and_reports_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lookup.sqlite");
+    success(binary().arg("init").arg(&path));
+    let created = transact(
+        &path,
+        &json!({"version":1,"schema":[
+            {"name":"run/key","type":"string","cardinality":"one","unique":"unique_one"},
+            {"name":"run/status","type":"string","cardinality":"one","unique":"none"}],
+          "new_entities":["run"],
+          "changes":[{"op":"assert","entity":{"temp":"run"},"attr":"run/key","value":{"string":"A/run-3"}}]}),
+    );
+    let lookup =
+        |value: &str| success(db(&path).args(["lookup", "--attr", "run/key", "--value", value]));
+    assert_eq!(
+        lookup(r#"{"string":"A/run-3"}"#)["entity"]["id"],
+        created["tempids"]["run"]
+    );
+    assert_eq!(lookup(r#"{"string":"absent"}"#)["entity"], Json::Null);
+    failure(
+        db(&path).args([
+            "lookup",
+            "--attr",
+            "run/status",
+            "--value",
+            r#"{"string":"x"}"#,
+        ]),
+        2,
+        "InvalidRequest",
+    );
+    failure(
+        db(&path).args(["lookup", "--attr", "run/key", "--value", r#"{"i64":"1"}"#]),
+        2,
+        "TypeMismatch",
+    );
+    failure(
+        db(&path).args(["lookup", "--attr", "run/key"]),
+        2,
+        "InvalidRequest",
+    );
+}
