@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 158 tests, including forty-four 1,024-case properties, plus the
+gate passed 160 tests, including forty-four 1,024-case properties, plus the
 asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
 into the strict wire requests. Remote publication (8.2) and direct indexed reads
 (9.2) are open. Reviews are self-reviews; remote CI and independent review have not
@@ -538,6 +538,24 @@ run.
   skip without `bb` unless `REQUIRE_BB` is set.
 - **What's next:** Registry packaging/release once a remote exists. Read-only
   opens through the pod if a consumer needs them. Item 9.2.
+
+## 9.3 Open without the write lock: done
+
+- **Done:** `Store::open` validates an existing store in a deferred read
+  transaction and takes the write lock only to initialize or upgrade. All 160
+  tests passed, including forty-four 1,024-case properties; full checks passed.
+  Review: `reviews/0034-open-without-write-lock.md`.
+- **Found by:** the clajent session's pod trial. Opens of a 2,803-revision store
+  held the write lock for 7.5 s, and concurrent writers saw 2.2 s `Busy` failures.
+  On a copy of that store after the fix, one pod process committed 200 times
+  while another opened it three times: zero `Busy`, worst commit 21 ms.
+- **Decisions:** See `decisions.md`. Validation still covers a full snapshot at
+  open; later commits are validated by the next open.
+- **Blockers:** None locally.
+- **What's next:** Open time itself grows with revisions times live state (7.5 s
+  at 2,803 revisions in that store). Profiling shows per-revision whole-state
+  work in replay validation. Choosing incremental validation, checkpoints or an
+  explicit verify step needs a user decision.
 
 ## Environment notes
 

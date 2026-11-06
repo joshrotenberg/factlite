@@ -140,17 +140,89 @@ fn schema_only_views_and_sqlite_like_prefixes_are_not_empty_databases() {
 
 #[test]
 fn held_writer_lock_has_bounded_busy_failure() {
+    // Initializing a new file needs the write lock, so it waits a bounded time.
     let dir = tempfile::tempdir().unwrap();
+    let fresh = dir.path().join("fresh.sqlite");
+    let blocker = Connection::open(&fresh).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let started = std::time::Instant::now();
+    let error = Store::open(&fresh).err().unwrap();
+    assert_eq!(error.code(), ErrorCode::Busy);
+    assert!(error.source().is_some());
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    blocker.execute_batch("ROLLBACK").unwrap();
+    drop(blocker);
+    // Opening an existing store does not; its commits wait a bounded time and
+    // report a confirmed rollback.
     let path = dir.path().join("busy.sqlite");
     let original = Store::open(&path).unwrap().head().unwrap();
     let connection = Connection::open(&path).unwrap();
     connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let store = Store::open(&path).unwrap();
     let started = std::time::Instant::now();
-    let error = Store::open(&path).err().unwrap();
+    let error = store.commit(factlite::Tx::default()).unwrap_err();
     assert_eq!(error.code(), ErrorCode::Busy);
-    assert!(error.source().is_some());
+    assert_eq!(
+        error.commit_outcome(),
+        Some(factlite::CommitOutcome::RolledBack)
+    );
     assert!(started.elapsed() < std::time::Duration::from_secs(10));
     connection.execute_batch("ROLLBACK").unwrap();
     drop(connection);
     assert_eq!(Store::open(&path).unwrap().head().unwrap(), original);
+    assert_eq!(
+        Store::open(&fresh).unwrap().head().unwrap().revision(),
+        Revision::ZERO
+    );
+}
+
+#[test]
+fn opening_an_existing_store_neither_takes_nor_waits_for_the_write_lock() {
+    use std::time::{Duration, Instant};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("locked.sqlite");
+    let store = Store::open(&path).unwrap();
+    let head = store.commit(factlite::Tx::default()).unwrap().after;
+    let blocker = Connection::open(&path).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let started = Instant::now();
+    let opened = Store::open(&path).unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "open waited {:?} for another writer",
+        started.elapsed()
+    );
+    assert_eq!(opened.head().unwrap(), head);
+    // Reads work while the other connection still holds the write lock.
+    assert_eq!(
+        opened
+            .db()
+            .unwrap()
+            .transactions(Revision::ZERO)
+            .unwrap()
+            .len(),
+        1
+    );
+    blocker.execute_batch("ROLLBACK").unwrap();
+    assert!(opened.commit(factlite::Tx::default()).is_ok());
+}
+
+#[test]
+fn concurrent_first_opens_initialize_one_store_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fresh.sqlite");
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+    let handles: Vec<_> = (0..6)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                Store::open(&path).unwrap().head().unwrap()
+            })
+        })
+        .collect();
+    let heads: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert!(heads.iter().all(|head| head == &heads[0]));
+    assert_eq!(heads[0].revision(), Revision::ZERO);
 }

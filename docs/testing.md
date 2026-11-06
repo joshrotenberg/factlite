@@ -115,3 +115,9 @@ one file: keyed creations land exactly once, conditional increments serialize,
 and the final revision count is exact. Set `FACTLITE_POD_WORKERS` and
 `FACTLITE_POD_ITERATIONS` for a heavier run. These tests skip when `bb` is not
 on PATH unless `REQUIRE_BB` is set.
+
+Open's lock scope is tested by holding `BEGIN IMMEDIATE` on another connection:
+opening an existing store must succeed in under a second and read normally,
+while initializing a new file and committing fail `Busy` within a bound with a
+confirmed rollback. Six threads opening one new file together must agree on one
+store identity.

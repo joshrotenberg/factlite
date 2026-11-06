@@ -61,6 +61,7 @@ scenario testing. See `testing.md` for the verification policy.
   writer serialization. URI/in-memory modes are not part of the durable API.
 - Configure FULL synchronization before initialization and after enabling WAL,
   foreign keys, and a two-second busy timeout. Bootstrap with BEGIN IMMEDIATE
+  (since 9.3, only initialization and upgrade take it; see below)
   and commit all schema/identity state together. Change journal mode outside
   transactions, as SQLite requires.
 - File markers are application ID `0x464c4954` and format/user version 1. Only
@@ -449,3 +450,18 @@ scenario testing. See `testing.md` for the verification policy.
   Pod argument errors use the same shape with code `InvalidRequest`.
 - Not exposed: read-only opens, backups and raw wire JSON. Registry publication
   and release packaging are not part of this item.
+
+## Open without the write lock (9.3)
+
+- Reported by the clajent session from pod trials: `Store::open` validated the
+  whole log inside `BEGIN IMMEDIATE`, so every open held the write lock for its
+  full validation. At 2,803 revisions that was 7.5 s, during which other
+  processes' commits and opens failed `Busy` after the two-second timeout.
+- Open now classifies the file and validates an existing current-format store in
+  a deferred read transaction. Under WAL that snapshot neither blocks writers nor
+  waits for them. Validation covers one consistent snapshot; commits made after
+  it are validated by the next open. Only initializing an empty file and the
+  format-1 upgrade write, so only they take IMMEDIATE. They classify the file
+  again once the lock is held, so concurrent first opens create one identity.
+- Open time is unchanged: full replay validation is still proportional to
+  revisions times live state. That is a separate decision.
