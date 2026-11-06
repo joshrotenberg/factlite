@@ -35,6 +35,11 @@ use those labels in assertions and `ValueTerm::TempRef` for references. Forward
 references and cycles resolve together. `build()` checks request structure;
 `commit()` checks current state and commits atomically. Read durable IDs from
 `TxReport::tempids`. Save IDs and the original request if you need to retry.
+`EntityTerm::Lookup(attr, value)` and `ValueTerm::LookupRef(attr, value)` name
+the entity that owns a `unique_one` value before the transaction. They never
+see values the same request asserts, never create entities (no match fails
+`UnknownEntity` with `ErrorContext::Lookup`), and enter retry identity as the
+lookup, not the entity it found. Expectations take `EntityId` only.
 
 For a one-valued attribute, asserting the new value replaces the old value.
 For a many-valued attribute, assertions/retractions operate on a set. Batch

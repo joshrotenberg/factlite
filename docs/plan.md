@@ -293,7 +293,7 @@ Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
   errors. SQL uses a correlated `NOT EXISTS` with per-alias visibility.
   Coverage: reference-evaluator parity including facts asserted and
   retracted after the view's revision, and wire, CLI and pod coverage.
-- [ ] **12.3 Transaction lookup refs, A1** (roadmap 4). `EntityTerm::Lookup`
+- [x] **12.3 Transaction lookup refs, A1** (roadmap 4). `EntityTerm::Lookup`
   and `ValueTerm::LookupRef` with canonical tag 2, in changes and reference
   values only. Resolution inside evaluation against the pre-state, before
   normalization; IDs and lookups naming one entity collapse before conflict

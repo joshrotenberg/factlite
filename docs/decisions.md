@@ -686,6 +686,41 @@ them.
 - **History:** immutable. Documentation of permanence and application-level
   encryption; a lineage rewrite only if needed; no in-place excision.
 
+## Transaction lookup refs (12.3)
+
+- Option A1 of the brief: `EntityTerm::Lookup(attr, value)` and
+  `ValueTerm::LookupRef(attr, value)` in changes only. Expectations keep
+  `EntityId`; expectation lookups wait for canonical request version 2.
+- Resolution happens inside `normalize_in_place`, change by change in
+  submission order, against the pre-transaction schema and facts. No fact
+  changes until every change is resolved, so the owners index is still the
+  pre-state's. Resolving inside the loop, not in a pass before it, keeps
+  errors in submission order: an earlier unknown ID beats a later unmatched
+  lookup, and the reverse. The head fence and expectations come first, as
+  before.
+- Checks per lookup, in order: attribute visible before the transaction
+  (`UnknownAttribute`, including an attribute defined by the same request),
+  `unique_one` (`InvalidRequest`), value type (`TypeMismatch`), owner
+  (`UnknownEntity` with the new `ErrorContext::Lookup`). No upsert.
+- After resolution the IDs are ordinary IDs, so an ID and a lookup naming one
+  entity are one fact before the conflict and cardinality checks.
+- Canonical tag 2 in the entity-term and value-term positions: attribute text,
+  then the value. Canonical version stays 1 and existing bytes are unchanged.
+  Decoding is state-independent, so a retry compares the lookup, not its
+  resolution, and an exact retry returns the original report after the value
+  moves. Replay on open re-evaluates retained keyed lookups against each
+  historical pre-state.
+- The commit loader resolves each lookup at head with the same rules, loads
+  the owning fact, and treats the owner like an `Id` or `Ref`. Lookups that
+  evaluation will reject load nothing, so evaluation reports them in order.
+- The reference model resolves lookups by scanning all facts, independent of
+  the production owners index. The shared transaction generator seeds owned
+  unique values so generated lookups usually resolve.
+- Wire: `{"lookup":{"attr","value"}}` as a change entity and inside `ref` as a
+  change value. Pod: `[attr value]` (vector or list, as for read lookups) in
+  the same two positions. Errors encode the context as
+  `{"lookup":{"attr","value"}}`.
+
 ## Query negation (12.2)
 
 - `Query` gains `negations: Vec<Negation>`. A `Negation` has `join`

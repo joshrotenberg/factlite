@@ -210,8 +210,21 @@ fn lookups_see_only_the_pre_state() {
         .unwrap();
     assert_eq!(f.values(&f.runs[0], "run/key"), vec![key("z")]);
     assert_eq!(f.values(&f.runs[1], "run/key"), vec![key("a")]);
+    // A value the same request retracts still resolves to its old owner.
+    f.store
+        .commit(
+            Tx::builder()
+                .retract(f.runs[2].clone(), attr("run/key"), key("c"))
+                .assert(by_key("c"), attr("run/status"), key("retired"))
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(f.values(&f.runs[2], "run/status"), vec![key("retired")]);
+    assert!(f.values(&f.runs[2], "run/key").is_empty());
     // A value the same request assigns is not visible to its lookups.
     let assigns = Tx::builder()
+        .assert(f.runs[1].clone(), attr("run/label"), key("x"))
         .assert(f.runs[2].clone(), attr("run/key"), key("new"))
         .assert(by_key("new"), attr("run/status"), key("x"))
         .build()

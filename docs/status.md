@@ -15,8 +15,8 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 208 pass locally with babashka installed and `REQUIRE_BB=1`,
-  including fifty 1,024-case properties and the pod's three babashka
+- **Tests:** 220 pass locally with babashka installed and `REQUIRE_BB=1`,
+  including fifty-one 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions is unavailable for
   this account this month, so the local gate stands in for CI.
 - **Reviews:** entries 0001 to 0043 in `reviews/` are self-reviews. Since 0044,
@@ -28,7 +28,7 @@ current.
   `decision-briefs/` decided on 2026-11-06:
   - 12.1: read-only structural open and verify (done);
   - 12.2: query negation (done);
-  - 12.3: transaction lookup refs;
+  - 12.3: transaction lookup refs (done);
   - 12.4: permanence and encryption guidance.
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
@@ -780,6 +780,21 @@ current.
   test. `Factlite-Design.md` still lists negative patterns as out of scope; it
   is kept as historical reference.
 - **What's next:** 12.3, transaction lookup refs (A1).
+
+## 12.3 Transaction lookup refs (A1): done
+
+- **Done:** `EntityTerm::Lookup` and `ValueTerm::LookupRef` in changes,
+  resolved against the pre-transaction state, with canonical tag 2, the
+  touched-state loader, `ErrorContext::Lookup`, wire `{"lookup":...}`, pod
+  `[attr value]` in changes, and a CLI scenario. 220 tests pass with
+  `REQUIRE_BB=1`. Review: `reviews/0051-transaction-lookup-refs.md`.
+- **Decisions:** resolution inside the normalization loop, so errors stay in
+  submission order; see `decisions.md`, "Transaction lookup refs (12.3)".
+- **Validation:** local only; GitHub Actions is unavailable.
+- **Left open:** expectation lookups (canonical request version 2), as the
+  decision deferred. Generated traces carry no idempotency keys, so replay of
+  keyed lookups on reopen is covered by deterministic tests only.
+- **What's next:** 12.4, permanence and encryption guidance.
 
 ## Environment notes
 

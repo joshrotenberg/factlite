@@ -480,7 +480,10 @@ pub(crate) fn history_matching(
 /// The state a commit of `tx` at `head` can observe, and nothing else: the
 /// whole schema, the identities `tx` names, the next allocation, every visible
 /// value of each entity/attribute pair `tx` changes or expects, and every
-/// current owner of each unique value it asserts. Evaluation reads only those,
+/// current owner of each unique value it asserts. Each lookup is resolved at
+/// `head` with evaluation's rules: its owning fact is loaded, and the owner
+/// then counts as a named identity (and its value as an asserted reference)
+/// exactly like an `Id` or `Ref`. Evaluation reads only those,
 /// so evaluating `tx` on this model equals evaluating it on the full state.
 pub(crate) fn model_for_request(
     connection: &Connection,

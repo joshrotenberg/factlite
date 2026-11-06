@@ -39,6 +39,17 @@ again. Changed content under the same key conflicts; a fresh stale conditional
 request fails PreconditionFailed. Key identity preserves submitted operation
 order and temporary labels. Retry the same request/key after an ambiguous response.
 
+In a change, an entity may be `{"lookup":{"attr":"run/key","value":{"string":"A"}}}`
+and a reference value `{"ref":{"lookup":{...}}}`. A lookup names the entity
+that owns that value of a `unique_one` attribute before the transaction, so it
+never sees values the same request asserts or moves. Checks run in order: the
+attribute exists before the transaction (`UnknownAttribute`), it is
+`unique_one` (`InvalidRequest`), the value has its type (`TypeMismatch`), and
+an owner exists (`UnknownEntity`, context `{"lookup":{"attr","value"}}`). No
+entity is created. Retry identity holds the lookup, so an exact retry returns
+the original report after the value moves. Expectations, metadata, query
+params and lookup values themselves take no lookups.
+
 `--file -` reads a request from stdin. Reads accept mutually exclusive `--at`
 compact tokens or `--at-file PATH|-` portable JSON snapshots; omission captures
 head once. Read commands use a read-only database connection. `facts` and `history` accept exact `--entity`, `--attr`, and tagged JSON

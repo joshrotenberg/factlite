@@ -163,6 +163,16 @@ accessors and cross-type distinctions. An upgrade test rebuilds a real format-3
 layout (type checks 0..=5), opens it, verifies parity at every revision, and
 commits keyword and inst facts.
 
+Since 12.3, the shared transaction generator produces entity and reference
+lookups (matched, unmatched, on a non-unique attribute, and on a unique
+reference), and its seed state owns unique values so most lookups resolve.
+The incremental-versus-reference and touched-state-versus-full properties
+therefore cover lookups. Canonical properties round-trip tag 2 and reject
+every truncation, noncanonical floats in lookup keys, and bad tags.
+Integration tests pin validation order, pre-state resolution and transfers,
+ID and lookup collapse, unique reference values, error priority, retries
+after the value moves, replay on reopen, and wire strictness.
+
 Since 12.2, a 1,024-case property checks SQL against the reference evaluator
 for every negation form at one view: `not`, `not-join` with a predicate on a
 local, a local joined across two group patterns, conjunctive groups,

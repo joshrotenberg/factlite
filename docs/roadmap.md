@@ -30,7 +30,7 @@ and an explicit verify. Plan item 12.1.
 ## 4. Lookup refs in transactions: decided
 
 Decided 2026-11-06 ([brief](decision-briefs/04-transaction-lookup-refs.md)):
-option A1, lookups in changes and reference values, plan item 12.3. Later:
+option A1, lookups in changes and reference values, plan item 12.3 (done). Later:
 expectation lookups with canonical request version 2.
 ## 5. Query language: decided in stages
 

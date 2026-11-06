@@ -129,7 +129,17 @@ Keys, all optional: `:schema`, `:new-entities`, `:changes`, `:expect`,
   `:bool :i64 :f64 :string :bytes :ref :keyword :inst`, `:cardinality` is `:one` or `:many`,
   and `:unique` is `:none` or `:unique-one`.
 - Changes are `[op entity attr value]` with op `:assert` or `:retract`. The
-  entity is `{:id "e1..."}` or `{:temp label}` for a label in `:new-entities`.
+  entity is `{:id "e1..."}`, `{:temp label}` for a label in `:new-entities`,
+  or a lookup ref `[attr value]`. A reference value may also be a lookup ref:
+  `[:assert [:run/key "A/run-4"] :run/follows [:run/key "A/run-3"]]`.
+- A transaction lookup names the entity that owns that `:unique-one` value
+  before the transaction. It never sees values the same request asserts or
+  moves, so a transfer can name the old owner. A lookup that matches nothing
+  fails `UnknownEntity` with context `{:lookup {:attr ... :value ...}}`; it
+  never creates an entity. The attribute must already exist and be unique,
+  and the value must have its type. Expectations take `{:id ...}` only. A
+  retry compares the lookup itself, so an exact retry returns the original
+  report even after the value has moved.
 - Expectations are `[entity attr values]`: exact typed set equality at the
   pre-transaction head, with `[]` meaning absent.
 - `:expected-head` is a snapshot map; any intervening commit fails `HeadMismatch`.
@@ -161,8 +171,8 @@ Wherever a read takes an entity (`pull`, and `:entity` in filters), a lookup
 ref `[attr value]` names the entity whose `:unique-one` attribute has that
 value at the read's revision: `(f/pull conn [:run/key "A/run-3"] [:run/status])`.
 A lookup that matches nothing makes `pull` return nil and filters match
-nothing. The attribute must be unique and the value of its type. Transactions
-take `{:id ...}` and `{:temp ...}` only.
+nothing. The attribute must be unique and the value of its type. Transaction
+changes take lookup refs too (see Transactions); expectations do not.
 
 Snapshots are `{:version 1 :store "s1..." :lineage "l1..." :revision n}`.
 

@@ -239,8 +239,6 @@ impl Model {
         Ok(())
     }
 
-    // Batch normalization is private; evaluate adds preconditions and final
-    // uniqueness before storage can expose a report.
     /// Lookup resolution by scanning every pre-state fact, independent of the
     /// production owners index.
     fn lookup_reference(&self, attribute: &AttrName, value: &Value) -> Result<EntityId> {
@@ -287,6 +285,8 @@ impl Model {
             })
     }
 
+    // Batch normalization is private; evaluate adds preconditions and final
+    // uniqueness before storage can expose a report.
     pub fn normalize_reference(&self, tx: &Tx) -> Result<NormalizedBatch> {
         let (catalog, catalog_delta) = self.catalog.stage(&tx.schema, &tx.new_entities)?;
         let schema = catalog.schema_at(catalog.snapshot.revision())?;
