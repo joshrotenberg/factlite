@@ -53,6 +53,8 @@ impl<'a> Reader<'a> {
             3 => Ok(ValueType::String),
             4 => Ok(ValueType::Bytes),
             5 => Ok(ValueType::Ref),
+            6 => Ok(ValueType::Keyword),
+            7 => Ok(ValueType::Inst),
             _ => Err(corrupt("invalid canonical type")),
         }
     }
@@ -73,6 +75,10 @@ impl<'a> Reader<'a> {
                     .parse()
                     .map_err(|error: Error| corrupt(error.to_string()))?,
             )),
+            ValueType::Keyword => {
+                Value::keyword(self.text()?).map_err(|error| corrupt(error.to_string()))
+            }
+            ValueType::Inst => Ok(Value::Inst(i64::from_be_bytes(self.eight()?))),
         }
     }
     fn entity(&mut self) -> Result<EntityTerm> {

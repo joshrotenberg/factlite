@@ -64,7 +64,7 @@ fn end_to_end(transport: &str) {
     // Guard against a script that silently skips checks; update with test.bb.
     assert_eq!(
         out.lines().filter(|line| line.starts_with("ok ")).count(),
-        86,
+        95,
         "{out}"
     );
 }

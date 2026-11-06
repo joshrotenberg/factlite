@@ -12,9 +12,11 @@
 //! | `String` | string |
 //! | `Bytes` | byte array |
 //! | `Ref` | `{:id "e1..."}` (`{:temp "label"}` in transaction changes) |
+//! | `Keyword` | keyword |
+//! | `Inst` | `#inst` (milliseconds) |
 //!
-//! Anything else in a value position (nil, keywords, symbols, big or ratio
-//! numbers, collections, insts, uuids) is rejected, never coerced.
+//! Anything else in a value position (nil, symbols, big or ratio numbers,
+//! collections, uuids) is rejected, never coerced.
 
 use babashka_pod::PodError;
 use babashka_pod::transit::Value as Clj;
@@ -275,6 +277,8 @@ pub(crate) fn value_in(value: &Clj, field: &str) -> Result<Json> {
         // Rust's shortest round-trip decimal; the wire decoder normalizes -0.0.
         Clj::Float(value) => json!({"f64": value.to_string()}),
         Clj::String(value) => json!({"string": value}),
+        Clj::Keyword(value) => json!({"keyword": value}),
+        Clj::Inst(millis) => json!({"inst": millis.to_string()}),
         Clj::Bytes(value) => {
             json!({"bytes": base64::engine::general_purpose::STANDARD.encode(value)})
         }
@@ -284,7 +288,7 @@ pub(crate) fn value_in(value: &Clj, field: &str) -> Result<Json> {
                 field,
                 format!(
                     "unsupported {field} {}: Factlite values are booleans, longs, \
-                     doubles, strings, byte arrays or {{:id ...}} references",
+                     doubles, strings, byte arrays, keywords, insts or {{:id ...}} references",
                     describe(other)
                 ),
             ));
@@ -799,6 +803,8 @@ pub(crate) fn value_out(value: &Value) -> Clj {
         Value::String(value) => string(value),
         Value::Bytes(value) => Clj::Bytes(value.clone()),
         Value::Ref(id) => ref_id(&id.to_string()),
+        Value::Keyword(keyword) => kw(keyword.as_str()),
+        Value::Inst(millis) => Clj::Inst(*millis),
     }
 }
 
@@ -823,6 +829,8 @@ fn type_out(ty: ValueType) -> Clj {
         ValueType::String => "string",
         ValueType::Bytes => "bytes",
         ValueType::Ref => "ref",
+        ValueType::Keyword => "keyword",
+        ValueType::Inst => "inst",
     })
 }
 
@@ -1030,9 +1038,22 @@ mod tests {
             string("雪\0x"),
             Clj::Bytes(vec![0, 1, 255]),
             ref_id(ID),
+            kw("status/done"),
+            kw("todo"),
+            Clj::Inst(i64::MIN),
+            Clj::Inst(1_730_851_200_000),
         ] {
             assert_eq!(round_trip(&value), value);
         }
+        // A keyword is not a string, and an inst is not a long.
+        assert_ne!(
+            value_in(&kw("a"), "v").unwrap(),
+            value_in(&string("a"), "v").unwrap()
+        );
+        assert_ne!(
+            value_in(&Clj::Inst(1), "v").unwrap(),
+            value_in(&Clj::Int(1), "v").unwrap()
+        );
         assert_eq!(round_trip(&Clj::Float(-0.0)), Clj::Float(0.0));
         assert!(
             matches!(round_trip(&Clj::Float(-0.0)), Clj::Float(zero) if zero.is_sign_positive())
@@ -1046,9 +1067,16 @@ mod tests {
 
     #[test]
     fn unsupported_values_are_rejected_not_coerced() {
+        // Keyword text is validated by the wire decoder, as other values are.
+        for invalid in [kw("a/b/c"), kw(""), kw("ns/"), kw("has space")] {
+            let wire_value = value_in(&invalid, "value").unwrap();
+            assert!(
+                wire::decode_value(&wire_value.to_string()).is_err(),
+                "{invalid:?}"
+            );
+        }
         for value in [
             Clj::Nil,
-            kw("done"),
             sym("x"),
             Clj::BigInt("1".into()),
             Clj::BigDec("1.5".into()),
@@ -1057,7 +1085,6 @@ mod tests {
                 denominator: "3".into(),
             },
             Clj::Char('a'),
-            Clj::Inst(0),
             Clj::Uuid("00000000-0000-0000-0000-000000000000".into()),
             Clj::Uri("https://example.com".into()),
             vector(vec![]),

@@ -11,9 +11,11 @@ use crate::{
 };
 
 const APPLICATION_ID: i32 = 0x464c4954;
-const FORMAT_VERSION: i32 = 3;
-/// Format 2 lacks the attribute/value index; writable opens add it.
+const FORMAT_VERSION: i32 = 4;
+/// Format 1 lacks the datom table, format 2 the attribute/value index, and
+/// format 3 type tags 6 and 7; writable opens upgrade step by step.
 const FORMAT_V2: i32 = 2;
+const FORMAT_V3: i32 = 3;
 /// Format 1 lacks the derived datom index; writable opens upgrade it in place.
 const FORMAT_V1: i32 = 1;
 const TABLES_V1: [&str; 5] = [
@@ -64,16 +66,24 @@ CREATE TABLE entity_events (
  entity TEXT NOT NULL UNIQUE,
  PRIMARY KEY(revision,ordinal)
 );
-CREATE TABLE fact_events (
+";
+
+/// Authoritative effective fact events. Type tags 0..=7 are bool, i64, f64,
+/// string, bytes, ref, keyword and inst.
+fn fact_events_table(name: &str) -> String {
+    format!(
+        "CREATE TABLE {name} (
  revision BLOB NOT NULL REFERENCES transactions(revision),
  ordinal INTEGER NOT NULL CHECK(ordinal>=0),
  operation INTEGER NOT NULL CHECK(operation IN (0,1)),
  entity TEXT NOT NULL REFERENCES entity_events(entity),
  attribute TEXT NOT NULL REFERENCES schema_events(attribute),
- type_tag INTEGER NOT NULL CHECK(type_tag BETWEEN 0 AND 5),
+ type_tag INTEGER NOT NULL CHECK(type_tag BETWEEN 0 AND 7),
  value BLOB NOT NULL,
  PRIMARY KEY(revision,ordinal)
-);";
+);"
+    )
+}
 
 /// Connection settings for [`Store::open_with`] and [`crate::Db::open_read_only_with`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -226,14 +236,13 @@ impl Store {
                 validate_current(&transaction)?;
                 transaction.commit()?;
             }
-            FileKind::Empty | FileKind::FormatOne | FileKind::FormatTwo => {
+            FileKind::Empty | FileKind::Older(_) => {
                 transaction.rollback()?;
                 let transaction =
                     connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 match file_kind(&transaction)? {
                     FileKind::Empty => initialize(&transaction)?,
-                    FileKind::FormatOne => upgrade_v1(&transaction)?,
-                    FileKind::FormatTwo => upgrade_v2(&transaction)?,
+                    FileKind::Older(version) => upgrade(&transaction, version)?,
                     FileKind::Current => {}
                 }
                 validate_current(&transaction)?;
@@ -292,8 +301,8 @@ impl Store {
 
 enum FileKind {
     Empty,
-    FormatOne,
-    FormatTwo,
+    /// A supported older format, upgraded by writable opens.
+    Older(i32),
     Current,
 }
 
@@ -310,10 +319,8 @@ fn file_kind(connection: &Connection) -> Result<FileKind> {
     )?;
     if application == 0 && version == 0 && user_objects == 0 {
         Ok(FileKind::Empty)
-    } else if application == APPLICATION_ID && version == FORMAT_V1 {
-        Ok(FileKind::FormatOne)
-    } else if application == APPLICATION_ID && version == FORMAT_V2 {
-        Ok(FileKind::FormatTwo)
+    } else if application == APPLICATION_ID && (FORMAT_V1..FORMAT_VERSION).contains(&version) {
+        Ok(FileKind::Older(version))
     } else if application == APPLICATION_ID && version == FORMAT_VERSION {
         Ok(FileKind::Current)
     } else {
@@ -327,7 +334,8 @@ fn file_kind(connection: &Connection) -> Result<FileKind> {
 
 fn initialize(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
     transaction.execute_batch(DDL)?;
-    transaction.execute_batch(crate::index::DDL)?;
+    transaction.execute_batch(&fact_events_table("fact_events"))?;
+    transaction.execute_batch(&crate::index::ddl())?;
     transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
     transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
     let store = format!("s1.{}", uuid::Uuid::new_v4().simple());
@@ -363,52 +371,66 @@ fn validate_indexes(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-// Adds the attribute/value index to a format-2 file inside the open
-// transaction; the datom intervals themselves are unchanged and are verified
-// against the retained log by the validation that follows.
-fn upgrade_v2(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
-    if table_names(transaction)? != TABLES {
-        return Err(corrupt("database tables do not match the supported format"));
-    }
+// Upgrades an older file to the current format, one step at a time, inside
+// the open's write transaction. Any failure rolls back and leaves the file
+// unchanged; full validation of the result follows in the same transaction.
+fn upgrade(transaction: &rusqlite::Transaction<'_>, from: i32) -> Result<()> {
     let format: i32 = transaction.query_row(
         "SELECT format FROM store_info WHERE singleton=1",
         [],
         |row| row.get(0),
     )?;
-    if format != FORMAT_V2 {
+    if format != from {
         return Err(corrupt("stored format differs from file format marker"));
     }
-    transaction.execute_batch(crate::index::AVET_DDL)?;
-    transaction.execute(
-        "UPDATE store_info SET format=?1 WHERE singleton=1",
-        [FORMAT_VERSION],
-    )?;
-    transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
-    Ok(())
-}
-
-// Adds and derives the datom index for a format-1 file inside the open
-// transaction. Any failure rolls back, leaving the original file unchanged;
-// full validation of the upgraded file follows in the same transaction.
-fn upgrade_v1(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
-    if table_names(transaction)? != TABLES_V1 {
+    let expected = if from == FORMAT_V1 {
+        &TABLES_V1[..]
+    } else {
+        &TABLES[..]
+    };
+    if table_names(transaction)? != expected {
         return Err(corrupt("database tables do not match the supported format"));
     }
-    let format: i32 = transaction.query_row(
-        "SELECT format FROM store_info WHERE singleton=1",
-        [],
-        |row| row.get(0),
-    )?;
-    if format != FORMAT_V1 {
-        return Err(corrupt("stored format differs from file format marker"));
+    for version in from..FORMAT_VERSION {
+        match version {
+            // Derive the datom intervals from retained fact events.
+            FORMAT_V1 => {
+                transaction.execute_batch(&crate::index::datoms_table("datoms"))?;
+                transaction.execute_batch(crate::index::OPEN_DDL)?;
+                crate::index::rebuild(transaction)?;
+            }
+            // Add the attribute/value index.
+            FORMAT_V2 => transaction.execute_batch(crate::index::AVET_DDL)?,
+            // Rebuild both fact tables so their type-tag checks admit keyword
+            // and inst. SQLite cannot alter a CHECK constraint, and no table
+            // references either of them, so copy, drop and rename is safe with
+            // foreign keys enabled.
+            FORMAT_V3 => {
+                transaction.execute_batch(&format!(
+                    "{}
+INSERT INTO fact_events_v4(revision,ordinal,operation,entity,attribute,type_tag,value)
+ SELECT revision,ordinal,operation,entity,attribute,type_tag,value FROM fact_events;
+DROP TABLE fact_events;
+ALTER TABLE fact_events_v4 RENAME TO fact_events;
+{}
+INSERT INTO datoms_v4(entity,attribute,type_tag,value,asserted,retracted)
+ SELECT entity,attribute,type_tag,value,asserted,retracted FROM datoms;
+DROP TABLE datoms;
+ALTER TABLE datoms_v4 RENAME TO datoms;
+{}
+{}",
+                    fact_events_table("fact_events_v4"),
+                    crate::index::datoms_table("datoms_v4"),
+                    crate::index::OPEN_DDL,
+                    crate::index::AVET_DDL,
+                ))?;
+            }
+            _ => unreachable!("supported older formats"),
+        }
+        let next = version + 1;
+        transaction.execute("UPDATE store_info SET format=?1 WHERE singleton=1", [next])?;
+        transaction.pragma_update(None, "user_version", next)?;
     }
-    transaction.execute_batch(crate::index::DDL)?;
-    crate::index::rebuild(transaction)?;
-    transaction.execute(
-        "UPDATE store_info SET format=?1 WHERE singleton=1",
-        [FORMAT_VERSION],
-    )?;
-    transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
     Ok(())
 }
 

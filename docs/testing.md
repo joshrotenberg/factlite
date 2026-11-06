@@ -155,3 +155,10 @@ typed histories, at head and at half of head, with lower bounds of zero, half
 and the view's revision. Filters are every entity (including an unknown one),
 every attribute, every entity/attribute pair and attribute/value pair that
 ever changed (including since-retracted values), and pairs that never changed.
+
+Since 11.5, the typed generators for replay parity, index parity, SQL query
+parity (including aggregates), wire and canonical round trips, storage codecs
+and backups cover keyword and inst. Unit tests cover keyword validation,
+accessors and cross-type distinctions. An upgrade test rebuilds a real format-3
+layout (type checks 0..=5), opens it, verifies parity at every revision, and
+commits keyword and inst facts.

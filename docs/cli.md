@@ -82,7 +82,10 @@ Only one input may consume stdin: query and snapshot cannot both use `-`.
 A match is `[entity-term, "namespace/attribute", value-term]`. Terms are
 `{"var":"name"}`, `{"param":"name"}`, or a concrete tagged value; entity terms
 must have Ref type. Temporary references are transaction input only. Declared
-inputs use bool/i64/f64/string/bytes/ref and all must be supplied in params.
+inputs use bool/i64/f64/string/bytes/ref/keyword/inst and all must be supplied
+in params. Since format 4, `{"keyword":"status/done"}` is a keyword value and
+`{"inst":"1730851200000"}` an instant in signed decimal milliseconds since the
+Unix epoch; neither equals a string or i64 with the same text or number.
 
 Predicates use `{"left":TERM,"op":"eq","right":TERM}` with eq/ne/lt/le/gt/ge.
 Equality is exact typed equality; ranges require the same type. Variables in

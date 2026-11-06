@@ -193,7 +193,10 @@ fn values() -> impl Strategy<Value = Value> {
         any::<i64>().prop_map(Value::I64),
         any::<u64>().prop_filter_map("finite", |bits| Value::f64(f64::from_bits(bits)).ok()),
         any::<String>().prop_map(Value::String),
-        proptest::collection::vec(any::<u8>(), 0..64).prop_map(Value::Bytes)
+        proptest::collection::vec(any::<u8>(), 0..64).prop_map(Value::Bytes),
+        "([a-z0-9.*+!_?<>=雪-]{1,6}/)?[a-z0-9.*+!_?<>=雪-]{1,6}"
+            .prop_map(|text| Value::keyword(text).unwrap()),
+        any::<i64>().prop_map(Value::Inst),
     ]
 }
 proptest! {
@@ -204,10 +207,10 @@ proptest! {
         let dir = tempfile::tempdir().unwrap();let path = dir.path().join("source.sqlite");let copy = dir.path().join("copy.sqlite");let store = Store::open(&path).unwrap();
         let allocated = store.commit(Tx::builder().new_entity(TempId::new("data").unwrap()).new_entity(TempId::new("target").unwrap()).build().unwrap()).unwrap();
         let data = allocated.tempids[&TempId::new("data").unwrap()].clone();let target = allocated.tempids[&TempId::new("target").unwrap()].clone();
-        let attr = |ty| match ty {ValueType::Bool => "x/bool",ValueType::I64 => "x/i64",ValueType::F64 => "x/f64",ValueType::String => "x/string",ValueType::Bytes => "x/bytes",ValueType::Ref => "x/ref"};
+        let attr = |ty| match ty {ValueType::Bool => "x/bool",ValueType::I64 => "x/i64",ValueType::F64 => "x/f64",ValueType::String => "x/string",ValueType::Bytes => "x/bytes",ValueType::Ref => "x/ref",ValueType::Keyword => "x/keyword",ValueType::Inst => "x/inst"};
         let mut request = Tx::builder().idempotency_key("all-types");
-        for ty in [ValueType::Bool,ValueType::I64,ValueType::F64,ValueType::String,ValueType::Bytes,ValueType::Ref] {request = request.define_attribute(AttributeDefinition::new(attr(ty).parse().unwrap(),ty,Cardinality::Many,Uniqueness::None).unwrap());}
-        for value in values.into_iter().chain([Value::Bool(false),Value::I64(i64::MIN),Value::f64(f64::MAX).unwrap(),Value::String("\0e\u{301}雪".into()),Value::Bytes(vec![0,255]),Value::Ref(target)]) {let name=attr(value.value_type()).parse().unwrap();request=request.assert(data.clone(),name,value);}
+        for ty in [ValueType::Bool,ValueType::I64,ValueType::F64,ValueType::String,ValueType::Bytes,ValueType::Ref,ValueType::Keyword,ValueType::Inst] {request = request.define_attribute(AttributeDefinition::new(attr(ty).parse().unwrap(),ty,Cardinality::Many,Uniqueness::None).unwrap());}
+        for value in values.into_iter().chain([Value::Bool(false),Value::I64(i64::MIN),Value::f64(f64::MAX).unwrap(),Value::String("\0e\u{301}雪".into()),Value::Bytes(vec![0,255]),Value::Ref(target),Value::keyword("status/done").unwrap(),Value::Inst(i64::MIN)]) {let name=attr(value.value_type()).parse().unwrap();request=request.assert(data.clone(),name,value);}
         let request = request.build().unwrap();let a = store.commit(request).unwrap();let before = store.db().unwrap();
         for _ in 0..noops {store.commit(Tx::default()).unwrap();}
         let head = store.head().unwrap();prop_assert_eq!(store.backup(&copy).unwrap(),head.clone());
@@ -215,7 +218,7 @@ proptest! {
         prop_assert_eq!(readonly.facts(FactFilter::default()).unwrap(),before.facts(FactFilter::default()).unwrap());
         prop_assert_eq!(readonly.schema().unwrap(),before.schema().unwrap());
         prop_assert_eq!(readonly.history(FactFilter::default(),Revision::ZERO).unwrap(),before.history(FactFilter::default(),Revision::ZERO).unwrap());
-        for ty in [ValueType::Bool,ValueType::I64,ValueType::F64,ValueType::String,ValueType::Bytes,ValueType::Ref] {
+        for ty in [ValueType::Bool,ValueType::I64,ValueType::F64,ValueType::String,ValueType::Bytes,ValueType::Ref,ValueType::Keyword,ValueType::Inst] {
             let name=QueryName::new("v").unwrap();let q=Query {patterns:vec![Pattern {entity:Term::Const(Value::Ref(data.clone())),attribute:attr(ty).parse().unwrap(),value:Term::Var(name.clone())}],select:vec![name.clone()],order:vec![Order {field:name,direction:Direction::Asc}],..Query::default()};
             prop_assert_eq!(readonly.query(&q,&Default::default()).unwrap(),before.query(&q,&Default::default()).unwrap());
         }

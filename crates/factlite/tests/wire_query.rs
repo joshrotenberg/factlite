@@ -170,7 +170,10 @@ fn values() -> impl Strategy<Value = Value> {
         any::<u64>().prop_filter_map("finite", |bits| Value::f64(f64::from_bits(bits)).ok()),
         any::<String>().prop_map(Value::String),
         proptest::collection::vec(any::<u8>(), 0..64).prop_map(Value::Bytes),
-        Just(Value::Ref(ENTITY.parse().unwrap()))
+        Just(Value::Ref(ENTITY.parse().unwrap())),
+        "([a-z0-9.*+!_?<>=雪-]{1,6}/)?[a-z0-9.*+!_?<>=雪-]{1,6}"
+            .prop_map(|text| Value::keyword(text).unwrap()),
+        any::<i64>().prop_map(Value::Inst),
     ]
 }
 proptest! {

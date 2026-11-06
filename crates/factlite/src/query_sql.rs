@@ -541,18 +541,18 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(1024))]
         #[test]
         fn typed_graph_joins_predicates_order_limits_and_history_match_reference(
-            ty in 0_usize..6, samples in proptest::collection::vec((any::<bool>(),any::<i64>(),any::<u64>(),any::<String>()),0..5),
+            ty in 0_usize..8, samples in proptest::collection::vec((any::<bool>(),any::<i64>(),any::<u64>(),any::<String>()),0..5),
             edges in proptest::collection::vec((0_usize..3,0_usize..3),0..8), op in 0_usize..6, descending in any::<bool>(),limit in 0_u64..20,
         ) {
             let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("graph.sqlite"); let store = Store::open(&path).unwrap();
             let labels: Vec<_> = (0..3).map(|i| TempId::new(i.to_string()).unwrap()).collect();
             let mut tx = Tx::builder(); for label in &labels { tx = tx.new_entity(label.clone()); }
             let allocated = store.commit(tx.build().unwrap()).unwrap(); let ids = allocated.created_entities;
-            let domain = [ValueType::Bool,ValueType::I64,ValueType::F64,ValueType::String,ValueType::Bytes,ValueType::Ref][ty];
+            let domain = [ValueType::Bool,ValueType::I64,ValueType::F64,ValueType::String,ValueType::Bytes,ValueType::Ref,ValueType::Keyword,ValueType::Inst][ty];
             let mut values: Vec<_> = samples.into_iter().map(|(b,i,bits,s)| match ty {
-                0 => Value::Bool(b),1 => Value::I64(i),2 => Value::f64(f64::from_bits(bits)).unwrap_or_else(|_| Value::f64(0.0).unwrap()),3 => Value::String(s),4 => Value::Bytes(s.into_bytes()),5 => Value::Ref(ids[usize::from(b)].clone()),_ => unreachable!()
+                0 => Value::Bool(b),1 => Value::I64(i),2 => Value::f64(f64::from_bits(bits)).unwrap_or_else(|_| Value::f64(0.0).unwrap()),3 => Value::String(s),4 => Value::Bytes(s.into_bytes()),5 => Value::Ref(ids[usize::from(b)].clone()),6 => Value::keyword(format!("k{}", i.rem_euclid(5))).unwrap(),7 => Value::Inst(i),_ => unreachable!()
             }).collect();
-            let wanted = values.first().cloned().unwrap_or_else(|| match ty {0 => Value::Bool(false),1 => Value::I64(0),2 => Value::f64(0.0).unwrap(),3 => Value::String(String::new()),4 => Value::Bytes(Vec::new()),_ => Value::Ref(ids[0].clone())});
+            let wanted = values.first().cloned().unwrap_or_else(|| match ty {0 => Value::Bool(false),1 => Value::I64(0),2 => Value::f64(0.0).unwrap(),3 => Value::String(String::new()),4 => Value::Bytes(Vec::new()),5 => Value::Ref(ids[0].clone()),6 => Value::keyword("k0").unwrap(),_ => Value::Inst(0)});
             values.push(wanted.clone());
             let mut tx = Tx::builder().define_attribute(definition("x/value",domain)).define_attribute(definition("x/link",ValueType::Ref));
             for (i,value) in values.iter().enumerate() { tx = tx.assert(ids[i%3].clone(),"x/value".parse().unwrap(),value.clone()); }

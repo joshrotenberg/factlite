@@ -62,6 +62,14 @@ impl Writer {
                 self.byte(5);
                 self.text(&id.to_string());
             }
+            Value::Keyword(keyword) => {
+                self.byte(6);
+                self.text(keyword.as_str());
+            }
+            Value::Inst(millis) => {
+                self.byte(7);
+                self.0.extend_from_slice(&millis.to_be_bytes());
+            }
         }
     }
     fn entity(&mut self, entity: &EntityTerm) {
@@ -107,6 +115,8 @@ impl Tx {
                 crate::ValueType::String => 3,
                 crate::ValueType::Bytes => 4,
                 crate::ValueType::Ref => 5,
+                crate::ValueType::Keyword => 6,
+                crate::ValueType::Inst => 7,
             });
             writer.byte(match definition.cardinality() {
                 Cardinality::One => 0,

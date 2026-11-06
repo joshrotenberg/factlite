@@ -35,11 +35,15 @@ Each Factlite type has exactly one Clojure representation, in both directions.
 | `string` | string |
 | `bytes` | byte array |
 | `ref` | `{:id "e1..."}`, or `{:temp label}` inside transaction changes |
+| `keyword` | keyword, such as `:status/done` |
+| `inst` | `#inst` (`java.util.Date`, millisecond precision) |
 
 Anything else in a value position is rejected with `InvalidRequest`, never
-coerced: nil, keywords, symbols, BigInts, BigDecimals, ratios, characters,
-collections, insts and uuids. A long never equals a double: `1` and `1.0` are
-different values and a filter of the wrong type fails `TypeMismatch`.
+coerced: nil, symbols, BigInts, BigDecimals, ratios, characters, collections
+and uuids. A long never equals a double: `1` and `1.0` are different values. A
+keyword never equals a string and an inst never equals a long, so `:done` in a
+string attribute fails `TypeMismatch`. Keywords are `name` or `namespace/name`
+with no whitespace or extra `/`; `(keyword "a b")` fails `InvalidRequest`.
 
 Attribute names, temporary labels, metadata keys and query input names may be
 keywords or strings; the pod returns them as keywords. Maps that the pod
@@ -116,7 +120,7 @@ Keys, all optional: `:schema`, `:new-entities`, `:changes`, `:expect`,
 `:metadata`, `:expected-head`, `:idempotency-key`, and `:version` (default 1).
 
 - Schema entries are `{:name :type :cardinality :unique}`. `:type` is one of
-  `:bool :i64 :f64 :string :bytes :ref`, `:cardinality` is `:one` or `:many`,
+  `:bool :i64 :f64 :string :bytes :ref :keyword :inst`, `:cardinality` is `:one` or `:many`,
   and `:unique` is `:none` or `:unique-one`.
 - Changes are `[op entity attr value]` with op `:assert` or `:retract`. The
   entity is `{:id "e1..."}` or `{:temp label}` for a label in `:new-entities`.

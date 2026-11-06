@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 179 tests, including forty-nine 1,024-case properties, plus the
+gate passed 181 tests, including forty-nine 1,024-case properties, plus the
 asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
 into the strict wire requests. Remote publication (8.2) and direct indexed reads
 (9.2) are open. Reviews are self-reviews; remote CI and independent review have not
@@ -650,6 +650,21 @@ run.
   1.85 ms through the pod, against 4.7 ms to fetch and reduce in babashka.
 - **Blockers:** None locally.
 - **What's next:** New value types (keyword, inst) remain undecided.
+
+## 11.5 Keyword and inst value types: done
+
+- **Done:** Keyword and inst values in the library, storage (format 4), wire,
+  canonical requests, queries, CLI and pod. All 181 tests passed, including
+  forty-nine 1,024-case properties, now over eight types; full checks passed.
+  Review: `reviews/0042-keyword-inst-types.md`.
+- **Upgrade evidence:** A backup copy of the clajent store (format 3, 24,452
+  events) upgraded on first open in 247 ms. History at its last pre-upgrade
+  revision is byte-identical to the previous CLI's output, and a keyword fact
+  then committed.
+- **Decisions:** See `decisions.md`.
+- **Blockers:** None locally. No remote is configured.
+- **What's next:** All clajent requests are addressed except transaction
+  lookup refs, which need a canonical-identity decision.
 
 ## Environment notes
 

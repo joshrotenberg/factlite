@@ -621,3 +621,35 @@ scenario testing. See `testing.md` for the verification policy.
   optional and emitted only when non-empty. The pod writes `(fn ?var)` in
   `:select` and `:order`, names the column `fn-var`, accepts `:with`, and
   returns columns in `:select` order.
+
+## Keyword and inst value types (11.5)
+
+- Chosen by the user on 2026-11-05. The design allowed new types "only with
+  explicit comparison and encoding contracts"; these are the contracts.
+- `ValueType::Keyword` / `Value::Keyword(Keyword)`: text `name` or
+  `namespace/name`, without a colon. Both parts are nonempty, with no `/`,
+  whitespace or control characters, so every keyword reads back as the same
+  Clojure keyword. Equality is exact text; ordering is bytewise, like strings.
+  A keyword never equals a string.
+- `ValueType::Inst` / `Value::Inst(i64)`: a UTC instant in signed milliseconds
+  since the Unix epoch, matching Clojure `#inst` and transit precision, over
+  the full i64 range. Ordering is numeric. An inst never equals an i64.
+- Both variants are appended to the enums, so existing values keep their
+  canonical cross-type order.
+- Storage tags 6 (keyword, UTF-8 text) and 7 (inst, sign-flipped big-endian
+  eight bytes, ordering like i64). Decoding rejects invalid keyword text and
+  noncanonical bytes, as for other types.
+- Canonical request encoding adds value and type tags 6 and 7 (text; eight
+  big-endian bytes). Existing canonical bytes are unchanged, so retained retry
+  identities are preserved without a canonicalization version change.
+- Wire: `{"keyword":"..."}` and `{"inst":"<signed decimal>"}` (decimal parsed
+  like i64), type names `keyword` and `inst` in schema and query inputs.
+- Format 4. Format 3's `fact_events` and `datoms` CHECK constraints admit tags
+  0..=5 and SQLite cannot alter a CHECK, so the upgrade rebuilds both tables:
+  create, copy, drop, rename, then recreate the datom indexes. Neither table is
+  referenced by a foreign key. Upgrades are now ordered steps (1 to 2, 2 to 3,
+  3 to 4), each recorded in `store_info.format` and `user_version`, all inside
+  the open's write transaction and followed by full validation.
+- Pod: Clojure keywords in value positions are keyword values, and `#inst`
+  values are insts. Keywords in pod-defined positions (attribute names, labels,
+  enum options) keep their meaning there.

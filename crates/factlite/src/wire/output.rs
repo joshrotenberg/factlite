@@ -59,14 +59,7 @@ pub fn encode_transactions(records: &[TxRecord]) -> String {
 }
 
 fn ty(ty: ValueType) -> &'static str {
-    match ty {
-        ValueType::Bool => "bool",
-        ValueType::I64 => "i64",
-        ValueType::F64 => "f64",
-        ValueType::String => "string",
-        ValueType::Bytes => "bytes",
-        ValueType::Ref => "ref",
-    }
+    super::type_name(ty)
 }
 fn code(code: ErrorCode) -> &'static str {
     match code {

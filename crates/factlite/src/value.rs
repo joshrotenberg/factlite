@@ -20,6 +20,10 @@ pub enum ValueType {
     Bytes,
     /// Store-bound entity reference.
     Ref,
+    /// Symbolic name, distinct from strings: `name` or `namespace/name`.
+    Keyword,
+    /// UTC instant as signed milliseconds since the Unix epoch.
+    Inst,
 }
 
 /// A finite binary64 value whose negative zero is normalized to positive zero.
@@ -62,6 +66,49 @@ impl PartialOrd for FiniteF64 {
     }
 }
 
+/// A symbolic name: `name` or `namespace/name`, without a leading colon. Each
+/// part is nonempty and contains no `/`, whitespace or control character, so a
+/// keyword always reads back as the same Clojure keyword. Ordering is bytewise
+/// over the text, as for strings, but a keyword never equals a string.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Keyword(String);
+
+impl Keyword {
+    /// Validates the keyword text, without a leading colon.
+    pub fn new(text: impl Into<String>) -> Result<Self> {
+        let text = text.into();
+        let valid_part = |part: &str| {
+            !part.is_empty()
+                && !part
+                    .chars()
+                    .any(|c| c == '/' || c.is_whitespace() || c.is_control())
+        };
+        let valid = match text.split_once('/') {
+            None => valid_part(&text),
+            Some((namespace, name)) => valid_part(namespace) && valid_part(name),
+        };
+        if !valid || text.starts_with(':') {
+            return Err(Error::invalid(
+                "keyword",
+                "keywords are name or namespace/name, each nonempty without '/', ':' prefix, whitespace or control characters",
+            ));
+        }
+        Ok(Self(text))
+    }
+    /// The full text, such as `status/done`.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    /// The namespace, if any.
+    pub fn namespace(&self) -> Option<&str> {
+        self.0.split_once('/').map(|(namespace, _)| namespace)
+    }
+    /// The name after any namespace.
+    pub fn name(&self) -> &str {
+        self.0.split_once('/').map_or(&self.0, |(_, name)| name)
+    }
+}
+
 /// A typed fact value. Absence is represented by no fact, never a null value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Value {
@@ -77,6 +124,11 @@ pub enum Value {
     Bytes(Vec<u8>),
     /// Entity reference; catalog membership is validated by transactions.
     Ref(EntityId),
+    /// Validated keyword; never equal to a string with the same text.
+    Keyword(Keyword),
+    /// UTC instant in milliseconds since the Unix epoch, over the full i64
+    /// range; never equal to an I64 with the same number.
+    Inst(i64),
 }
 
 impl Value {
@@ -88,6 +140,10 @@ impl Value {
             .then_with(|| self.compare(other).expect("matching type tags"))
     }
 
+    /// Constructs a validated keyword value.
+    pub fn keyword(text: impl Into<String>) -> Result<Self> {
+        Keyword::new(text).map(Self::Keyword)
+    }
     /// Constructs a validated float value.
     pub fn f64(value: f64) -> Result<Self> {
         FiniteF64::new(value).map(Self::F64)
@@ -101,6 +157,8 @@ impl Value {
             Self::String(_) => ValueType::String,
             Self::Bytes(_) => ValueType::Bytes,
             Self::Ref(_) => ValueType::Ref,
+            Self::Keyword(_) => ValueType::Keyword,
+            Self::Inst(_) => ValueType::Inst,
         }
     }
     /// Compares within one type; cross-type ordering returns `TypeMismatch`.
@@ -112,6 +170,10 @@ impl Value {
             (Self::String(a), Self::String(b)) => Ok(a.as_bytes().cmp(b.as_bytes())),
             (Self::Bytes(a), Self::Bytes(b)) => Ok(a.cmp(b)),
             (Self::Ref(a), Self::Ref(b)) => Ok(a.cmp(b)),
+            (Self::Keyword(a), Self::Keyword(b)) => {
+                Ok(a.as_str().as_bytes().cmp(b.as_str().as_bytes()))
+            }
+            (Self::Inst(a), Self::Inst(b)) => Ok(a.cmp(b)),
             _ => Err(Error::new(
                 ErrorCode::TypeMismatch,
                 ErrorContext::TypeMismatch {
@@ -169,6 +231,41 @@ mod tests {
                 .unwrap_err()
                 .code(),
             ErrorCode::TypeMismatch
+        );
+    }
+
+    #[test]
+    fn keywords_and_insts_have_their_own_types_and_order() {
+        for valid in ["todo", "status/done", "a.b/c-d?", "雪/<=>", "x+*!_"] {
+            assert_eq!(Keyword::new(valid).unwrap().as_str(), valid);
+        }
+        for invalid in ["", "/", "a/", "/a", "a/b/c", ":a", "a b", "a\tb", "a\u{0}"] {
+            assert!(Keyword::new(invalid).is_err(), "{invalid:?}");
+        }
+        let done = Keyword::new("status/done").unwrap();
+        assert_eq!((done.namespace(), done.name()), (Some("status"), "done"));
+        let plain = Keyword::new("todo").unwrap();
+        assert_eq!((plain.namespace(), plain.name()), (None, "todo"));
+        assert_ne!(Value::keyword("a").unwrap(), Value::String("a".into()));
+        assert_ne!(Value::Inst(1), Value::I64(1));
+        assert_eq!(
+            Value::keyword("a")
+                .unwrap()
+                .compare(&Value::String("a".into()))
+                .unwrap_err()
+                .code(),
+            ErrorCode::TypeMismatch
+        );
+        assert_eq!(
+            Value::Inst(i64::MIN).compare(&Value::Inst(0)).unwrap(),
+            Ordering::Less
+        );
+        assert_eq!(
+            Value::keyword("a/b")
+                .unwrap()
+                .compare(&Value::keyword("a/c").unwrap())
+                .unwrap(),
+            Ordering::Less
         );
     }
 

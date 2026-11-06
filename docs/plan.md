@@ -252,6 +252,10 @@ design and need a separate decision; they are not in this step.
   distinct projected tuples, grouped by the selected variables, with an
   explicit `with` list. Shared exact arithmetic for SQL and reference paths;
   wire, CLI and pod surfaces; independent-oracle and parity properties.
+- [x] **11.5 Keyword and inst value types.** Chosen by the user on
+  2026-11-05. Explicit validation, equality, ordering and encoding contracts;
+  storage tags 6 and 7 with a format-4 table rebuild; wire, canonical, query
+  and pod mappings; every typed property extended to eight types.
 - [x] **11.3 Indexed filtered history.** Answer entity- or attribute-filtered
   history from datom intervals and per-revision events instead of decoding
   every retained report, with parity against the log path.

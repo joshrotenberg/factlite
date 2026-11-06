@@ -17,6 +17,8 @@ pub(crate) fn type_tag(ty: ValueType) -> u8 {
         ValueType::String => 3,
         ValueType::Bytes => 4,
         ValueType::Ref => 5,
+        ValueType::Keyword => 6,
+        ValueType::Inst => 7,
     }
 }
 fn value_type(tag: u8) -> Result<ValueType> {
@@ -27,6 +29,8 @@ fn value_type(tag: u8) -> Result<ValueType> {
         3 => Ok(ValueType::String),
         4 => Ok(ValueType::Bytes),
         5 => Ok(ValueType::Ref),
+        6 => Ok(ValueType::Keyword),
+        7 => Ok(ValueType::Inst),
         _ => Err(corrupt("invalid stored value tag")),
     }
 }
@@ -44,6 +48,9 @@ pub(crate) fn encode_value(value: &Value) -> Vec<u8> {
         Value::String(value) => value.as_bytes().to_vec(),
         Value::Bytes(value) => value.clone(),
         Value::Ref(value) => value.to_string().into_bytes(),
+        Value::Keyword(value) => value.as_str().as_bytes().to_vec(),
+        // Instants order like integers.
+        Value::Inst(value) => ((*value as u64) ^ SIGN).to_be_bytes().to_vec(),
     }
 }
 
@@ -75,6 +82,8 @@ pub(crate) fn decode_value(tag: u8, bytes: &[u8]) -> Result<Value> {
                 .parse()
                 .map_err(|err: crate::Error| corrupt(err.to_string()))?,
         ),
+        ValueType::Keyword => Value::keyword(text()?).map_err(|err| corrupt(err.to_string()))?,
+        ValueType::Inst => Value::Inst((eight()? ^ SIGN) as i64),
     };
     if encode_value(&value) != bytes {
         return Err(corrupt("noncanonical stored value"));
@@ -319,6 +328,9 @@ mod tests {
                 .prop_map(|bits| Value::f64(f64::from_bits(bits)).unwrap()),
             any::<String>().prop_map(Value::String),
             proptest::collection::vec(any::<u8>(), 0..256).prop_map(Value::Bytes),
+            "([a-z0-9.*+!_?<>=雪-]{1,6}/)?[a-z0-9.*+!_?<>=雪-]{1,6}"
+                .prop_map(|text| Value::keyword(text).unwrap()),
+            any::<i64>().prop_map(Value::Inst),
             (any::<u128>(), 1_u64..=u64::MAX).prop_map(|(store, allocation)| Value::Ref(
                 format!("e1.{store:032x}.{allocation:016x}")
                     .parse()
@@ -351,6 +363,7 @@ mod tests {
         fn scalar_blob_order_matches_typed_numeric_order(a in any::<i64>(),b in any::<i64>(),x in any::<f64>().prop_filter("finite",|v|v.is_finite()),y in any::<f64>().prop_filter("finite",|v|v.is_finite())){
             prop_assert_eq!(encode_value(&Value::I64(a)).cmp(&encode_value(&Value::I64(b))),a.cmp(&b));
             let x=Value::f64(x).unwrap();let y=Value::f64(y).unwrap();prop_assert_eq!(encode_value(&x).cmp(&encode_value(&y)),x.compare(&y).unwrap());
+            prop_assert_eq!(encode_value(&Value::Inst(a)).cmp(&encode_value(&Value::Inst(b))),a.cmp(&b));
         }
         #[test]
         fn reports_roundtrip_exact_values(value in values(), cut in any::<usize>()){
