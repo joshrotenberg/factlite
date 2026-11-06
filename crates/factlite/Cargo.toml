@@ -4,6 +4,7 @@ description = "Typed facts and durable revision-pinned database views over SQLit
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [dependencies]
