@@ -476,8 +476,15 @@ fn help_version_and_non_utf8_paths_preserve_process_contracts() {
         let path = dir
             .path()
             .join(std::ffi::OsString::from_vec(vec![b'd', 255]));
-        success(binary().arg("init").arg(&path));
-        success(db(&path).arg("schema"));
+        // Some filesystems (APFS on macOS) reject non-UTF-8 names outright, so
+        // the path round trip is only meaningful where the name can exist.
+        let probe = dir
+            .path()
+            .join(std::ffi::OsString::from_vec(vec![b'p', 255]));
+        if std::fs::write(&probe, b"").is_ok() {
+            success(binary().arg("init").arg(&path));
+            success(db(&path).arg("schema"));
+        }
         failure(
             binary().arg(std::ffi::OsString::from_vec(vec![255])),
             2,
