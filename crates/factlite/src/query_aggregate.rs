@@ -293,3 +293,112 @@ pub(crate) fn finish(
         rows,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn mean(values: &[i64]) -> f64 {
+        let values: Vec<_> = values.iter().map(|n| Value::I64(*n)).collect();
+        i64_mean(&values.iter().collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn i64_mean_rounds_the_exact_quotient_once() {
+        // Expected bits come from Python's `float(Fraction(sum, count))`, which
+        // rounds the exact rational once. Converting the sum to f64 before
+        // dividing rounds twice and gives a different result in each case.
+        let cases: [(&[i64], u64); 3] = [
+            (
+                &[
+                    9223372036854334585,
+                    9223372036854606229,
+                    9223372036854029755,
+                    9223372036853974259,
+                    9223372036854374164,
+                ],
+                0x43df_ffff_ffff_fe0c,
+            ),
+            (
+                &[
+                    9223372036853943354,
+                    9223372036854121225,
+                    9223372036854508205,
+                    9223372036853931557,
+                    9223372036853858909,
+                ],
+                0x43df_ffff_ffff_fd51,
+            ),
+            (
+                &[
+                    -9223372036854429858,
+                    -9223372036854058465,
+                    -9223372036854457074,
+                ],
+                0xc3df_ffff_ffff_fe3e,
+            ),
+        ];
+        for (values, expected) in cases {
+            let sum: i128 = values.iter().map(|n| i128::from(*n)).sum();
+            let twice = sum as f64 / values.len() as f64;
+            assert_eq!(mean(values).to_bits(), expected, "{values:?}");
+            assert_ne!(twice.to_bits(), expected, "{values:?}");
+        }
+        assert_eq!(mean(&[i64::MIN, i64::MIN]), i64::MIN as f64);
+        assert_eq!(mean(&[i64::MAX, i64::MIN]), -0.5);
+        assert_eq!(mean(&[1, -1]).to_bits(), 0.0_f64.to_bits());
+        // 2^53 + 1 is a tie between 2^53 and 2^53 + 2; ties go to even.
+        assert_eq!(mean(&[(1 << 53) + 1]), (1_u64 << 53) as f64);
+        assert_eq!(mean(&[(1 << 53) + 3]), ((1_u64 << 53) + 4) as f64);
+    }
+
+    #[test]
+    fn f64_mean_fails_when_the_sum_overflows() {
+        let max = Value::f64(f64::MAX).unwrap();
+        let error = aggregate(AggregateFn::Avg, vec![&max, &max]).unwrap_err();
+        assert_eq!(error.code(), crate::ErrorCode::InvalidRequest);
+        let low = Value::f64(1.0).unwrap();
+        let high = Value::f64(2.0).unwrap();
+        assert_eq!(
+            aggregate(AggregateFn::Avg, vec![&high, &low]).unwrap(),
+            Value::f64(1.5).unwrap()
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+        // Below 2^53 both operands are exact f64s, and IEEE division rounds
+        // the exact quotient once: an independent oracle.
+        #[test]
+        fn nearest_quotient_matches_ieee_division_on_exact_operands(
+            numerator in 1_u64..1 << 53,
+            denominator in 1_u64..1 << 53,
+        ) {
+            prop_assert_eq!(
+                nearest_quotient(u128::from(numerator), u128::from(denominator)).to_bits(),
+                (numerator as f64 / denominator as f64).to_bits()
+            );
+        }
+        // For larger numerators, the result brackets the exact quotient within
+        // half a unit in the last place, checked in exact integer arithmetic.
+        #[test]
+        fn nearest_quotient_is_within_half_an_ulp(
+            numerator in 1_u128..1 << 127,
+            denominator in 1_u128..1 << 64,
+        ) {
+            let result = nearest_quotient(numerator, denominator);
+            let bits = result.to_bits();
+            let mantissa = u128::from((bits & ((1 << 52) - 1)) | (1 << 52));
+            let exponent = i32::try_from(bits >> 52).unwrap() - 1023 - 52;
+            // |numerator / denominator - mantissa * 2^exponent| <= 2^exponent / 2
+            // is |numerator * 2^-e - mantissa * denominator| * 2 <= denominator.
+            let (scaled, product) = if exponent >= 0 {
+                (numerator, (mantissa * denominator) << exponent)
+            } else {
+                (numerator << -exponent, mantissa * denominator)
+            };
+            prop_assert!(scaled.abs_diff(product) * 2 <= denominator << exponent.max(0));
+        }
+    }
+}

@@ -4,8 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use factlite::{
-    Aggregate, AggregateFn, AttributeDefinition, Cardinality, Direction, ErrorCode, Order, Params,
-    Pattern, Query, QueryName, QueryResult, Store, TempId, Term, Tx, Uniqueness, Value, ValueType,
+    Aggregate, AggregateFn, AttributeDefinition, Cardinality, Comparison, Direction, ErrorCode,
+    Order, Params, Pattern, Predicate, Query, QueryName, QueryResult, Store, TempId, Term, Tx,
+    Uniqueness, Value, ValueType,
 };
 use proptest::prelude::*;
 
@@ -89,6 +90,7 @@ fn per_recipe(with_run: bool) -> Query {
             agg(AggregateFn::Sum, "cost", "total"),
             agg(AggregateFn::Min, "cost", "low"),
             agg(AggregateFn::Max, "cost", "high"),
+            agg(AggregateFn::Avg, "cost", "mean"),
         ],
         ..Query::default()
     }
@@ -106,10 +108,11 @@ fn per_group_aggregates_count_distinct_tuples_unless_with_keeps_matches_apart() 
     let (_dir, store) = store_with(&runs, ValueType::I64);
     let db = store.db().unwrap();
     let s = |n: u8| Value::String(format!("recipe-{n}"));
+    let f = |x: f64| Value::f64(x).unwrap();
     let with = db.query(&per_recipe(true), &Params::new()).unwrap();
     assert_eq!(
         with.columns,
-        ["recipe", "n", "distinct", "total", "low", "high"]
+        ["recipe", "n", "distinct", "total", "low", "high", "mean"]
             .map(name)
             .to_vec()
     );
@@ -118,8 +121,8 @@ fn per_group_aggregates_count_distinct_tuples_unless_with_keeps_matches_apart() 
         rows_as_set(&QueryResult {
             columns: vec![],
             rows: vec![
-                vec![s(0), i(3), i(2), i(17), i(5), i(7)],
-                vec![s(1), i(1), i(1), i(-2), i(-2), i(-2)],
+                vec![s(0), i(3), i(2), i(17), i(5), i(7), f(17.0 / 3.0)],
+                vec![s(1), i(1), i(1), i(-2), i(-2), i(-2), f(-2.0)],
             ],
         })
     );
@@ -130,10 +133,118 @@ fn per_group_aggregates_count_distinct_tuples_unless_with_keeps_matches_apart() 
         rows_as_set(&QueryResult {
             columns: vec![],
             rows: vec![
-                vec![s(0), i(2), i(2), i(12), i(5), i(7)],
-                vec![s(1), i(1), i(1), i(-2), i(-2), i(-2)],
+                vec![s(0), i(2), i(2), i(12), i(5), i(7), f(6.0)],
+                vec![s(1), i(1), i(1), i(-2), i(-2), i(-2), f(-2.0)],
             ],
         })
+    );
+}
+
+fn having(left: Term, comparison: Comparison, right: Term) -> Predicate {
+    Predicate {
+        left,
+        comparison,
+        right,
+    }
+}
+
+#[test]
+fn having_filters_aggregated_rows_before_ordering_and_the_limit() {
+    let i = Value::I64;
+    let runs = vec![
+        (0, i(5), vec![]),
+        (0, i(6), vec![]),
+        (0, i(7), vec![]),
+        (1, i(-2), vec![]),
+        (2, i(40), vec![]),
+        (2, i(41), vec![]),
+    ];
+    let (_dir, store) = store_with(&runs, ValueType::I64);
+    let db = store.db().unwrap();
+    let recipes = |query: &Query, params: &Params| -> Vec<Value> {
+        db.query(query, params)
+            .unwrap()
+            .rows
+            .into_iter()
+            .map(|row| row[0].clone())
+            .collect()
+    };
+    let s = |n: u8| Value::String(format!("recipe-{n}"));
+    let base = Query {
+        order: vec![Order {
+            field: name("recipe"),
+            direction: Direction::Desc,
+        }],
+        ..per_recipe(true)
+    };
+    // Without HAVING, the descending limit of one keeps recipe-2.
+    assert_eq!(
+        recipes(
+            &Query {
+                limit: Some(1),
+                ..base.clone()
+            },
+            &Params::new()
+        ),
+        [s(2)]
+    );
+    // HAVING runs first, so the limit applies to the surviving rows.
+    let at_least_three = Query {
+        having: vec![having(var("n"), Comparison::Ge, Term::Const(Value::I64(3)))],
+        limit: Some(1),
+        ..base.clone()
+    };
+    assert_eq!(recipes(&at_least_three, &Params::new()), [s(0)]);
+    // Several predicates all hold; parameters, selected columns and avg work.
+    let cheap = Query {
+        inputs: [(name("ceiling"), ValueType::F64)].into(),
+        having: vec![
+            having(var("mean"), Comparison::Lt, Term::Param(name("ceiling"))),
+            having(
+                var("recipe"),
+                Comparison::Ne,
+                Term::Const(Value::String("recipe-1".into())),
+            ),
+        ],
+        ..base.clone()
+    };
+    let ceiling = |x: f64| [(name("ceiling"), Value::f64(x).unwrap())].into();
+    assert_eq!(recipes(&cheap, &ceiling(41.0)), [s(2), s(0)]);
+    assert_eq!(recipes(&cheap, &ceiling(40.5)), [s(0)]);
+    // A HAVING variable names the result column, even when an aggregate is
+    // named like a pattern variable that is not a result column.
+    let shadowed = Query {
+        select: vec![name("recipe")],
+        aggregates: vec![agg(AggregateFn::Max, "cost", "run")],
+        having: vec![having(
+            var("run"),
+            Comparison::Gt,
+            Term::Const(Value::I64(6)),
+        )],
+        ..base.clone()
+    };
+    assert_eq!(recipes(&shadowed, &Params::new()), [s(2), s(0)]);
+    // An aggregate error fails the query even in a group HAVING would drop.
+    let (_dir, overflowing) = store_with(
+        &[
+            (0, i(i64::MAX), vec![]),
+            (0, i(i64::MAX - 1), vec![]),
+            (1, i(1), vec![]),
+        ],
+        ValueType::I64,
+    );
+    let never = Query {
+        having: vec![having(var("n"), Comparison::Gt, Term::Const(i(10)))],
+        ..base
+    };
+    assert_eq!(
+        overflowing
+            .db()
+            .unwrap()
+            .query(&never, &Params::new())
+            .unwrap_err()
+            .code(),
+        ErrorCode::InvalidRequest
     );
 }
 
@@ -290,12 +401,57 @@ fn aggregate_queries_are_validated_before_execution() {
     let db = store.db().unwrap();
     let base = per_recipe(true);
     let code = |query: Query| db.query(&query, &Params::new()).unwrap_err().code();
-    assert_eq!(
-        code(Query {
+    for mismatched in [
+        Query {
             aggregates: vec![agg(AggregateFn::Sum, "recipe", "x")],
             ..base.clone()
-        }),
-        ErrorCode::TypeMismatch
+        },
+        Query {
+            aggregates: vec![agg(AggregateFn::Avg, "recipe", "x")],
+            ..base.clone()
+        },
+        // Avg is F64, so a range against an I64 constant mismatches.
+        Query {
+            having: vec![having(
+                var("mean"),
+                Comparison::Lt,
+                Term::Const(Value::I64(1)),
+            )],
+            ..base.clone()
+        },
+        Query {
+            inputs: [(name("p"), ValueType::String)].into(),
+            having: vec![having(var("n"), Comparison::Ge, Term::Param(name("p")))],
+            ..base.clone()
+        },
+    ] {
+        let params: Params = if mismatched.inputs.is_empty() {
+            Params::new()
+        } else {
+            [(name("p"), Value::String("x".into()))].into()
+        };
+        assert_eq!(
+            db.query(&mismatched, &params).unwrap_err().code(),
+            ErrorCode::TypeMismatch,
+            "{mismatched:?}"
+        );
+    }
+    // Equality across types is allowed and simply never holds.
+    assert!(
+        db.query(
+            &Query {
+                having: vec![having(
+                    var("mean"),
+                    Comparison::Eq,
+                    Term::Const(Value::I64(1))
+                )],
+                ..base.clone()
+            },
+            &Params::new()
+        )
+        .unwrap()
+        .rows
+        .is_empty()
     );
     for invalid in [
         Query {
@@ -336,6 +492,42 @@ fn aggregate_queries_are_validated_before_execution() {
             }],
             ..base.clone()
         },
+        // HAVING needs an aggregate, names only result columns, and takes
+        // declared inputs only.
+        Query {
+            aggregates: vec![],
+            with: vec![],
+            having: vec![having(
+                var("recipe"),
+                Comparison::Eq,
+                Term::Const(Value::I64(1)),
+            )],
+            ..base.clone()
+        },
+        Query {
+            having: vec![having(
+                var("run"),
+                Comparison::Eq,
+                Term::Const(Value::I64(1)),
+            )],
+            ..base.clone()
+        },
+        Query {
+            having: vec![having(
+                var("cost"),
+                Comparison::Eq,
+                Term::Const(Value::I64(1)),
+            )],
+            ..base.clone()
+        },
+        Query {
+            having: vec![having(
+                var("n"),
+                Comparison::Eq,
+                Term::Param(name("undeclared")),
+            )],
+            ..base.clone()
+        },
     ] {
         assert_eq!(
             code(invalid.clone()),
@@ -352,11 +544,19 @@ proptest! {
         runs in proptest::collection::vec((0_u8..3, -50_i64..50, proptest::collection::vec(0_u8..3, 0..3)), 0..16),
         floats in any::<bool>(),
         with_run in any::<bool>(),
+        at_least in proptest::option::of(0_i64..4),
     ) {
         let cost = |n: i64| if floats { Value::f64(n as f64 / 4.0).unwrap() } else { Value::I64(n) };
         let data: Vec<_> = runs.iter().map(|(r, c, t)| (*r, cost(*c), t.clone())).collect();
         let (_dir, store) = store_with(&data, if floats { ValueType::F64 } else { ValueType::I64 });
-        let actual = store.db().unwrap().query(&per_recipe(with_run), &Params::new()).unwrap();
+        let mut query = per_recipe(with_run);
+        let mut params = Params::new();
+        if let Some(at_least) = at_least {
+            query.inputs = [(name("at_least"), ValueType::I64)].into();
+            query.having = vec![Predicate { left: var("n"), comparison: Comparison::Ge, right: Term::Param(name("at_least")) }];
+            params.insert(name("at_least"), Value::I64(at_least));
+        }
+        let actual = store.db().unwrap().query(&query, &params).unwrap();
         // Independent calculation: distinct (recipe, run?, cost) tuples per recipe.
         let mut groups: BTreeMap<u8, BTreeSet<(Option<usize>, i64)>> = BTreeMap::new();
         for (index, (recipe, cost, _)) in runs.iter().enumerate() {
@@ -366,15 +566,24 @@ proptest! {
             columns: vec![],
             rows: groups
                 .into_iter()
+                .filter(|(_, tuples)| at_least.is_none_or(|k| tuples.len() as i64 >= k))
                 .map(|(recipe, tuples)| {
                     let costs: Vec<i64> = tuples.iter().map(|(_, c)| *c).collect();
                     let distinct: BTreeSet<i64> = costs.iter().copied().collect();
                     let mut sorted = costs.clone();
                     sorted.sort();
+                    let float_sum = sorted.iter().fold(0.0, |sum, c| sum + *c as f64 / 4.0);
                     let total = if floats {
-                        Value::f64(sorted.iter().fold(0.0, |sum, c| sum + *c as f64 / 4.0)).unwrap()
+                        Value::f64(float_sum).unwrap()
                     } else {
                         Value::I64(costs.iter().sum())
+                    };
+                    // Small sums are exact f64s, so one IEEE division is the
+                    // correctly rounded mean.
+                    let mean = if floats {
+                        float_sum / costs.len() as f64
+                    } else {
+                        costs.iter().sum::<i64>() as f64 / costs.len() as f64
                     };
                     vec![
                         Value::String(format!("recipe-{recipe}")),
@@ -383,6 +592,7 @@ proptest! {
                         total,
                         cost(*sorted.first().unwrap()),
                         cost(*sorted.last().unwrap()),
+                        Value::f64(mean).unwrap(),
                     ]
                 })
                 .collect(),
