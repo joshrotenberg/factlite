@@ -671,3 +671,17 @@ scenario testing. See `testing.md` for the verification policy.
   The design is `design/json-rpc.md`, and roadmap item 10 tracks it. The library
   remains the core. No server code exists, and `AGENTS.md` still excludes
   building one until authorized.
+
+## Roadmap decisions (2026-11-06)
+
+The user decided four briefs in `decision-briefs/`; plan step 12 implements
+them.
+
+- **Open-time integrity:** full validation by default; a structural open for
+  read-only connections only; explicit verify.
+- **Transaction lookup refs:** option A1. Expectation lookups come later, with
+  canonical request version 2.
+- **Query language:** negation now; then `avg` and HAVING; `or` and recursion
+  on demand.
+- **History:** immutable. Documentation of permanence and application-level
+  encryption; a lineage rewrite only if needed; no in-place excision.

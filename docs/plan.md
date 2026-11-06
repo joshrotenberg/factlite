@@ -261,3 +261,51 @@ design and need a separate decision; they are not in this step.
 - [x] **11.3 Indexed filtered history.** Answer entity- or attribute-filtered
   history from datom intervals and per-revision events instead of decoding
   every retained report, with parity against the log path.
+
+## Step 12: Decided roadmap items
+
+Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
+
+- [ ] **12.1 Read-only structural open and explicit verify** (roadmap 3).
+  `StoreOptions` gains `validation: Full | Structural`, defaulting to `Full`.
+  `Structural` is accepted only for read-only opens; writable opens with it
+  fail `InvalidRequest`. A structural open checks:
+  - format markers;
+  - the table and datom index sets;
+  - the head row against the latest transaction.
+
+  Add `Store::verify` and `Db::verify`, which run full validation in one read
+  transaction and return the verified head or a `Storage` error naming the
+  failed check. The CLI gains `--validation structural` on read commands and
+  a `verify` command; the pod gains `:validation` on read-only `open` and a
+  `verify` var. Tests:
+  - structural reads equal full reads;
+  - tampering that full validation catches still passes a structural open,
+    and is caught by `verify`;
+  - writable structural opens are refused;
+  - timings are recorded.
+- [ ] **12.2 Query negation** (roadmap 5). Add `not` and `not-join` with
+  lexically scoped variables:
+  - `not` variables must be bound outside the group;
+  - `not-join` locals must be bound inside the group and must not escape.
+
+  Absence is evaluated at the view's revision, and unknown attributes are
+  errors. SQL uses a correlated `NOT EXISTS` with per-alias visibility.
+  Coverage: reference-evaluator parity including facts asserted and
+  retracted after the view's revision, and wire, CLI and pod coverage.
+- [ ] **12.3 Transaction lookup refs, A1** (roadmap 4). `EntityTerm::Lookup`
+  and `ValueTerm::LookupRef` with canonical tag 2, in changes and reference
+  values only. Resolution inside evaluation against the pre-state, before
+  normalization; IDs and lookups naming one entity collapse before conflict
+  checks. Validation order: unknown attribute, then not `unique_one`, then
+  type, then `UnknownEntity` with a lookup context. The commit loader loads
+  lookup owners and their touched state. Coverage:
+  - wire and pod `[attr value]`;
+  - retry identity and replay;
+  - full, touched-state and replay parity;
+  - existing canonical bytes unchanged.
+- [ ] **12.4 Permanence and encryption guidance** (roadmap 6). Document in
+  the README and the Rust and pod guides that fact values are permanent, and
+  describe the application-level encryption pattern with its equality,
+  uniqueness, retry and key-destruction limits, and what physical deletion
+  requires.

@@ -2,7 +2,7 @@
 
 ## Current state
 
-Updated 2026-11-06. This section is the summary. The entries below are the full
+Updated 2026-11-06 (decisions recorded). This section is the summary. The entries below are the full
 per-item log, oldest first, and are kept as written, so older entries describe
 the state at their time. Where they disagree with this section, this section is
 current.
@@ -24,12 +24,12 @@ current.
   with the kit subagent tooling, alongside a self-review.
 - **Hosting:** private repository `github.com/joshrotenberg/factlite`. Licensed
   MIT OR Apache-2.0. Crates are unpublished.
-- **Waiting on the user:** decision briefs, each in an open draft pull request
-  and not yet on `main`:
-  - roadmap item 3, bounded open time (PR #5);
-  - item 4, lookup refs in transactions (PR #7);
-  - item 5, query language (PR #8);
-  - item 6, history excision (PR #9).
+- **Decided, next to build:** plan step 12, from the four briefs in
+  `decision-briefs/` decided on 2026-11-06:
+  - 12.1: read-only structural open and verify;
+  - 12.2: query negation;
+  - 12.3: transaction lookup refs;
+  - 12.4: permanence and encryption guidance.
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
 
