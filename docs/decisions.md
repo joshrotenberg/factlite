@@ -663,3 +663,11 @@ scenario testing. See `testing.md` for the verification policy.
 - The Elixir NIF (roadmap item 7) is deferred by the user.
 - The pod is not published to the babashka pod registry (user decision,
   2026-11-05). It stays in this repository and is built from source.
+
+## JSON-RPC interface: designed, deferred (2026-11-05)
+
+- The user chose to design a JSON-RPC 2.0 process-boundary interface now and to
+  build it later, as its own crate in this workspace (`crates/factlite-rpc`).
+  The design is `design/json-rpc.md`, and roadmap item 10 tracks it. The library
+  remains the core. No server code exists, and `AGENTS.md` still excludes
+  building one until authorized.
