@@ -305,12 +305,16 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
             "[conn query], [conn query params] or [conn query params opts]",
         )?;
         let conn = conn(&s, &args[0])?;
-        let (query, params) = convert::query_in(&args[1], args.get(2))?;
+        let convert::PodQuery {
+            query,
+            params,
+            columns,
+        } = convert::query_in(&args[1], args.get(2))?;
         let mut opts = Fields::optional(args.get(3), "opts")?;
         let db = view(&conn, opts.take("at"))?;
         opts.finish()?;
         let result = db.query(&query, &params).map_err(library_error)?;
-        Ok(convert::result_out(&result))
+        Ok(convert::result_out_in(&result, &columns))
     });
     vec![
         (

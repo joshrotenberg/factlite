@@ -504,6 +504,38 @@ fn variable(value: &Clj, field: &str) -> Result<String> {
     .ok_or_else(|| invalid(field, format!("{field} entries are ?variables")))
 }
 
+/// A `:select` or `:order` entry: `?x`, or an aggregate `(fn ?x)` whose column
+/// is named `fn-x`. Returns the column name and, for an aggregate, its wire
+/// function and variable.
+fn column(value: &Clj, field: &str) -> Result<(String, Option<(&'static str, String)>)> {
+    if let Clj::List(items) = unmeta(value) {
+        let [function, var] = items.as_slice() else {
+            return Err(invalid(field, "an aggregate is (fn ?variable)"));
+        };
+        let (wire, label) = match unmeta(function) {
+            Clj::Symbol(name) => match name.as_str() {
+                "count" => ("count", "count"),
+                "count-distinct" => ("count_distinct", "count-distinct"),
+                "sum" => ("sum", "sum"),
+                "min" => ("min", "min"),
+                "max" => ("max", "max"),
+                other => {
+                    return Err(invalid(
+                        field,
+                        format!(
+                            "unknown aggregate {other}: use count, count-distinct, sum, min or max"
+                        ),
+                    ));
+                }
+            },
+            _ => return Err(invalid(field, "an aggregate is (fn ?variable)")),
+        };
+        let var = variable(var, field)?;
+        return Ok((format!("{label}-{var}"), Some((wire, var))));
+    }
+    Ok((variable(value, field)?, None))
+}
+
 /// `?x` is a variable, `$x` an input, and anything else a constant value.
 fn term_in(value: &Clj) -> Result<Json> {
     if let Clj::Symbol(symbol) = unmeta(value) {
@@ -541,11 +573,16 @@ fn predicate_in(value: &Clj) -> Result<Json> {
     Ok(json!({"left": term_in(left)?, "op": op, "right": term_in(right)?}))
 }
 
+/// A decoded query, its params, and the result columns in the order the
+/// caller's `:select` listed them (the library puts aggregates last).
+pub(crate) struct PodQuery {
+    pub query: factlite::Query,
+    pub params: factlite::Params,
+    pub columns: Vec<String>,
+}
+
 /// A query map and optional params map as a version-1 wire envelope.
-pub(crate) fn query_in(
-    query: &Clj,
-    params: Option<&Clj>,
-) -> Result<(factlite::Query, factlite::Params)> {
+pub(crate) fn query_in(query: &Clj, params: Option<&Clj>) -> Result<PodQuery> {
     let mut fields = Fields::new(query, "query")?;
     let mut inner = Map::new();
     if let Some(inputs) = fields.take("inputs") {
@@ -580,12 +617,31 @@ pub(crate) fn query_in(
             .collect::<Result<Vec<_>>>()?;
         inner.insert("where".into(), json!(predicates));
     }
+    let mut order_of_columns = Vec::new();
     if let Some(select) = fields.take("select") {
-        let select = items(&select, "select")?
+        let mut variables = Vec::new();
+        let mut aggregates = Vec::new();
+        for entry in items(&select, "select")? {
+            let (name, aggregate) = column(entry, "select")?;
+            match aggregate {
+                None => variables.push(name.clone()),
+                Some((function, var)) => {
+                    aggregates.push(json!({"fn": function, "var": var, "name": name}))
+                }
+            }
+            order_of_columns.push(name);
+        }
+        inner.insert("select".into(), json!(variables));
+        if !aggregates.is_empty() {
+            inner.insert("aggregates".into(), json!(aggregates));
+        }
+    }
+    if let Some(with) = fields.take("with") {
+        let with = items(&with, "with")?
             .iter()
-            .map(|var| variable(var, "select"))
+            .map(|var| variable(var, "with"))
             .collect::<Result<Vec<_>>>()?;
-        inner.insert("select".into(), json!(select));
+        inner.insert("with".into(), json!(with));
     }
     if let Some(order) = fields.take("order") {
         let order = items(&order, "order")?
@@ -598,7 +654,7 @@ pub(crate) fn query_in(
                     }
                     _ => return Err(invalid("order", "order direction is :asc or :desc")),
                 };
-                Ok(json!({"field": variable(field, "order")?, "direction": direction}))
+                Ok(json!({"field": column(field, "order")?.0, "direction": direction}))
             })
             .collect::<Result<Vec<_>>>()?;
         inner.insert("order".into(), json!(order));
@@ -620,7 +676,12 @@ pub(crate) fn query_in(
         Some(params) => named_values(params, "params")?,
     };
     let envelope = json!({"version": 1, "query": inner, "params": params});
-    wire::decode_query(&envelope.to_string()).map_err(library_error)
+    let (query, params) = wire::decode_query(&envelope.to_string()).map_err(library_error)?;
+    Ok(PodQuery {
+        query,
+        params,
+        columns: order_of_columns,
+    })
 }
 
 /// An entity in a read: `{:id "e1..."}`, or a lookup ref `[attr value]` naming
@@ -883,6 +944,32 @@ pub(crate) fn event_out(event: &FactEvent) -> Clj {
     ])
 }
 
+/// The result with columns in the caller's `:select` order.
+pub(crate) fn result_out_in(result: &QueryResult, columns: &[String]) -> Clj {
+    let positions: Vec<usize> = columns
+        .iter()
+        .map(|column| {
+            result
+                .columns
+                .iter()
+                .position(|name| name.as_str() == column)
+                .expect("every requested column is in the result")
+        })
+        .collect();
+    let reordered = QueryResult {
+        columns: positions
+            .iter()
+            .map(|i| result.columns[*i].clone())
+            .collect(),
+        rows: result
+            .rows
+            .iter()
+            .map(|row| positions.iter().map(|i| row[*i].clone()).collect())
+            .collect(),
+    };
+    result_out(&reordered)
+}
+
 pub(crate) fn result_out(result: &QueryResult) -> Clj {
     map(vec![
         (
@@ -1124,10 +1211,12 @@ mod tests {
               "select":["task"],"order":[{{"field":"task","direction":"desc"}}],"limit":5}},
               "params":{{"wanted":{{"string":"doing"}}}}}}"#
         );
+        let decoded = query_in(&query, Some(&params)).unwrap();
         assert_eq!(
-            query_in(&query, Some(&params)).unwrap(),
+            (decoded.query, decoded.params),
             wire::decode_query(&json).unwrap()
         );
+        assert_eq!(decoded.columns, vec!["task".to_owned()]);
         for bad in [
             map(vec![("select", vector(vec![sym("task")]))]),
             map(vec![(
@@ -1143,6 +1232,56 @@ mod tests {
         ] {
             assert!(query_in(&bad, None).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn aggregate_columns_are_named_kept_in_select_order_and_orderable() {
+        let list = |items: Vec<Clj>| Clj::List(items);
+        let query = map(vec![
+            (
+                "match",
+                vector(vec![
+                    vector(vec![sym("?run"), kw("run/recipe"), sym("?recipe")]),
+                    vector(vec![sym("?run"), kw("run/cost"), sym("?cost")]),
+                ]),
+            ),
+            (
+                "select",
+                vector(vec![
+                    list(vec![sym("sum"), sym("?cost")]),
+                    sym("?recipe"),
+                    list(vec![sym("count-distinct"), sym("?run")]),
+                ]),
+            ),
+            ("with", vector(vec![sym("?run")])),
+            (
+                "order",
+                vector(vec![vector(vec![
+                    list(vec![sym("sum"), sym("?cost")]),
+                    kw("desc"),
+                ])]),
+            ),
+        ]);
+        let decoded = query_in(&query, None).unwrap();
+        assert_eq!(
+            decoded.columns,
+            ["sum-cost", "recipe", "count-distinct-run"]
+        );
+        assert_eq!(
+            decoded.query.select,
+            vec![factlite::QueryName::new("recipe").unwrap()]
+        );
+        assert_eq!(
+            decoded.query.with,
+            vec![factlite::QueryName::new("run").unwrap()]
+        );
+        assert_eq!(decoded.query.aggregates.len(), 2);
+        assert_eq!(decoded.query.order[0].field.as_str(), "sum-cost");
+        let unknown = map(vec![(
+            "select",
+            vector(vec![list(vec![sym("avg"), sym("?cost")])]),
+        )]);
+        assert!(code(query_in(&unknown, None).err().unwrap()).contains("InvalidRequest"));
     }
 
     #[test]

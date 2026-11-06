@@ -587,3 +587,37 @@ scenario testing. See `testing.md` for the verification policy.
   primary key serve it.
 - Unfiltered and value-only history still read every report in range, which
   is the reference path in tests.
+
+## Aggregates (11.4)
+
+- Chosen by the user on 2026-11-05. The original design listed aggregates as
+  outside v1; the design document is unchanged and this records the extension.
+- `Query` gains `with: Vec<QueryName>` and `aggregates: Vec<Aggregate>`
+  (`function`, `var`, `name`). Without aggregates, behavior is unchanged, and
+  `with` requires at least one aggregate.
+- Evaluation extends match, filter, project, distinct, order, limit. The query
+  projects the selected variables, the `with` variables and each aggregate
+  variable; removes duplicate tuples; groups by the selected variables;
+  aggregates; then orders and limits over selected and aggregate columns.
+  Aggregating distinct tuples follows the existing set semantics and Datomic's
+  `:with`. Equal values from different matches collapse unless a
+  distinguishing variable is in `with`. Documentation states this.
+- Functions: `count` (tuples in the group), `count_distinct` (distinct values
+  of the variable), `sum` (I64 or F64 only, otherwise `TypeMismatch`), `min`
+  and `max` (any type, by same-type order). Counts are I64.
+- Arithmetic is exact or an error, never wrapped. An I64 sum overflow fails
+  `InvalidRequest`. F64 values are summed in ascending order, so the result
+  is deterministic for a given set of tuples, and a non-finite running total
+  fails `InvalidRequest`.
+- Empty input: Factlite has no null for a missing sum or min, so no matching
+  tuples give no rows, with or without grouping. This differs from SQL's
+  single row for an ungrouped aggregate.
+- SQL produces the distinct tuples, using the existing compiler, and
+  `query_aggregate::finish` groups and computes for both the SQL path and the
+  reference evaluator. SQLite's own SUM is not used: its integer overflow
+  behavior and float summation order are not ours.
+- Wire: `query.aggregates` entries `{"fn","var","name"}` with fn `count`,
+  `count_distinct`, `sum`, `min` or `max`, and `query.with` names, both
+  optional and emitted only when non-empty. The pod writes `(fn ?var)` in
+  `:select` and `:order`, names the column `fn-var`, accepts `:with`, and
+  returns columns in `:select` order.

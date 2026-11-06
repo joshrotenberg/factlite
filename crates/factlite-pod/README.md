@@ -171,6 +171,24 @@ A query map has `:match` and `:select` (required) and optional `:inputs`,
 
 Params are a map from input name to value: `{:status "done"}`.
 
+Aggregates go in `:select` as `(count ?x)`, `(count-distinct ?x)`,
+`(sum ?x)`, `(min ?x)` or `(max ?x)`; their columns are named `:count-x`,
+`:sum-x` and so on, in `:select` order. The selected variables group. `:order`
+can name an aggregate the same way.
+
+```clojure
+(f/q conn '{:match [[?run :run/recipe ?recipe] [?run :run/cost-usd ?cost]]
+            :select [?recipe (sum ?cost) (count ?run)]
+            :with [?run]
+            :order [[(sum ?cost) :desc]]})
+;; => {:columns [:recipe :sum-cost :count-run], :rows [["review" 77.4 288] ...]}
+```
+
+Aggregates range over distinct tuples of the selected, `:with` and aggregated
+variables. Without `:with [?run]`, two runs with equal cost in one recipe would
+count once. `sum` takes i64 or f64 variables and fails rather than overflow. A
+query with no matches returns no rows, even `(count ?x)` alone.
+
 ## Errors
 
 Every failure is an `ex-info` whose message is the library's message. Library

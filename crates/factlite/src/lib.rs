@@ -46,6 +46,7 @@ mod model;
 #[cfg(test)]
 mod process_recovery;
 mod query;
+mod query_aggregate;
 mod query_eval;
 mod query_sql;
 #[cfg(test)]
@@ -64,7 +65,8 @@ pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use model::{Fact, FactDelta, TxReport};
 pub use query::{
-    Comparison, Direction, Order, Params, Pattern, Predicate, Query, QueryName, QueryResult, Term,
+    Aggregate, AggregateFn, Comparison, Direction, Order, Params, Pattern, Predicate, Query,
+    QueryName, QueryResult, Term,
 };
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
 pub use store::{Store, StoreOptions};

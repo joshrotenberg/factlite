@@ -95,6 +95,16 @@ Entity columns use Ref. Projection removes duplicate tuples before ordering and
 limit. Supply a total order, such as title plus task identity, for predictable
 limited results. Missing facts fail a pattern; no null values are invented.
 
+Aggregates are optional `query.aggregates` entries
+`{"fn":"sum","var":"cost","name":"total"}`, with fn count, count_distinct,
+sum, min or max, plus optional `query.with` variable names. The query projects
+the selected, `with` and aggregated variables, removes duplicate tuples, groups
+by the selected variables, aggregates, then orders and limits. Aggregate names
+follow the selected columns and may be ordered. Include the entity in `with`
+when equal values from different matches must each count. Count results are
+i64; sum keeps its i64 or f64 type, and overflow or a non-finite f64 total is
+an error. No matching tuples give no rows.
+
 ## Backup
 
 `backup --to PATH` emits the full head token copied by SQLite and creates a
