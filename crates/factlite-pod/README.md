@@ -192,9 +192,9 @@ A query map has `:match` and `:select` (required) and optional `:inputs`,
 Params are a map from input name to value: `{:status "done"}`.
 
 Aggregates go in `:select` as `(count ?x)`, `(count-distinct ?x)`,
-`(sum ?x)`, `(min ?x)` or `(max ?x)`; their columns are named `:count-x`,
-`:sum-x` and so on, in `:select` order. The selected variables group. `:order`
-can name an aggregate the same way.
+`(sum ?x)`, `(avg ?x)`, `(min ?x)` or `(max ?x)`; their columns are named
+`:count-x`, `:sum-x` and so on, in `:select` order. The selected variables
+group. `:order` can name an aggregate the same way.
 
 ```clojure
 (f/q conn '{:match [[?run :run/recipe ?recipe] [?run :run/cost-usd ?cost]]
@@ -206,8 +206,24 @@ can name an aggregate the same way.
 
 Aggregates range over distinct tuples of the selected, `:with` and aggregated
 variables. Without `:with [?run]`, two runs with equal cost in one recipe would
-count once. `sum` takes i64 or f64 variables and fails rather than overflow. A
-query with no matches returns no rows, even `(count ?x)` alone.
+count once. `sum` takes i64 or f64 variables and fails rather than overflow.
+`avg` takes the same and returns a double; a long mean is rounded once from
+the exact quotient. A query with no matches returns no rows, even
+`(count ?x)` alone.
+
+`:having` holds comparisons applied to each aggregated row before `:order` and
+`:limit`. In it, `(fn ?x)` names that aggregate's column and `?x` a selected
+variable; other pattern variables are rejected. Inputs and values work as in
+`:where`. A query with `:having` needs at least one aggregate.
+
+```clojure
+(f/q conn '{:match [[?run :run/recipe ?recipe] [?run :run/cost-usd ?cost]]
+            :select [?recipe (avg ?cost) (count ?run)]
+            :with [?run]
+            :inputs {:floor :f64}
+            :having [(> (avg ?cost) $floor) (>= (count ?run) 10)]}
+     {:floor 0.25})
+```
 
 Negation goes in `:where` as `(not clause ...)` or
 `(not-join [?var ...] clause ...)`, where a vector clause is a pattern and a

@@ -21,7 +21,8 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
   and `not-join`) run as
   revision-bounded SQL over a derived datom interval index. Schema reads
   schema events. Transaction enumeration and unfiltered history read the
-  retained reports. Aggregates are computed in Rust over the distinct tuples
+  retained reports. Aggregates (count, count-distinct, sum, avg, min, max,
+  with HAVING) are computed in Rust over the distinct tuples
   that SQL returns, and very large queries fall back to the reference
   evaluator.
 - **Commits:** each commit loads only the state its request can touch.

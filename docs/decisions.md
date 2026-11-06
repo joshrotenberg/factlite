@@ -686,6 +686,35 @@ them.
 - **History:** immutable. Documentation of permanence and application-level
   encryption; a lineage rewrite only if needed; no in-place excision.
 
+## avg and HAVING (12.5)
+
+- `AggregateFn::Avg` takes I64 or F64 variables (anything else is
+  `TypeMismatch`, as for `sum`) and returns F64. It follows the existing
+  distinct-tuple, grouping, `with` and empty-input rules.
+- An I64 mean sums exactly in i128, which cannot overflow for any count that
+  fits in memory, and divides the rational sum/count with one rounding to the
+  nearest f64, ties to even. Converting the sum to f64 first would round twice.
+- An F64 mean divides the ascending-order f64 sum, as `sum` computes it, by
+  the count. The sum rounds at each step, so this is not the correctly rounded
+  mean of the inputs; it is deterministic. A non-finite running sum is an
+  error, so `[MAX, MAX]` fails even though its mean is representable.
+- `Query::having` holds predicates in the `where` shape. A variable in HAVING
+  names a result column: a selected variable or an aggregate name. Pattern
+  and `with` variables that are not result columns are `InvalidRequest`. An
+  aggregate named like a non-selected pattern variable is that aggregate in
+  HAVING. Constants and declared parameters work as in `where`; range
+  comparisons need one type. HAVING needs at least one aggregate.
+- Evaluation: every group is aggregated, then HAVING filters, then ordering
+  and the limit. An aggregate error in a group HAVING would drop still fails
+  the query. A limit of zero returns before aggregating, so it cannot fail.
+  HAVING never reaches the SQL tuple query.
+- Validation order: inputs, patterns, predicates, negations, selection, `with`,
+  aggregates (binding, type, then name), HAVING (left term, right term, then
+  comparison types), ordering.
+- Wire: `"fn":"avg"` and an optional `"having"` array, encoded only when
+  nonempty. Pod: `(avg ?x)`, and `:having` where `(fn ?x)` names that
+  aggregate's column.
+
 ## Transaction lookup refs (12.3)
 
 - Option A1 of the brief: `EntityTerm::Lookup(attr, value)` and

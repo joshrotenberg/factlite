@@ -173,6 +173,19 @@ Integration tests pin validation order, pre-state resolution and transfers,
 ID and lookup collapse, unique reference values, error priority, retries
 after the value moves, replay on reopen, and wire strictness.
 
+Since 12.5, `avg` and HAVING have oracles independent of the shared
+aggregation code. Two unit properties check the rational rounding: below 2^53
+both operands are exact f64s, so IEEE division is the oracle; over the full
+input range, the result must lie within half a unit in the last place of the
+exact quotient, checked in integer arithmetic. Deterministic cases, with
+expected bits from Python's `Fraction`, are means that converting the sum to
+f64 before dividing gets wrong, plus ties, cancellation and a rounding carry.
+The grouped-aggregate oracle property gains `avg` and an optional HAVING
+threshold computed from the generated data. Integration tests pin HAVING
+before the limit, parameters, an aggregate named like a pattern variable,
+overflow in a dropped group, limit zero, and validation order. The SQL parity
+property adds `avg` and HAVING, but shares `finish` with the reference.
+
 Since 12.2, a 1,024-case property checks SQL against the reference evaluator
 for every negation form at one view: `not`, `not-join` with a predicate on a
 local, a local joined across two group patterns, conjunctive groups,

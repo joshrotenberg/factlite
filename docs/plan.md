@@ -309,7 +309,7 @@ Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
   describe the application-level encryption pattern with its equality,
   uniqueness, retry and key-destruction limits, and what physical deletion
   requires.
-- [ ] **12.5 `avg` and HAVING** (roadmap 5, brief 05). Add `AggregateFn::Avg`
+- [x] **12.5 `avg` and HAVING** (roadmap 5, brief 05). Add `AggregateFn::Avg`
   over I64 and F64 variables, returning F64: an I64 average divides the exact
   i128 sum by the count as a rational and rounds once to the nearest f64; an
   F64 average divides the ascending-order sum, which fails if not finite. Add

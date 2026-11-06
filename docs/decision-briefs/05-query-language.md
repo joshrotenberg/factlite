@@ -1,7 +1,8 @@
 # Decision brief: query language extensions (roadmap item 5)
 
 Status: decided 2026-11-06 (see Decision). `not` and `not-join` are
-implemented (plan item 12.2); the rest is not.
+implemented (plan item 12.2), and `avg` and HAVING (plan item 12.5); `or`,
+recursion and nested pull are not.
 
 ## The question
 
