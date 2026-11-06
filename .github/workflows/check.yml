@@ -14,15 +14,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      # Pinned release, checked against the SHA-256 published with it, so the
-      # pod's babashka tests run instead of skipping.
+      # Pinned release. The SHA-256 is the one published with the release
+      # (babashka-1.13.229-linux-amd64-static.tar.gz.sha256). The pod's
+      # babashka tests then run instead of skipping.
       - name: Install babashka 1.13.229
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/bb.tar.gz" \
+          mkdir -p "$RUNNER_TEMP/bb"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/bb.tar.gz" \
             https://github.com/babashka/babashka/releases/download/v1.13.229/babashka-1.13.229-linux-amd64-static.tar.gz
           echo "64fb984991c6e68f44e8a9391176a9bb411f9b9ae9959a6bca5307c75a7414da  $RUNNER_TEMP/bb.tar.gz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/bb.tar.gz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          tar -xzf "$RUNNER_TEMP/bb.tar.gz" -C "$RUNNER_TEMP/bb"
+          echo "$RUNNER_TEMP/bb" >> "$GITHUB_PATH"
+      - name: Check babashka
+        run: bb --version
       - name: Verify workspace
         env:
           REQUIRE_BB: "1"

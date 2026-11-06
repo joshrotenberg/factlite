@@ -28,7 +28,8 @@ VIEW: --at SNAPSHOT_TOKEN or --at-file PATH|- (otherwise capture head once)
 FILTER: --entity ID, --attr ATTR, --value TAGGED_JSON
 --after defaults to 0. Empty --attrs projects no fields.
 Every database command also accepts --busy-timeout-ms MS: how long to wait for
-another process's lock before failing busy (default 2000; 0 fails at once).
+a lock held by another process before failing busy (default 2000; 0 fails at
+once).
 Database commands emit one versioned JSON result. Errors are JSON on stderr.
 Exit codes: 0 success, 2 invalid input, 3 conflict, 4 busy, 5 storage.
 ";
@@ -80,6 +81,7 @@ enum Command {
     Database {
         path: PathBuf,
         command: String,
+        store: StoreOptions,
         options: BTreeMap<String, OsString>,
     },
 }
@@ -101,6 +103,9 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
             PathBuf::from(&args[1]),
             store_options(Some(args[3].clone()))?,
         ));
+    }
+    if args.first().is_some_and(|arg| arg == "init") {
+        return Err(invalid("init expects PATH [--busy-timeout-ms MS]"));
     }
     let mut args = args.into_iter();
     if args.next().as_deref() != Some(std::ffi::OsStr::new("--db")) {
@@ -168,9 +173,12 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
             return Err(invalid(format!("missing option: {option}")));
         }
     }
+    // Validated here, with the other options, before any input is read.
+    let store = store_options(options.remove("--busy-timeout-ms"))?;
     Ok(Command::Database {
         path,
         command,
+        store,
         options,
     })
 }
@@ -218,9 +226,9 @@ fn run(command: Command) -> Result<String> {
         Command::Database {
             path,
             command,
+            store,
             mut options,
         } => {
-            let store = store_options(options.remove("--busy-timeout-ms"))?;
             if command == "backup" {
                 let destination =
                     PathBuf::from(options.remove("--to").expect("required during parse"));

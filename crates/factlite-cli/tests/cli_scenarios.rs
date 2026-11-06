@@ -868,7 +868,7 @@ fn busy_timeout_option_bounds_lock_waits_and_is_validated() {
     use std::time::{Duration, Instant};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("timeout.sqlite");
-    success(
+    let zero = success(
         binary()
             .arg("init")
             .arg(&path)
@@ -876,22 +876,46 @@ fn busy_timeout_option_bounds_lock_waits_and_is_validated() {
     );
     let blocker = rusqlite::Connection::open(&path).unwrap();
     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
-    let started = Instant::now();
-    failure(
-        db(&path)
-            .args(["transact", "--file", "-", "--busy-timeout-ms", "150"])
-            .write_stdin(r#"{"version":1}"#),
-        4,
-        "Busy",
-    );
-    let waited = started.elapsed();
-    // At least the requested wait, and well under the 2 s default.
+    let busy = |millis: &str| {
+        let started = Instant::now();
+        failure(
+            db(&path)
+                .args(["transact", "--file", "-", "--busy-timeout-ms", millis])
+                .write_stdin(r#"{"version":1}"#),
+            4,
+            "Busy",
+        );
+        started.elapsed()
+    };
+    // Lower bounds are exact; the comparison between the two runs absorbs
+    // process startup and runner load without an absolute upper bound.
+    let short = busy("0");
+    let long = busy("1500");
+    assert!(long >= Duration::from_millis(1500), "{long:?}");
     assert!(
-        waited >= Duration::from_millis(150) && waited < Duration::from_millis(1800),
-        "{waited:?}"
+        short + Duration::from_millis(800) <= long,
+        "{short:?} vs {long:?}"
     );
-    // Reads do not take the write lock, so they succeed while it is held.
+    // Reads, reads at a snapshot, and backups do not need the write lock.
     success(db(&path).args(["schema", "--busy-timeout-ms", "0"]));
+    let token = format!(
+        "d1.{}.{}.0",
+        zero["store"].as_str().unwrap().trim_start_matches("s1."),
+        zero["lineage"].as_str().unwrap().trim_start_matches("l1.")
+    );
+    success(db(&path).args(["transactions", "--at", &token, "--busy-timeout-ms", "0"]));
+    let foreign = format!("d1.{}.{}.0", "0".repeat(32), "0".repeat(32));
+    failure(
+        db(&path).args(["schema", "--at", &foreign, "--busy-timeout-ms", "0"]),
+        2,
+        "InvalidSnapshot",
+    );
+    success(
+        db(&path)
+            .args(["backup", "--to"])
+            .arg(dir.path().join("copy.sqlite"))
+            .args(["--busy-timeout-ms", "0"]),
+    );
     blocker.execute_batch("ROLLBACK").unwrap();
     assert_eq!(
         success(
@@ -901,13 +925,34 @@ fn busy_timeout_option_bounds_lock_waits_and_is_validated() {
         )["after"]["revision"],
         "1"
     );
-    for invalid in ["-1", "abc", "1.5", "", "2147483648"] {
+    // init honors the option while another connection holds a new file's lock.
+    let fresh = dir.path().join("fresh.sqlite");
+    let holder = rusqlite::Connection::open(&fresh).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    failure(
+        binary()
+            .arg("init")
+            .arg(&fresh)
+            .args(["--busy-timeout-ms", "0"]),
+        4,
+        "Busy",
+    );
+    holder.execute_batch("ROLLBACK").unwrap();
+    for invalid in ["-1", "abc", "1.5", "", "2147483648", "99999999999999999999"] {
         failure(
             db(&path).args(["schema", "--busy-timeout-ms", invalid]),
             2,
             "InvalidRequest",
         );
     }
+    // An invalid timeout fails before stdin is consumed.
+    failure(
+        db(&path)
+            .args(["transact", "--file", "-", "--busy-timeout-ms", "x"])
+            .write_stdin(r#"{"version":1}"#),
+        2,
+        "InvalidRequest",
+    );
     failure(
         db(&path).args(["schema", "--busy-timeout-ms", "1", "--busy-timeout-ms", "2"]),
         2,
@@ -918,6 +963,14 @@ fn busy_timeout_option_bounds_lock_waits_and_is_validated() {
             .arg("init")
             .arg(dir.path().join("x.sqlite"))
             .args(["--busy-timeout-ms", "x"]),
+        2,
+        "InvalidRequest",
+    );
+    failure(
+        binary()
+            .arg("init")
+            .arg(dir.path().join("y.sqlite"))
+            .arg("--busy-timeout-ms"),
         2,
         "InvalidRequest",
     );

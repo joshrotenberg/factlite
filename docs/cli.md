@@ -122,4 +122,6 @@ with the usual schema/facts/pull/history/transactions/query commands. See
 wait for another process's lock before failing with exit code 4 (`Busy`). The
 default is 2000; 0 fails at once. The value must be unsigned decimal
 milliseconds no greater than 2147483647. Read commands use read-only
-connections and do not wait for writers.
+connections; under WAL a reader does not wait for a writer's lock, but opening
+can still wait briefly, for example while another process switches a new file
+to WAL.
