@@ -8,11 +8,11 @@ use std::{
     process::ExitCode,
 };
 
-use factlite::{Db, ErrorCode, FactFilter, Revision, Store, wire};
+use factlite::{Db, ErrorCode, FactFilter, Revision, Store, StoreOptions, wire};
 use serde_json::json;
 
 const HELP: &str = "Usage:
-  factlite init PATH
+  factlite init PATH [--busy-timeout-ms MS]
   factlite --db PATH backup --to PATH
   factlite --db PATH transact --file PATH|-
   factlite --db PATH pull --entity ID --attrs ATTR[,ATTR...] [VIEW]
@@ -27,6 +27,9 @@ const HELP: &str = "Usage:
 VIEW: --at SNAPSHOT_TOKEN or --at-file PATH|- (otherwise capture head once)
 FILTER: --entity ID, --attr ATTR, --value TAGGED_JSON
 --after defaults to 0. Empty --attrs projects no fields.
+Every database command also accepts --busy-timeout-ms MS: how long to wait for
+a lock held by another process before failing busy (default 2000; 0 fails at
+once).
 Database commands emit one versioned JSON result. Errors are JSON on stderr.
 Exit codes: 0 success, 2 invalid input, 3 conflict, 4 busy, 5 storage.
 ";
@@ -74,10 +77,11 @@ fn typed<T: std::str::FromStr<Err = factlite::Error>>(value: OsString) -> Result
 enum Command {
     Help,
     Version,
-    Init(PathBuf),
+    Init(PathBuf, StoreOptions),
     Database {
         path: PathBuf,
         command: String,
+        store: StoreOptions,
         options: BTreeMap<String, OsString>,
     },
 }
@@ -89,7 +93,19 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
         return Ok(Command::Version);
     }
     if args.len() == 2 && args[0] == "init" {
-        return Ok(Command::Init(PathBuf::from(&args[1])));
+        return Ok(Command::Init(
+            PathBuf::from(&args[1]),
+            StoreOptions::default(),
+        ));
+    }
+    if args.len() == 4 && args[0] == "init" && args[2] == "--busy-timeout-ms" {
+        return Ok(Command::Init(
+            PathBuf::from(&args[1]),
+            store_options(Some(args[3].clone()))?,
+        ));
+    }
+    if args.first().is_some_and(|arg| arg == "init") {
+        return Err(invalid("init expects PATH [--busy-timeout-ms MS]"));
     }
     let mut args = args.into_iter();
     if args.next().as_deref() != Some(std::ffi::OsStr::new("--db")) {
@@ -127,7 +143,7 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
     let mut options = BTreeMap::new();
     while let Some(option) = args.next() {
         let option = text(option)?;
-        if !allowed.contains(&option.as_str()) {
+        if option != "--busy-timeout-ms" && !allowed.contains(&option.as_str()) {
             return Err(invalid(format!("unknown option for {command}: {option}")));
         }
         let value = args
@@ -157,9 +173,12 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
             return Err(invalid(format!("missing option: {option}")));
         }
     }
+    // Validated here, with the other options, before any input is read.
+    let store = store_options(options.remove("--busy-timeout-ms"))?;
     Ok(Command::Database {
         path,
         command,
+        store,
         options,
     })
 }
@@ -176,32 +195,53 @@ fn read_input(path: &Path) -> Result<String> {
     };
     String::from_utf8(bytes).map_err(|_| invalid("JSON input must be UTF-8"))
 }
-fn open_existing(path: &Path) -> Result<Store> {
+/// Connection settings from `--busy-timeout-ms`, validated by the library.
+fn store_options(timeout: Option<OsString>) -> Result<StoreOptions> {
+    let Some(timeout) = timeout else {
+        return Ok(StoreOptions::default());
+    };
+    let millis = text(timeout)?;
+    if millis.is_empty() || !millis.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid(
+            "--busy-timeout-ms expects unsigned decimal milliseconds",
+        ));
+    }
+    let millis: u64 = millis
+        .parse()
+        .map_err(|_| invalid("--busy-timeout-ms is out of range"))?;
+    Ok(StoreOptions::new().with_busy_timeout(std::time::Duration::from_millis(millis))?)
+}
+fn open_existing(path: &Path, options: &StoreOptions) -> Result<Store> {
     // CLI creation is explicit, even though the library's Store::open can initialize.
     std::fs::metadata(path).map_err(|error| Failure::Io("open database", error))?;
-    Ok(Store::open(path)?)
+    Ok(Store::open_with(path, options)?)
 }
 fn run(command: Command) -> Result<String> {
     match command {
         Command::Help => Ok(HELP.into()),
         Command::Version => Ok(format!("factlite {}", env!("CARGO_PKG_VERSION"))),
-        Command::Init(path) => Ok(wire::encode_snapshot(&Store::open(path)?.head()?)),
+        Command::Init(path, store) => Ok(wire::encode_snapshot(
+            &Store::open_with(path, &store)?.head()?,
+        )),
         Command::Database {
             path,
             command,
+            store,
             mut options,
         } => {
             if command == "backup" {
                 let destination =
                     PathBuf::from(options.remove("--to").expect("required during parse"));
                 return Ok(wire::encode_snapshot(
-                    &open_existing(&path)?.backup(destination)?,
+                    &open_existing(&path, &store)?.backup(destination)?,
                 ));
             }
             if command == "transact" {
                 let file = PathBuf::from(options.remove("--file").expect("required during parse"));
                 let request = wire::decode_tx(&read_input(&file)?)?;
-                return Ok(wire::encode_report(&open_existing(&path)?.commit(request)?));
+                return Ok(wire::encode_report(
+                    &open_existing(&path, &store)?.commit(request)?,
+                ));
             }
             let at = if let Some(file) = options.remove("--at-file") {
                 Some(wire::decode_snapshot(&read_input(&PathBuf::from(file))?)?)
@@ -239,8 +279,8 @@ fn run(command: Command) -> Result<String> {
                 })
                 .transpose()?;
             let db = match at {
-                Some(snapshot) => Db::open_read_only_at(&path, &snapshot)?,
-                None => Db::open_read_only(&path)?,
+                Some(snapshot) => Db::open_read_only_with(&path, &store)?.at(&snapshot)?,
+                None => Db::open_read_only_with(&path, &store)?,
             };
             let filter = FactFilter {
                 entity: entity.clone(),

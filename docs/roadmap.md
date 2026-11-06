@@ -90,9 +90,8 @@ and which consumer needs it.
 
 None of these needs a design decision; each could be done directly.
 
-- The CLI has no busy-timeout flag; the library and pod do (item 11.1).
-- CI (`.github/workflows`) does not install babashka, so the pod's babashka
-  tests skip there. Installing it and setting `REQUIRE_BB` would make them run.
+- Done 2026-11-06: the CLI accepts `--busy-timeout-ms`, and CI installs
+  babashka 1.13.229 and runs the pod's babashka tests with `REQUIRE_BB`.
 - No query-planner statistics (`ANALYZE`) are kept. Plans rely on SQLite
   defaults, which were adequate for every measured query.
 - CLI read commands open the file per process and so replay the whole log

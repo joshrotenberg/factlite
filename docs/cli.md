@@ -115,3 +115,13 @@ validated standalone file at a new destination. It copies all retained history,
 including WAL commits, without replacing an existing path or sidecar. Read it
 with the usual schema/facts/pull/history/transactions/query commands. See
 [backup and lineage rules](backup.md) before resuming writes from a restored copy.
+
+## Busy timeout
+
+`init` and every database command accept `--busy-timeout-ms MS`: how long to
+wait for another process's lock before failing with exit code 4 (`Busy`). The
+default is 2000; 0 fails at once. The value must be unsigned decimal
+milliseconds no greater than 2147483647. Read commands use read-only
+connections; under WAL a reader does not wait for a writer's lock, but opening
+can still wait briefly, for example while another process switches a new file
+to WAL.

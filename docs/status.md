@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 183 tests, including forty-nine 1,024-case properties, plus the
+gate passed 184 tests, including forty-nine 1,024-case properties, plus the
 asserted Rust workflow. Items 9 to 11 add indexed reads and commits, a babashka pod, and consumer
 requests (lookups, aggregates, keyword and inst types). The repository is
 published to a private GitHub remote, where CI passed 181 tests on Linux.
@@ -700,6 +700,17 @@ Reviews are self-reviews; no independent review has run.
   and succeeding after release. 183 tests pass.
 - **What's next:** roadmap item 4 (lookup refs in transactions) needs a
   decision brief; item 3's brief (PR #5) awaits the user.
+
+## Roadmap 8: CLI busy timeout and babashka in CI: done
+
+- **Done:** `--busy-timeout-ms` on `init` and every database command, and CI
+  that installs a checksum-pinned babashka and requires the pod's babashka
+  tests. 184 tests pass with `REQUIRE_BB=1`.
+  Review: `reviews/0046-cli-timeout-ci-babashka.md`.
+- **Left open:** `ANALYZE` (no measured need), and per-process CLI opens, which
+  wait on the item 3 decision.
+- **What's next:** item 9 (documentation) needs a decision brief; items 3, 4, 5
+  and 6 await decisions in PRs #5, #7, #8 and #9.
 
 ## Environment notes
 

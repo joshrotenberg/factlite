@@ -162,3 +162,8 @@ and backups cover keyword and inst. Unit tests cover keyword validation,
 accessors and cross-type distinctions. An upgrade test rebuilds a real format-3
 layout (type checks 0..=5), opens it, verifies parity at every revision, and
 commits keyword and inst facts.
+
+CI installs babashka 1.13.229 from its pinned release, verified by checksum, and
+sets `REQUIRE_BB`, so the pod's babashka tests fail rather than skip if `bb` is
+missing. A CLI scenario holds a write lock and checks that `--busy-timeout-ms`
+bounds the wait, that reads are unaffected, and that invalid values exit 2.
