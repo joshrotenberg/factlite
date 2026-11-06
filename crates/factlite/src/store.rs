@@ -1,7 +1,7 @@
 use std::{
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
@@ -222,15 +222,24 @@ impl Store {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
         )?;
-        connection.busy_timeout(options.busy_timeout)?;
-        connection.pragma_update(None, "foreign_keys", true)?;
-        connection.pragma_update(None, "synchronous", "FULL")?;
+        let configure = |e| Error::storage("open: configure connection", e);
+        connection
+            .busy_timeout(options.busy_timeout)
+            .map_err(configure)?;
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .map_err(configure)?;
+        connection
+            .pragma_update(None, "synchronous", "FULL")
+            .map_err(configure)?;
         // An existing current-format store is validated in a deferred read
         // transaction: under WAL its snapshot never blocks writers, and it never
         // waits for them. Only initialization and the format-1 upgrade write,
         // so only they take the write lock, and they recheck the file once it
         // is held because another process may have changed it meanwhile.
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Deferred)
+            .map_err(|e| Error::storage("open: begin read", e))?;
         match file_kind(&transaction)? {
             FileKind::Current => {
                 validate_current(&transaction)?;
@@ -238,23 +247,24 @@ impl Store {
             }
             FileKind::Empty | FileKind::Older(_) => {
                 transaction.rollback()?;
-                let transaction =
-                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let transaction = connection
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(|e| Error::storage("open: begin write", e))?;
                 match file_kind(&transaction)? {
                     FileKind::Empty => initialize(&transaction)?,
                     FileKind::Older(version) => upgrade(&transaction, version)?,
                     FileKind::Current => {}
                 }
                 validate_current(&transaction)?;
-                transaction.commit()?;
+                transaction
+                    .commit()
+                    .map_err(|e| Error::storage("open: commit initialization", e))?;
             }
         }
-        connection.pragma_update(None, "journal_mode", "WAL")?;
-        let mode: String = connection.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
-        if mode != "wal" {
-            return Err(corrupt("WAL journal mode could not be enabled"));
-        }
-        connection.pragma_update(None, "synchronous", "FULL")?;
+        enable_wal(&connection, options.busy_timeout)?;
+        connection
+            .pragma_update(None, "synchronous", "FULL")
+            .map_err(|e| Error::storage("open: configure connection", e))?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
@@ -297,6 +307,48 @@ impl Store {
             .lock()
             .map_err(|_| corrupt("store connection lock poisoned"))
     }
+}
+
+// Switching a rollback-journal file to WAL needs exclusive access. When other
+// connections are opening the same new file at once, SQLite can return
+// SQLITE_BUSY for this step without invoking the busy handler, or report the
+// old mode instead of switching. Retry until the pragma reports "wal", within
+// the configured busy timeout overall: each attempt's own busy wait is limited
+// to the remaining budget, and the original timeout is restored afterwards.
+// Once any connection has switched, the pragma is a no-op that reports "wal".
+// A file another connection keeps open in rollback mode also uses up the whole
+// budget before failing Busy.
+fn enable_wal(connection: &Connection, timeout: Duration) -> Result<()> {
+    let label = |source| Error::storage("open: enable WAL", source);
+    let deadline = Instant::now() + timeout;
+    let mut pause = Duration::from_millis(1);
+    let result = loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        connection.busy_timeout(remaining).map_err(label)?;
+        let (error, retryable) = match connection
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0))
+        {
+            Ok(mode) if mode == "wal" => break Ok(()),
+            // SQLite reports the unchanged mode when it could not switch.
+            Ok(mode) => (
+                corrupt(format!("journal mode stayed {mode}, not wal")),
+                true,
+            ),
+            Err(source) => {
+                let error = label(source);
+                let busy = error.code() == ErrorCode::Busy;
+                (error, busy)
+            }
+        };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if !retryable || remaining.is_zero() {
+            break Err(error);
+        }
+        std::thread::sleep(pause.min(remaining));
+        pause = (pause * 2).min(Duration::from_millis(50));
+    };
+    connection.busy_timeout(timeout).map_err(label)?;
+    result
 }
 
 enum FileKind {
