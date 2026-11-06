@@ -1,17 +1,14 @@
 # Work status
 
-Steps 0–7 are complete locally. Typed atomic commits, authoritative replay,
-owned pinned reads, strict interchange, exact retries, historical SQL queries,
-CLI parity, process recovery and standalone backups are implemented and tested.
-The latest gate passed 142 tests, including forty-two 1,024-case properties,
-plus the asserted Rust workflow example.
-The manual release profiler also passed separately. Verified keyed replay state
-reuse reduced head-query medians 18–53% across the measured workloads; full-log
-costs remain and no production latency target exists. The Rust workflow guide
-and independent mixed stateful traces are complete.
-The handoff archive has been restored and verified; remote publication is next.
-Reviews
-are self-reviews; remote CI and independent review have not run.
+Steps 0–7 and item 8.1 are complete locally. Typed atomic commits, authoritative
+replay, owned pinned reads, strict interchange, exact retries, historical SQL
+queries, CLI parity, process recovery and standalone backups are implemented and
+tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
+load the pinned state from that index instead of replaying the log. The latest
+gate passed 147 tests, including forty-three 1,024-case properties, plus the
+asserted Rust workflow. Remote publication (8.2) and direct indexed reads (9.2)
+are open. Reviews are self-reviews; remote CI and independent review have not
+run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -492,6 +489,31 @@ are self-reviews; remote CI and independent review have not run.
 - **What's next:** Publish to the selected remote and compare all branch refs
   plus a fresh clone before declaring the remote handoff complete.
 
+## 9.1 Temporal datom index: done
+
+- **Done:** Format 2 adds a `datoms` interval table, written inside each commit
+  transaction. Reads and commit evaluation load state at R from bounded schema/
+  entity events and visible intervals. Every open runs full replay, compares
+  stored intervals with intervals derived from fact events, and cross-checks
+  indexed head state against replay. Writable opens upgrade format-1 files
+  atomically. All 147 tests passed, including forty-three 1,024-case properties;
+  full checks passed. Review: `reviews/0032-temporal-datom-index.md`.
+- **Decisions:** The log stays authoritative and the index is derived and
+  fail-closed. Integrity is established at open, not per read. Read-only opens
+  of format-1 files fail `UnsupportedFormat`. Columns reuse fact-event encodings
+  (text identities). Queries keep the TEMP relation for now. See `decisions.md`.
+- **Measured:** On an Apple M4 Pro at 1,000 tasks/50 revisions, head-query median
+  fell from 41.088 to 4.922ms and no-op commit from 45.124 to 2.901ms. Read-only
+  open rose 5–28%, and per-process CLI commands still pay full replay. See
+  `measurements.md`.
+- **Also:** The CLI non-UTF-8 path test now runs its file round trip only where
+  the filesystem accepts such names. APFS rejects them, so it failed on macOS.
+- **Blockers:** None locally. No git remote is configured; license is unselected.
+- **What's next:** Item 9.2, revision-bounded SQL for facts/pull/query directly
+  over intervals. Open-time cost (full replay per open) is a separate decision.
+  Options include an explicit verify command, or verified checkpoints that bound
+  replay at open.
+
 ## Environment notes
 
 The local toolchain lives outside Git in `/workspace/.factlite-tools`. For this
@@ -503,5 +525,5 @@ offline. The database and CLI require no outbound network access.
 
 ## Open repository decisions
 
-- Remote hosting destination: none selected; branch/review/merge is local.
+- Remote hosting destination: none configured in this checkout; branch/review/merge is local.
 - License: none selected; publishing is disabled.

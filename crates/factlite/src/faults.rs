@@ -48,6 +48,8 @@ fn every_write_stage_rolls_back_reports_metadata_schema_allocations_facts_and_he
         "CREATE TEMP TRIGGER injected BEFORE INSERT ON main.entity_events WHEN NEW.ordinal=1 BEGIN SELECT RAISE(ABORT,'late allocation fault'); END;",
         "CREATE TEMP TRIGGER injected BEFORE INSERT ON main.fact_events BEGIN SELECT RAISE(ABORT,'fact fault'); END;",
         "CREATE TEMP TRIGGER injected BEFORE INSERT ON main.fact_events WHEN NEW.ordinal=1 BEGIN SELECT RAISE(ABORT,'late fact fault'); END;",
+        "CREATE TEMP TRIGGER injected BEFORE INSERT ON main.datoms BEGIN SELECT RAISE(ABORT,'interval fault'); END;",
+        "CREATE TEMP TRIGGER injected BEFORE INSERT ON main.datoms WHEN (SELECT COUNT(*) FROM main.datoms)>=2 BEGIN SELECT RAISE(ABORT,'late interval fault'); END;",
         "CREATE TEMP TRIGGER injected BEFORE UPDATE ON main.store_info BEGIN SELECT RAISE(ABORT,'head fault'); END;",
     ];
     for injection in injections {
@@ -84,6 +86,7 @@ fn every_write_stage_rolls_back_reports_metadata_schema_allocations_facts_and_he
                 "SELECT COUNT(*) FROM schema_events",
                 "SELECT COUNT(*) FROM entity_events",
                 "SELECT COUNT(*) FROM fact_events",
+                "SELECT COUNT(*) FROM datoms",
             ] {
                 assert_eq!(
                     connection

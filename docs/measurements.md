@@ -148,3 +148,33 @@ The original replay path remains in test builds for typed randomized parity and
 future-allocation checks. Independent domain traces, corruption, rollback,
 forced writer isolation, abrupt process recovery, backup and CLI checks are the
 semantic gate for this change. See `reviews/0030-verified-replay-state-reuse.md`.
+
+## Temporal datom index (9.1): 2026-11-05
+
+Item 9.1 loads the state at R from revision-bounded schema/entity events and
+datom intervals instead of replaying the log for each read and commit. Open still
+replays and validates the full log, and now also verifies the index.
+
+Both runs used the unchanged workload runner on the same host, one after the
+other, with the release build of `main` at `7bc5d2f` and of the 9.1 branch.
+Host: Apple M4 Pro, 14 CPUs, macOS 27.2, APFS internal SSD, Rust 1.99.1,
+bundled SQLite 3.53.2, WAL/FULL. These are warm local observations, not an SLA,
+and are not comparable to the earlier Linux container tables above. Raw outputs:
+[before](benchmarks/2026-11-05-macos-before.jsonl),
+[after](benchmarks/2026-11-05-macos-after.jsonl). Medians in milliseconds:
+
+| Tasks / revision | Read-only open | Query at revision 1 | Query at captured head | Facts at head | New no-op commit |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 10 / 10 | 0.357 → 0.456 | 0.158 → 0.104 | 0.316 → 0.103 | 0.254 → 0.038 | 0.503 → 0.136 |
+| 100 / 50 | 4.675 → 5.226 | 1.041 → 0.512 | 4.726 → 0.504 | 4.451 → 0.255 | 5.074 → 0.384 |
+| 1,000 / 50 | 39.266 → 44.892 | 10.066 → 4.942 | 41.088 → 4.922 | 38.540 → 2.499 | 45.124 → 2.901 |
+| 100 / 250 | 19.748 → 20.656 | 1.140 → 0.616 | 19.703 → 0.547 | 19.327 → 0.271 | 19.555 → 0.361 |
+
+At 1,000 tasks/50 revisions, head-query p95 changed from 42.085 to 5.140ms and
+no-op commit p95 from 48.279 to 4.305ms. Query, fact and commit costs now track
+live state size rather than retained revision count: the 100-task workloads at
+50 and 250 revisions are close. Read-only open is 5–28% slower because it adds
+index derivation/comparison and an indexed-state cross-check to full replay. CLI
+commands open the file per process, so their elapsed time still includes full
+replay; only long-lived `Store`/`Db` handles gain the per-operation improvement.
+Queries still copy the visible state into a TEMP relation (item 9.2).

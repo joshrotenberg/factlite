@@ -66,6 +66,10 @@ impl EntityId {
         Ok(Self { store, allocation })
     }
 
+    pub(crate) fn allocation(&self) -> u64 {
+        self.allocation
+    }
+
     /// Returns the store binding encoded in this identity.
     pub fn store(&self) -> &StoreId {
         &self.store

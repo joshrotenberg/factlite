@@ -15,9 +15,10 @@ without allocating or advancing revision again. Strict versioned JSON decoders
 share the Rust request/value invariants.
 The CLI supports init, transact, schema, facts, pull, history, transactions, and
 joined queries, including portable snapshots and exact retries. Rust and JSON
-queries share typed validation and results. Bound SQL joins use a temporary
-relation reconstructed from the pinned historical log; large ASTs retain the
-reference evaluator as a fallback. Process recovery and safe standalone backups
+queries share typed validation and results. Reads and commits load the pinned state
+from a derived datom interval index, verified against full log replay on every
+open. Bound SQL joins use a temporary relation built from that state; large ASTs
+retain the reference evaluator as a fallback. Process recovery and safe standalone backups
 are verified; read-only views preserve historical tokens. Reproducible workload
 measurements document replay costs and the current optimization decision.
 
@@ -26,7 +27,7 @@ measurements document replay costs and the current optimization decision.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
 - [Acceptance audit](docs/acceptance.md): tests mapped to the supplied contract.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
-- [Measurements](docs/measurements.md): reproducible workloads and replay costs.
+- [Measurements](docs/measurements.md): reproducible workloads, replay and index costs.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 - [Rust guide](docs/rust.md): an executable application workflow and API choices.

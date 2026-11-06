@@ -29,8 +29,10 @@ Concurrent-connection tests use barriers and no scheduling sleeps.
 Reader isolation tests force a separate WAL writer to commit between head reads
 and the first log read using test-only authorizer callbacks. All six public read
 surfaces keep A; an operation-boundary test also checks SQL head and log remain
-at A even with a deliberately broad log bound. No current projection exists yet;
-introducing one requires its own forced head-check/read race regression.
+at A even with a deliberately broad log bound. Since 9.1 each read surface is
+also forced at two more points: before its SQL snapshot starts (first
+`store_info` read, so B is visible and only revision bounds keep A) and after
+it starts (first `datoms` read, so B must be invisible).
 
 The CLI's nine assert_cmd scenarios exercise separate processes, complete A/B/
 reopen/retry reports, Rust parity, all types and error codes, streams/exit codes,
@@ -93,3 +95,11 @@ The full gate reruns independent stateful, fault, isolation, crash/recovery,
 backup and CLI tests through the optimized public path. A deliberately ignored
 manual stage profile is run separately in release mode; its timings are benchmark
 evidence, not an additional ordinary semantic test or a latency assertion.
+
+The datom index is compared with full replay at every revision of 1,024 random
+mixed histories over all six types and both cardinalities, including conflicting
+batches, retract/reassert cycles and reopen. The typed replay-parity trace also
+compares indexed state at each basis. Deterministic tests cover separate
+intervals for a reasserted fact, format-1 upgrade and its rollback on failure,
+six interval tampering forms on writable and read-only open, and two interval
+write faults in the rollback suite.

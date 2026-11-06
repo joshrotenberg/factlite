@@ -75,11 +75,11 @@ The API guide is `docs/rust.md`; CLI and backup guides are `docs/cli.md` and
 `docs/backup.md`. Continue bounded branch → work → tests → self-review → merge
 increments, reporting done, decisions, blockers and what's next after each item.
 
-The runtime still replays retained history. Verified keyed-state reuse reduced
-measured head-query medians 18–53% in the recorded workloads; those are warm
-container observations, not a production SLA. Select a real workload and budget
-before designing caches/checkpoints/projections. Existing reference, stateful,
-fault, isolation, recovery and backup tests must gate future optimized paths.
+Since item 9.1, reads and commits load state from a derived, verified datom
+interval index; open still replays and validates the full retained log. See
+`measurements.md` for observed costs; they are not a production SLA. Existing
+reference, stateful, fault, isolation, recovery and backup tests must gate
+future optimized paths.
 
 Server/NIF integration, JMESPath, subscriptions and other explicitly deferred
 design scope remain deferred. The license and production workload are open
