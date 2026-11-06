@@ -168,39 +168,30 @@ impl Store {
         connection.busy_timeout(Duration::from_secs(2))?;
         connection.pragma_update(None, "foreign_keys", true)?;
         connection.pragma_update(None, "synchronous", "FULL")?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let application: i32 =
-            transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-        let version: i32 =
-            transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        let tables = table_names(&transaction)?;
-        let user_objects: i64 = transaction.query_row(
-            "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
-            [],
-            |row| row.get(0),
-        )?;
-        if application == 0 && version == 0 && tables.is_empty() && user_objects == 0 {
-            transaction.execute_batch(DDL)?;
-            transaction.execute_batch(crate::index::DDL)?;
-            transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
-            transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
-            let store = format!("s1.{}", uuid::Uuid::new_v4().simple());
-            let lineage = format!("l1.{}", uuid::Uuid::new_v4().simple());
-            transaction.execute("INSERT INTO store_info(singleton,format,store_id,lineage_id,head) VALUES(1,?1,?2,?3,?4)",rusqlite::params![FORMAT_VERSION,store,lineage,revision_bytes(Revision::ZERO).as_slice()])?;
-        } else if application == APPLICATION_ID && version == FORMAT_V1 {
-            upgrade_v1(&transaction)?;
-        } else if application != APPLICATION_ID || version != FORMAT_VERSION {
-            return Err(Error::new(
-                ErrorCode::UnsupportedFormat,
-                ErrorContext::InvalidInput { field: "format" },
-                "file is not a supported Factlite database",
-            ));
+        // An existing current-format store is validated in a deferred read
+        // transaction: under WAL its snapshot never blocks writers, and it never
+        // waits for them. Only initialization and the format-1 upgrade write,
+        // so only they take the write lock, and they recheck the file once it
+        // is held because another process may have changed it meanwhile.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        match file_kind(&transaction)? {
+            FileKind::Current => {
+                validate_current(&transaction)?;
+                transaction.commit()?;
+            }
+            FileKind::Empty | FileKind::FormatOne => {
+                transaction.rollback()?;
+                let transaction =
+                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                match file_kind(&transaction)? {
+                    FileKind::Empty => initialize(&transaction)?,
+                    FileKind::FormatOne => upgrade_v1(&transaction)?,
+                    FileKind::Current => {}
+                }
+                validate_current(&transaction)?;
+                transaction.commit()?;
+            }
         }
-        if table_names(&transaction)? != TABLES {
-            return Err(corrupt("database tables do not match the supported format"));
-        }
-        validate_head(&transaction)?;
-        transaction.commit()?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         let mode: String = connection.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if mode != "wal" {
@@ -249,6 +240,64 @@ impl Store {
             .lock()
             .map_err(|_| corrupt("store connection lock poisoned"))
     }
+}
+
+enum FileKind {
+    Empty,
+    FormatOne,
+    Current,
+}
+
+// Classifies the file without changing it. Unrelated or unsupported files fail
+// here, before any schema change.
+fn file_kind(connection: &Connection) -> Result<FileKind> {
+    let application: i32 =
+        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let user_objects: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
+        [],
+        |row| row.get(0),
+    )?;
+    if application == 0 && version == 0 && user_objects == 0 {
+        Ok(FileKind::Empty)
+    } else if application == APPLICATION_ID && version == FORMAT_V1 {
+        Ok(FileKind::FormatOne)
+    } else if application == APPLICATION_ID && version == FORMAT_VERSION {
+        Ok(FileKind::Current)
+    } else {
+        Err(Error::new(
+            ErrorCode::UnsupportedFormat,
+            ErrorContext::InvalidInput { field: "format" },
+            "file is not a supported Factlite database",
+        ))
+    }
+}
+
+fn initialize(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(DDL)?;
+    transaction.execute_batch(crate::index::DDL)?;
+    transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
+    transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
+    let store = format!("s1.{}", uuid::Uuid::new_v4().simple());
+    let lineage = format!("l1.{}", uuid::Uuid::new_v4().simple());
+    transaction.execute(
+        "INSERT INTO store_info(singleton,format,store_id,lineage_id,head) VALUES(1,?1,?2,?3,?4)",
+        rusqlite::params![
+            FORMAT_VERSION,
+            store,
+            lineage,
+            revision_bytes(Revision::ZERO).as_slice()
+        ],
+    )?;
+    Ok(())
+}
+
+fn validate_current(connection: &Connection) -> Result<()> {
+    if table_names(connection)? != TABLES {
+        return Err(corrupt("database tables do not match the supported format"));
+    }
+    validate_head(connection)
 }
 
 // Adds and derives the datom index for a format-1 file inside the open

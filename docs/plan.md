@@ -197,6 +197,12 @@ state without changing semantics. The log stays authoritative.
   revision-bounded SQL over the interval table, without loading the complete
   state at R. Compare every path with the reference evaluator over replayed
   state, including historical schema and the forced writer interleaving.
+- [x] **9.3 Open without the write lock.** Validate an existing current-format
+  file in a deferred read transaction. Take the write lock only to initialize an
+  empty file or upgrade format 1, rechecking the file once it is held. Test that
+  open succeeds promptly while another connection holds the write lock, that
+  concurrent first opens create one identity, and that initialization and
+  commits still fail `Busy` within a bound.
 
 ## Step 10: Babashka pod
 
