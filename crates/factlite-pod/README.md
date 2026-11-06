@@ -93,6 +93,7 @@ reject unknown keys.
 | `transact` | `[conn tx]` | the transaction report |
 | `schema` | `[conn]` `[conn opts]` | attribute definitions |
 | `pull` | `[conn entity attrs]` `[conn entity attrs opts]` | `{:id ...}` plus present attributes, or nil |
+| `lookup` | `[conn [attr value]]` `[conn [attr value] opts]` | `{:id ...}` or nil |
 | `facts` | `[conn]` `[conn filter]` `[conn filter opts]` | `[entity attr value]` vectors |
 | `history` | `[conn]` `[conn filter]` `[conn filter opts]` | effective fact events |
 | `transactions` | `[conn]` `[conn opts]` | committed reports, including no-change commits |
@@ -145,6 +146,13 @@ or reports in `(after, revision]`. History events are maps with `:revision`,
 
 Filters for `facts` and `history` are maps with optional `:entity`, `:attr`
 and `:value`.
+
+Wherever a read takes an entity (`pull`, and `:entity` in filters), a lookup
+ref `[attr value]` names the entity whose `:unique-one` attribute has that
+value at the read's revision: `(f/pull conn [:run/key "A/run-3"] [:run/status])`.
+A lookup that matches nothing makes `pull` return nil and filters match
+nothing. The attribute must be unique and the value of its type. Transactions
+take `{:id ...}` and `{:temp ...}` only.
 
 Snapshots are `{:version 1 :store "s1..." :lineage "l1..." :revision n}`.
 

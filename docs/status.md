@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 169 tests, including forty-seven 1,024-case properties, plus the
+gate passed 172 tests, including forty-seven 1,024-case properties, plus the
 asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
 into the strict wire requests. Remote publication (8.2) and direct indexed reads
 (9.2) are open. Reviews are self-reviews; remote CI and independent review have not
@@ -615,6 +615,16 @@ run.
 - **Decisions:** See `decisions.md`.
 - **Blockers:** None locally.
 - **What's next:** 11.2 lookup refs, then 11.3 indexed filtered history.
+
+## 11.2 Lookup refs for reads: done
+
+- **Done:** `Db::lookup`, CLI `lookup`, and pod lookup refs in `pull`,
+  filters and a `lookup` var. All 172 tests passed; full checks passed.
+  Review: `reviews/0039-lookup-refs.md`.
+- **Decisions:** Reads only; transactions keep `{:id}`/`{:temp}`. See
+  `decisions.md`.
+- **Blockers:** None locally.
+- **What's next:** 11.3 indexed filtered history.
 
 ## Environment notes
 

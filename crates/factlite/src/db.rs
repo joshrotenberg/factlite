@@ -231,6 +231,47 @@ impl Db {
         })
     }
 
+    /// The entity whose `attribute` has exactly `value` at this basis, if any.
+    /// The attribute must be visible and `unique_one`, and the value must have
+    /// its type, so at most one entity can match. A lookup never creates or
+    /// merges entities.
+    pub fn lookup(&self, attribute: &AttrName, value: &Value) -> Result<Option<EntityId>> {
+        self.read_basis(|transaction| {
+            let schema = crate::index::schema_at(transaction, &self.snapshot)?;
+            let definition = require_attribute(&schema, attribute)?;
+            if definition.uniqueness() != crate::Uniqueness::UniqueOne {
+                return Err(Error::new(
+                    ErrorCode::InvalidRequest,
+                    ErrorContext::Attribute {
+                        attribute: attribute.clone(),
+                    },
+                    "lookup attribute must be unique_one",
+                ));
+            }
+            if definition.value_type() != value.value_type() {
+                return Err(Error::new(
+                    ErrorCode::TypeMismatch,
+                    ErrorContext::TypeMismatch {
+                        expected: definition.value_type(),
+                        actual: value.value_type(),
+                    },
+                    "lookup value has the wrong type for its attribute",
+                ));
+            }
+            let mut owners = crate::index::facts_matching(
+                transaction,
+                &self.snapshot,
+                None,
+                Some(attribute),
+                Some(value),
+            )?;
+            if owners.len() > 1 {
+                return Err(crate::store::corrupt("unique value has several owners"));
+            }
+            Ok(owners.pop().map(|fact| fact.entity))
+        })
+    }
+
     /// Effective events in (after, basis], in revision/ordinal order.
     pub fn history(&self, filter: FactFilter, after: Revision) -> Result<Vec<FactEvent>> {
         self.validate_after(after)?;

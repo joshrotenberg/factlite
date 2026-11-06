@@ -173,6 +173,26 @@
 (check "bad arity" (= "InvalidRequest" (:code (failure #(f/head conn conn)))))
 (check "unknown opts key" (= "InvalidRequest" (:code (failure #(f/schema conn {:as-of 1})))))
 
+(def emailed (f/transact conn {:changes [[:assert ada :person/email "ada@example.com"]]}))
+(check "lookup" (= ada (f/lookup conn [:person/email "ada@example.com"])))
+(check "lookup before assignment" (nil? (f/lookup conn [:person/email "ada@example.com"] {:at (:after a)})))
+(check "lookup missing value" (nil? (f/lookup conn [:person/email "nobody@example.com"])))
+(check "pull by lookup ref" (= {:id (:id ada) :person/name "Ada"}
+                               (f/pull conn [:person/email "ada@example.com"] [:person/name])))
+(check "pull by unmatched lookup ref" (nil? (f/pull conn [:person/email "nobody@example.com"] [:person/name])))
+(check "unmatched lookup still validates attrs"
+       (= "UnknownAttribute" (:code (failure #(f/pull conn [:person/email "nobody@example.com"] [:person/nope])))))
+(check "facts by lookup ref" (= [[ada :person/name "Ada"]]
+                                (f/facts conn {:entity [:person/email "ada@example.com"] :attr :person/name})))
+(check "facts by unmatched lookup ref" (= [] (f/facts conn {:entity [:person/email "nobody@example.com"]})))
+(check "history by lookup ref" (= [(:revision (:after emailed))]
+                                  (map :revision (f/history conn {:entity [:person/email "ada@example.com"]
+                                                                  :attr :person/email}))))
+(check "lookup on non-unique attribute" (= "InvalidRequest" (:code (failure #(f/lookup conn [:person/name "Ada"])))))
+(check "lookup with wrong type" (= "TypeMismatch" (:code (failure #(f/lookup conn [:person/email 1])))))
+(check "lookup refs are not transaction entities"
+       (= "InvalidRequest" (:code (failure #(f/transact conn {:changes [[:assert [:person/email "ada@example.com"] :person/name "A"]]})))))
+
 (def reader (f/open path {:read-only true :busy-timeout-ms 500}))
 (check "read-only head follows writer" (= (f/head conn) (f/head reader)))
 (check "read-only history" (= "todo" (:task/status (f/pull reader task [:task/status] {:at (:after a)}))))

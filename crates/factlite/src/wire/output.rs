@@ -36,6 +36,10 @@ pub fn encode_entity(entity: Option<&Entity>) -> String {
         Some(entity) => json!({"version":1,"entity":{"id":entity.id.to_string()},"attributes":entity.attributes.iter().map(|(name,value)| (name.as_str().to_owned(),match value { PulledValue::One(value) => value_json(value),PulledValue::Many(values) => json!(values.iter().map(value_json).collect::<Vec<_>>()) })).collect::<Map<_,_>>()}).to_string(),
     }
 }
+/// Encode a lookup result: the matching entity, or null.
+pub fn encode_lookup(entity: Option<&crate::EntityId>) -> String {
+    json!({"version":1,"entity":entity.map(|id| json!({"id":id.to_string()}))}).to_string()
+}
 /// Encode historically visible definitions.
 pub fn encode_schema(schema: &Schema) -> String {
     json!({"version":1,"schema":schema.attributes().map(definition_json).collect::<Vec<_>>()} )

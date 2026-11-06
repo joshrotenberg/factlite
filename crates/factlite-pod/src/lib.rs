@@ -196,7 +196,7 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
             "[conn entity attrs] or [conn entity attrs opts]",
         )?;
         let conn = conn(&s, &args[0])?;
-        let id = convert::entity_id(&args[1])?;
+        let entity = convert::entity_ref(&args[1])?;
         let attrs = match &args[2] {
             Clj::Vector(attrs) | Clj::List(attrs) | Clj::Set(attrs) => attrs
                 .iter()
@@ -212,8 +212,35 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
         let mut opts = Fields::optional(args.get(3), "opts")?;
         let db = view(&conn, opts.take("at"))?;
         opts.finish()?;
+        // An unmatched lookup pulls an identity no store has: the library still
+        // validates every attribute and returns nil.
+        let id = match entity.resolve(&db)? {
+            Some(id) => id,
+            None => convert::no_store_entity()?,
+        };
         let entity = db.pull(&id, &attrs).map_err(library_error)?;
         Ok(convert::entity_out(entity.as_ref()))
+    });
+    let s = stores.clone();
+    let lookup: Var = Box::new(move |args| {
+        arity(
+            &args,
+            "lookup",
+            2,
+            3,
+            "[conn [attr value]] or [conn [attr value] opts]",
+        )?;
+        let conn = conn(&s, &args[0])?;
+        let convert::EntityRef::Lookup(attribute, value) = convert::entity_ref(&args[1])? else {
+            return Err(invalid("lookup", "lookup takes a lookup ref [attr value]"));
+        };
+        let mut opts = Fields::optional(args.get(2), "opts")?;
+        let db = view(&conn, opts.take("at"))?;
+        opts.finish()?;
+        Ok(db
+            .lookup(&attribute, &value)
+            .map_err(library_error)?
+            .map_or(Clj::Nil, |id| convert::id_out(&id)))
     });
     let s = stores.clone();
     let facts: Var = Box::new(move |args| {
@@ -229,7 +256,7 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
         let mut opts = Fields::optional(args.get(2), "opts")?;
         let db = view(&conn, opts.take("at"))?;
         opts.finish()?;
-        let facts = db.facts(filter).map_err(library_error)?;
+        let facts = db.facts(filter.resolve(&db)?).map_err(library_error)?;
         Ok(Clj::Vector(facts.iter().map(convert::fact_out).collect()))
     });
     let s = stores.clone();
@@ -247,7 +274,9 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
         let db = view(&conn, opts.take("at"))?;
         let after = after(&mut opts)?;
         opts.finish()?;
-        let events = db.history(filter, after).map_err(library_error)?;
+        let events = db
+            .history(filter.resolve(&db)?, after)
+            .map_err(library_error)?;
         Ok(Clj::Vector(events.iter().map(convert::event_out).collect()))
     });
     let s = stores.clone();
@@ -320,9 +349,17 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
         (
             "pull",
             "Returns {:id ...} plus the present requested attributes, or nil for an \
-             entity unknown at head or opts :at.",
+             entity unknown at head or opts :at. The entity may be a lookup ref \
+             [attr value] on a unique attribute.",
             &["[conn entity attrs]", "[conn entity attrs opts]"],
             pull,
+        ),
+        (
+            "lookup",
+            "Returns {:id ...} for the entity whose unique attribute has the value, \
+             or nil, at head or opts :at.",
+            &["[conn [attr value]]", "[conn [attr value] opts]"],
+            lookup,
         ),
         (
             "facts",
