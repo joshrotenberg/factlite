@@ -833,6 +833,22 @@ current.
   lookups (canonical request version 2) and the open roadmap entries; each
   needs the user's go-ahead.
 
+## Feature comparison (user request, 2026-11-06): done
+
+- **Done:** `comparison.md` compares Factlite with Datomic, XTDB, Datahike,
+  Datalevin, DataScript, Mentat, CozoDB and SQLite across deployment, data
+  model, transactions, time, query, operations and interfaces, with sources
+  checked on 2026-11-06 and a section on when another system fits better.
+  Linked from the README. Documentation only, not a plan item. Review:
+  `reviews/0054-feature-comparison.md`.
+- **Decisions:** cells distinguish `no` from "not documented"; Factlite cells
+  link to tests and docs.
+- **Validation:** local only; GitHub Actions is unavailable.
+- **Left open:** the comparison is dated and will go stale as the other
+  projects release.
+- **What's next:** unchanged: expectation lookups and the open roadmap
+  entries, each needing the user's go-ahead.
+
 ## Environment notes
 
 The local toolchain lives outside Git in `/workspace/.factlite-tools`. For this

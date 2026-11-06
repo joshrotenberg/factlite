@@ -51,6 +51,7 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
 - [Measurements](docs/measurements.md): reproducible workloads, replay and index costs.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [Permanence](docs/permanence.md): retained history, sensitive data, encryption limits and physical deletion.
+- [Comparison](docs/comparison.md): features compared with Datomic, XTDB, Datahike, Datalevin, DataScript, Mentat, CozoDB and SQLite.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 - [Rust guide](docs/rust.md): an executable application workflow and API choices.
 - [Handoff](docs/handoff.md): clone, verify and resume work.
