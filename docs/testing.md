@@ -121,3 +121,16 @@ opening an existing store must succeed in under a second and read normally,
 while initializing a new file and committing fail `Busy` within a bound with a
 confirmed rollback. Six threads opening one new file together must agree on one
 store identity.
+
+Incremental transitions are compared with the retained full-state transitions in
+1,024 random sequences of up to fifteen requests. The requests cover cardinality
+one and many, unique scalar and reference attributes, temporary labels,
+fabricated identities, wrong types, schema redeclaration and conflicts,
+expectations and stale head fences. Successful requests must produce identical
+states (including next allocation) and reports. Failing requests must produce
+identical error codes, contexts and messages; every evaluation error code
+occurs. Each successful report, and five deterministic damaged variants, are
+applied through both report paths, which must agree on acceptance and state. A
+deterministic case checks the unique-violation choice among several
+simultaneous violations. Replay parity and the tampering suite compare
+incremental replay with full-state replay.

@@ -178,3 +178,33 @@ index derivation/comparison and an indexed-state cross-check to full replay. CLI
 commands open the file per process, so their elapsed time still includes full
 replay; only long-lived `Store`/`Db` handles gain the per-operation improvement.
 Queries still copy the visible state into a TEMP relation (item 9.2).
+
+## Incremental replay validation (9.4): 2026-11-05
+
+Same host and runner as the 9.1 table, `main` at `f8c2cf0` against the 9.4
+branch. Raw outputs: [before](benchmarks/2026-11-05-macos-before-9.4.jsonl),
+[after](benchmarks/2026-11-05-macos-after-9.4.jsonl). Medians in milliseconds:
+
+| Tasks / revision | Read-only open | Query at revision 1 | Query at captured head | Facts at head | New no-op commit |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 10 / 10 | 0.592 → 0.433 | 0.131 → 0.111 | 0.127 → 0.107 | 0.044 → 0.038 | 0.250 → 0.157 |
+| 100 / 50 | 5.437 → 2.436 | 0.597 → 0.551 | 0.540 → 0.520 | 0.263 → 0.258 | 0.485 → 0.440 |
+| 1,000 / 50 | 45.770 → 16.439 | 5.133 → 5.077 | 5.152 → 5.079 | 2.571 → 2.539 | 3.096 → 2.915 |
+| 100 / 250 | 20.890 → 5.272 | 0.630 → 0.545 | 0.562 → 0.521 | 0.273 → 0.260 | 0.377 → 0.360 |
+
+Open scaling at 1,000 tasks, five samples each, read-only open medians:
+
+| Revisions | Before | After |
+| ---: | ---: | ---: |
+| 500 | 331.7 | 23.5 |
+| 2,000 | 1,291.5 | 46.3 |
+| 8,000 | not run | 138.2 |
+
+Open is now linear in retained revisions, at roughly 15 µs per revision for this
+workload, plus loading the state. On a backup copy of the clajent session's
+store (1,401 entities, 2,803 revisions, 18,650 live facts), a CLI read that
+opens the file went from about 7.5 s to 0.14 s.
+
+Commits and reads are still linear in live state, because they load the full
+state at head. At 10 revisions with 3,001 / 30,001 / 120,001 facts, no-op commit
+medians were 3.1 / 30.9 / 162.8 ms, and head-query medians 5.2 / 59.7 / 359.6 ms.

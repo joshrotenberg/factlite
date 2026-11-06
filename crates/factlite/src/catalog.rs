@@ -104,14 +104,43 @@ impl Catalog {
         Ok(())
     }
 
+    /// Like `require_known`, at an earlier revision of this catalog: concrete
+    /// identities in a request must exist at its pre-head even after staging.
+    pub fn require_known_at(&self, entity: &EntityId, revision: Revision) -> Result<()> {
+        if !self.known_at(entity, revision)? {
+            return Err(Error::new(
+                ErrorCode::UnknownEntity,
+                ErrorContext::Entity {
+                    entity: entity.clone(),
+                },
+                "entity is not allocated in this store at this revision",
+            ));
+        }
+        Ok(())
+    }
+
     // Staging returns a separate value; any later failure discards allocations.
+    // Production transitions stage in place on an owned model instead.
+    #[cfg(test)]
     pub fn stage(
         &self,
         definitions: &[AttributeDefinition],
         labels: &[TempId],
     ) -> Result<(Self, CatalogDelta)> {
-        let revision = self.snapshot.revision().next()?;
         let mut next = self.clone();
+        let delta = next.stage_in_place(definitions, labels)?;
+        Ok((next, delta))
+    }
+
+    /// Stages declarations and allocations into this catalog and advances its
+    /// snapshot. A failure may leave it partly staged, so callers that must
+    /// keep the original use `stage`; replay and commit discard it instead.
+    pub fn stage_in_place(
+        &mut self,
+        definitions: &[AttributeDefinition],
+        labels: &[TempId],
+    ) -> Result<CatalogDelta> {
+        let revision = self.snapshot.revision().next()?;
         let mut seen = BTreeSet::new();
         let mut schema_added = Vec::new();
         for definition in definitions {
@@ -122,7 +151,7 @@ impl Catalog {
                     "an attribute may be declared at most once per request",
                 ));
             }
-            match next.schema.get(name) {
+            match self.schema.get(name) {
                 Some((existing, _)) if existing != definition => {
                     return Err(Error::new(
                         ErrorCode::ConflictingBatch,
@@ -134,7 +163,7 @@ impl Catalog {
                 }
                 Some(_) => {}
                 None => {
-                    next.schema
+                    self.schema
                         .insert(name.clone(), (definition.clone(), revision));
                     schema_added.push(definition.clone());
                 }
@@ -149,26 +178,23 @@ impl Catalog {
                     "temporary label is declared more than once",
                 ));
             }
-            let allocation = next
+            let allocation = self
                 .next_allocation
                 .ok_or_else(|| Error::invalid("entity", "allocation space exhausted"))?;
-            let id = EntityId::allocated(next.snapshot.store().clone(), allocation)?;
-            next.next_allocation = allocation.checked_add(1);
-            next.entities.insert(id.clone(), revision);
+            let id = EntityId::allocated(self.snapshot.store().clone(), allocation)?;
+            self.next_allocation = allocation.checked_add(1);
+            self.entities.insert(id.clone(), revision);
             tempids.insert(label.clone(), id);
         }
-        next.snapshot = SnapshotId::new(
+        self.snapshot = SnapshotId::new(
             self.snapshot.store().clone(),
             self.snapshot.lineage().clone(),
             revision,
         );
-        Ok((
-            next,
-            CatalogDelta {
-                schema_added,
-                tempids,
-            },
-        ))
+        Ok(CatalogDelta {
+            schema_added,
+            tempids,
+        })
     }
 }
 

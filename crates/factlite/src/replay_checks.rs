@@ -77,7 +77,7 @@ fn same_state(connection: &rusqlite::Connection, basis: &SnapshotId) {
     assert_eq!(actual.catalog.snapshot, original.catalog.snapshot);
     assert_eq!(actual.catalog.schema, original.catalog.schema);
     assert_eq!(actual.catalog.entities, original.catalog.entities);
-    assert_eq!(actual.facts, original.facts);
+    assert_eq!(actual.facts(), original.facts());
     // The derived datom index must load exactly the replayed state at every basis.
     let indexed = crate::index::model_at(connection, basis).unwrap();
     assert!(crate::index::same_state(&indexed, &actual));

@@ -118,7 +118,7 @@ impl Store {
             }
             let basis = read_head(&transaction)?;
             let model = crate::index::model_at(&transaction, &basis)?;
-            let (_, report) = model.evaluate(&request)?;
+            let (_, report) = model.evaluate_owned(&request)?;
             crate::log::persist_report(
                 &transaction,
                 &report,

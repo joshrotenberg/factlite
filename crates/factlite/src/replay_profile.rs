@@ -108,7 +108,7 @@ fn stages(connection: &Connection, basis: &SnapshotId, nodes: usize) -> [f64; 6]
         model = applied;
     }
     assert_eq!(model.catalog.snapshot, *basis);
-    assert_eq!(model.facts.len(), 3 * nodes);
+    assert_eq!(model.facts().len(), 3 * nodes);
     assert_eq!(model.catalog.entities.len(), nodes);
     assert_eq!(model.catalog.schema.len(), 3);
     result[5] = milliseconds(wall);

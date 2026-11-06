@@ -221,7 +221,7 @@ impl Db {
                 query,
                 params,
                 &model.catalog.schema_at(self.snapshot().revision())?,
-                &model.facts,
+                model.facts(),
             )
         })
     }
@@ -262,8 +262,8 @@ mod tests {
     fn parity(db: &Db, q: &Query, params: &Params) -> QueryResult {
         db.read(|transaction, model| {
             let schema = model.catalog.schema_at(db.snapshot().revision())?;
-            let actual = evaluate(transaction, q, params, &schema, &model.facts)?;
-            let expected = crate::query_eval::evaluate(q, params, &schema, &model.facts)?;
+            let actual = evaluate(transaction, q, params, &schema, model.facts())?;
+            let expected = crate::query_eval::evaluate(q, params, &schema, model.facts())?;
             assert_eq!(actual.columns, expected.columns);
             if q.order.is_empty() && q.limit.is_none() {
                 assert_eq!(

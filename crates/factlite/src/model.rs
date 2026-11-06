@@ -67,9 +67,55 @@ impl TxReport {
 #[derive(Clone, Debug)]
 pub(crate) struct Model {
     pub catalog: Catalog,
-    pub facts: HashSet<Fact>,
+    facts: HashSet<Fact>,
+    // Built on the first transition and maintained by every fact change, so a
+    // transition only visits the facts it touches. Reads never build it.
+    indexes: Option<Indexes>,
 }
 
+/// Value sets per entity/attribute, and owners per unique attribute/value.
+#[derive(Clone, Debug, Default)]
+struct Indexes {
+    values: HashMap<(EntityId, AttrName), HashSet<Value>>,
+    owners: HashMap<(AttrName, Value), BTreeSet<EntityId>>,
+}
+
+impl Indexes {
+    fn add(&mut self, fact: &Fact, unique: bool) {
+        self.values
+            .entry((fact.entity.clone(), fact.attribute.clone()))
+            .or_default()
+            .insert(fact.value.clone());
+        if unique {
+            self.owners
+                .entry((fact.attribute.clone(), fact.value.clone()))
+                .or_default()
+                .insert(fact.entity.clone());
+        }
+    }
+
+    fn remove(&mut self, fact: &Fact, unique: bool) {
+        let key = (fact.entity.clone(), fact.attribute.clone());
+        if let Some(values) = self.values.get_mut(&key) {
+            values.remove(&fact.value);
+            if values.is_empty() {
+                self.values.remove(&key);
+            }
+        }
+        if unique {
+            let key = (fact.attribute.clone(), fact.value.clone());
+            if let Some(owners) = self.owners.get_mut(&key) {
+                owners.remove(&fact.entity);
+                if owners.is_empty() {
+                    self.owners.remove(&key);
+                }
+            }
+        }
+    }
+}
+
+// Test-only: batch normalization without final-state checks.
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub(crate) struct NormalizedBatch {
     pub next: Model,
@@ -77,8 +123,132 @@ pub(crate) struct NormalizedBatch {
     pub effective_delta: Vec<FactDelta>,
 }
 
+/// Facts touched by one transition, with whether each was visible before it.
+/// Only touched facts can differ between the states before and after, so the
+/// effective delta is computed from them alone.
+#[derive(Default)]
+struct Touched(HashMap<Fact, bool>);
+
+impl Touched {
+    fn note(&mut self, model: &Model, fact: &Fact) {
+        if !self.0.contains_key(fact) {
+            self.0.insert(fact.clone(), model.facts.contains(fact));
+        }
+    }
+
+    fn effective(self, model: &Model) -> Vec<FactDelta> {
+        let mut delta: Vec<_> = self
+            .0
+            .into_iter()
+            .filter_map(
+                |(fact, before)| match (before, model.facts.contains(&fact)) {
+                    (true, false) => Some(FactDelta {
+                        operation: Operation::Retract,
+                        fact,
+                    }),
+                    (false, true) => Some(FactDelta {
+                        operation: Operation::Assert,
+                        fact,
+                    }),
+                    _ => None,
+                },
+            )
+            .collect();
+        delta.sort_by(|a, b| {
+            a.operation
+                .cmp(&b.operation)
+                .then_with(|| a.fact.canonical_cmp(&b.fact))
+        });
+        delta
+    }
+}
+
+// Transitions are incremental. They assume, and preserve, a valid pre-state:
+// known identities and attributes, schema types, cardinality one and unique
+// ownership. Entities and definitions are never removed, so facts a transition
+// does not touch stay valid; only asserted facts can break cardinality, typing
+// or uniqueness. The empty model is valid, so every replayed state is too.
+// `model_reference.rs` keeps the former full-state checks for differential
+// tests.
 impl Model {
+    pub fn new(catalog: Catalog, facts: HashSet<Fact>) -> Self {
+        Self {
+            catalog,
+            facts,
+            indexes: None,
+        }
+    }
+
+    pub fn facts(&self) -> &HashSet<Fact> {
+        &self.facts
+    }
+
+    /// Replaces all facts, for tests that construct states directly.
+    #[cfg(test)]
+    pub fn set_facts(&mut self, facts: HashSet<Fact>) {
+        self.facts = facts;
+        self.indexes = None;
+    }
+
+    fn unique(&self, attribute: &AttrName) -> bool {
+        self.catalog
+            .schema
+            .get(attribute)
+            .is_some_and(|(definition, _)| definition.uniqueness() == Uniqueness::UniqueOne)
+    }
+
+    fn indexes(&mut self) -> &Indexes {
+        if self.indexes.is_none() {
+            let mut indexes = Indexes::default();
+            for fact in &self.facts {
+                indexes.add(fact, self.unique(&fact.attribute));
+            }
+            self.indexes = Some(indexes);
+        }
+        self.indexes.as_ref().expect("indexes were just built")
+    }
+
+    fn insert_fact(&mut self, fact: Fact) -> bool {
+        if self.facts.contains(&fact) {
+            return false;
+        }
+        let unique = self.unique(&fact.attribute);
+        if let Some(indexes) = &mut self.indexes {
+            indexes.add(&fact, unique);
+        }
+        self.facts.insert(fact)
+    }
+
+    fn remove_fact(&mut self, fact: &Fact) -> bool {
+        if !self.facts.remove(fact) {
+            return false;
+        }
+        let unique = self.unique(&fact.attribute);
+        if let Some(indexes) = &mut self.indexes {
+            indexes.remove(fact, unique);
+        }
+        true
+    }
+
+    /// Current values of one entity/attribute, in canonical order.
+    fn values(&mut self, entity: &EntityId, attribute: &AttrName) -> Vec<Value> {
+        let mut values: Vec<_> = self
+            .indexes()
+            .values
+            .get(&(entity.clone(), attribute.clone()))
+            .map(|values| values.iter().cloned().collect())
+            .unwrap_or_default();
+        values.sort_by(Value::canonical_cmp);
+        values
+    }
+
+    #[cfg(test)]
     pub fn apply_report(&self, report: &TxReport) -> Result<Self> {
+        self.clone().apply_report_owned(report)
+    }
+
+    /// Applies and validates one retained report in place.
+    pub fn apply_report_owned(mut self, report: &TxReport) -> Result<Self> {
         use crate::store::corrupt;
         let expected_after = SnapshotId::new(
             self.catalog.snapshot.store().clone(),
@@ -111,40 +281,45 @@ impl Model {
                     .ok_or_else(|| corrupt("report allocation mapping mismatch"))
             })
             .collect::<Result<_>>()?;
-        let (catalog, delta) = self
+        self.indexes();
+        let delta = self
             .catalog
-            .stage(&report.schema_added, &labels)
+            .stage_in_place(&report.schema_added, &labels)
             .map_err(|err| corrupt(err.to_string()))?;
         if delta.schema_added != report.schema_added || delta.tempids != report.tempids {
             return Err(corrupt(
                 "report declarations do not match catalog allocations",
             ));
         }
-        let mut facts = self.facts.clone();
+        let mut touched = Touched::default();
+        let mut asserted = Vec::new();
         for event in &report.effective_delta {
+            touched.note(&self, &event.fact);
             let effective = match event.operation {
-                Operation::Retract => facts.remove(&event.fact),
-                Operation::Assert => facts.insert(event.fact.clone()),
+                Operation::Retract => self.remove_fact(&event.fact),
+                Operation::Assert => {
+                    asserted.push(event.fact.clone());
+                    self.insert_fact(event.fact.clone())
+                }
             };
             if !effective {
                 return Err(corrupt("fact log contains an ineffective event"));
             }
         }
-        if effective_changes(&self.facts, &facts) != report.effective_delta {
+        if touched.effective(&self) != report.effective_delta {
             return Err(corrupt(
                 "fact events are not canonical effective differences",
             ));
         }
-        let next = Self { catalog, facts };
-        next.validate_state()
+        self.validate_asserted(&asserted)
             .map_err(|err| corrupt(err.to_string()))?;
-        Ok(next)
+        Ok(self)
     }
 
-    fn validate_state(&self) -> Result<()> {
+    // The full-state invariants, checked only where this transition asserted.
+    fn validate_asserted(&mut self, asserted: &[Fact]) -> Result<()> {
         let schema = self.catalog.schema_at(self.catalog.snapshot.revision())?;
-        let mut one_counts: HashMap<(&EntityId, &AttrName), usize> = HashMap::new();
-        for fact in &self.facts {
+        for fact in asserted {
             self.catalog.require_known(&fact.entity)?;
             if let Value::Ref(id) = &fact.value {
                 self.catalog.require_known(id)?;
@@ -168,27 +343,29 @@ impl Model {
                     "stored fact has wrong type",
                 ));
             }
-            if definition.cardinality() == Cardinality::One {
-                let count = one_counts
-                    .entry((&fact.entity, &fact.attribute))
-                    .or_default();
-                *count += 1;
-                if *count > 1 {
-                    return Err(Error::new(
-                        ErrorCode::ConflictingBatch,
-                        ErrorContext::EntityAttribute {
-                            entity: fact.entity.clone(),
-                            attribute: fact.attribute.clone(),
-                        },
-                        "stored state violates cardinality one",
-                    ));
-                }
+            if definition.cardinality() == Cardinality::One
+                && self.values(&fact.entity, &fact.attribute).len() > 1
+            {
+                return Err(Error::new(
+                    ErrorCode::ConflictingBatch,
+                    ErrorContext::EntityAttribute {
+                        entity: fact.entity.clone(),
+                        attribute: fact.attribute.clone(),
+                    },
+                    "stored state violates cardinality one",
+                ));
             }
         }
-        self.validate_uniqueness()
+        self.validate_uniqueness(asserted)
     }
 
+    #[cfg(test)]
     pub fn evaluate(&self, tx: &Tx) -> Result<(Self, TxReport)> {
+        self.clone().evaluate_owned(tx)
+    }
+
+    /// Evaluates one request against this state in place.
+    pub fn evaluate_owned(mut self, tx: &Tx) -> Result<(Self, TxReport)> {
         let tx = tx.clone().validate()?;
         if let Some(expected) = &tx.expected_head
             && expected != &self.catalog.snapshot
@@ -235,15 +412,7 @@ impl Model {
                     "cardinality-one expectation contains more than one distinct value",
                 ));
             }
-            let mut actual: Vec<_> = self
-                .facts
-                .iter()
-                .filter(|fact| {
-                    fact.entity == expectation.entity && fact.attribute == expectation.attribute
-                })
-                .map(|fact| fact.value.clone())
-                .collect();
-            actual.sort_by(Value::canonical_cmp);
+            let actual = self.values(&expectation.entity, &expectation.attribute);
             if actual != expectation.values {
                 return Err(Error::new(
                     ErrorCode::PreconditionFailed,
@@ -257,72 +426,100 @@ impl Model {
                 ));
             }
         }
-        let batch = self.normalize(&tx)?;
-        batch.next.validate_uniqueness()?;
-        let mut created_entities: Vec<_> = batch.catalog_delta.tempids.values().cloned().collect();
+        let before = self.catalog.snapshot.clone();
+        let (catalog_delta, effective_delta, asserted) = self.normalize_in_place(&tx)?;
+        self.validate_uniqueness(&asserted)?;
+        let mut created_entities: Vec<_> = catalog_delta.tempids.values().cloned().collect();
         created_entities.sort();
         let report = TxReport {
-            before: self.catalog.snapshot.clone(),
-            after: batch.next.catalog.snapshot.clone(),
-            tempids: batch.catalog_delta.tempids,
+            before,
+            after: self.catalog.snapshot.clone(),
+            tempids: catalog_delta.tempids,
             created_entities,
-            schema_added: batch.catalog_delta.schema_added,
-            effective_delta: batch.effective_delta,
+            schema_added: catalog_delta.schema_added,
+            effective_delta,
             metadata: tx.metadata,
         };
-        Ok((batch.next, report))
+        Ok((self, report))
     }
 
-    fn validate_uniqueness(&self) -> Result<()> {
-        let mut by_attr: BTreeMap<AttrName, HashMap<Value, BTreeSet<EntityId>>> = BTreeMap::new();
-        for fact in &self.facts {
-            if self.catalog.schema[&fact.attribute].0.uniqueness() == Uniqueness::UniqueOne {
-                by_attr
-                    .entry(fact.attribute.clone())
-                    .or_default()
-                    .entry(fact.value.clone())
-                    .or_default()
-                    .insert(fact.entity.clone());
+    // Before this transition no unique value had two owners, and only an
+    // assertion can add an owner, so only asserted values need checking. The
+    // reported violation is the least attribute, then least value, as a
+    // full-state scan in attribute/value order would choose.
+    fn validate_uniqueness(&mut self, asserted: &[Fact]) -> Result<()> {
+        self.indexes();
+        let mut violation: Option<(&AttrName, &Value, &BTreeSet<EntityId>)> = None;
+        let indexes = self.indexes.as_ref().expect("indexes were just built");
+        for fact in asserted {
+            if !self.unique(&fact.attribute) {
+                continue;
+            }
+            let Some(owners) = indexes
+                .owners
+                .get(&(fact.attribute.clone(), fact.value.clone()))
+            else {
+                continue;
+            };
+            if owners.len() < 2 {
+                continue;
+            }
+            let lesser = violation.is_none_or(|(attribute, value, _)| {
+                (&fact.attribute, &fact.value) != (attribute, value)
+                    && fact
+                        .attribute
+                        .cmp(attribute)
+                        .then_with(|| fact.value.canonical_cmp(value))
+                        .is_lt()
+            });
+            if lesser {
+                violation = Some((&fact.attribute, &fact.value, owners));
             }
         }
-        for (attribute, values) in by_attr {
-            if let Some((value, owners)) = values
-                .into_iter()
-                .filter(|(_, owners)| owners.len() > 1)
-                .min_by(|(a, _), (b, _)| a.canonical_cmp(b))
-            {
-                return Err(Error::new(
-                    ErrorCode::UniqueViolation,
-                    ErrorContext::UniqueOwnership {
-                        attribute,
-                        value,
-                        owners: owners.into_iter().collect(),
-                    },
-                    "unique value has multiple final-state owners",
-                ));
-            }
+        if let Some((attribute, value, owners)) = violation {
+            return Err(Error::new(
+                ErrorCode::UniqueViolation,
+                ErrorContext::UniqueOwnership {
+                    attribute: attribute.clone(),
+                    value: value.clone(),
+                    owners: owners.iter().cloned().collect(),
+                },
+                "unique value has multiple final-state owners",
+            ));
         }
         Ok(())
     }
 
     pub fn empty(snapshot: SnapshotId) -> Result<Self> {
-        Ok(Self {
-            catalog: Catalog::empty(snapshot)?,
-            facts: HashSet::new(),
-        })
+        Ok(Self::new(Catalog::empty(snapshot)?, HashSet::new()))
     }
 
     // Batch normalization is private; evaluate adds preconditions and final
     // uniqueness before storage can expose a report.
+    #[cfg(test)]
     pub fn normalize(&self, tx: &Tx) -> Result<NormalizedBatch> {
-        let (catalog, catalog_delta) = self.catalog.stage(&tx.schema, &tx.new_entities)?;
-        let schema = catalog.schema_at(catalog.snapshot.revision())?;
+        let mut next = self.clone();
+        let (catalog_delta, effective_delta, _) = next.normalize_in_place(tx)?;
+        Ok(NormalizedBatch {
+            next,
+            catalog_delta,
+            effective_delta,
+        })
+    }
+
+    /// Stages the batch into this state. Returns the catalog delta, effective
+    /// delta, and the asserted facts for final-state checks.
+    fn normalize_in_place(&mut self, tx: &Tx) -> Result<(CatalogDelta, Vec<FactDelta>, Vec<Fact>)> {
+        self.indexes();
+        let pre = self.catalog.snapshot.revision();
+        let catalog_delta = self.catalog.stage_in_place(&tx.schema, &tx.new_entities)?;
+        let schema = self.catalog.schema_at(self.catalog.snapshot.revision())?;
         let mut assertions = HashSet::new();
         let mut retractions = HashSet::new();
         for change in &tx.changes {
             let entity = match &change.entity {
                 EntityTerm::Id(id) => {
-                    self.catalog.require_known(id)?;
+                    self.catalog.require_known_at(id, pre)?;
                     id.clone()
                 }
                 EntityTerm::Temp(label) => catalog_delta
@@ -334,7 +531,7 @@ impl Model {
             let value = match &change.value {
                 ValueTerm::Value(value) => {
                     if let Value::Ref(id) = value {
-                        self.catalog.require_known(id)?;
+                        self.catalog.require_known_at(id, pre)?;
                     }
                     value.clone()
                 }
@@ -415,41 +612,37 @@ impl Model {
                 ));
             }
         }
-        let mut facts = self.facts.clone();
-        facts.retain(|fact| {
-            !retractions.contains(fact)
-                && !one_values.contains_key(&(fact.entity.clone(), fact.attribute.clone()))
-        });
-        facts.extend(assertions);
-        let effective_delta = effective_changes(&self.facts, &facts);
-        Ok(NormalizedBatch {
-            next: Model { catalog, facts },
-            catalog_delta,
-            effective_delta,
-        })
+        // Cardinality-one assertions replace every current value of their
+        // entity/attribute, as the former full-state retain did.
+        let mut replaced = Vec::new();
+        for (entity, attribute) in one_values.keys() {
+            for value in self.values(entity, attribute) {
+                replaced.push(Fact {
+                    entity: entity.clone(),
+                    attribute: attribute.clone(),
+                    value,
+                });
+            }
+        }
+        let mut touched = Touched::default();
+        for fact in retractions.iter().chain(&replaced).chain(&assertions) {
+            touched.note(self, fact);
+        }
+        for fact in retractions.iter().chain(&replaced) {
+            self.remove_fact(fact);
+        }
+        let asserted: Vec<_> = assertions.into_iter().collect();
+        for fact in &asserted {
+            self.insert_fact(fact.clone());
+        }
+        let effective_delta = touched.effective(self);
+        Ok((catalog_delta, effective_delta, asserted))
     }
 }
 
-fn effective_changes(before: &HashSet<Fact>, after: &HashSet<Fact>) -> Vec<FactDelta> {
-    let mut delta: Vec<_> = before
-        .difference(after)
-        .cloned()
-        .map(|fact| FactDelta {
-            operation: Operation::Retract,
-            fact,
-        })
-        .chain(after.difference(before).cloned().map(|fact| FactDelta {
-            operation: Operation::Assert,
-            fact,
-        }))
-        .collect();
-    delta.sort_by(|a, b| {
-        a.operation
-            .cmp(&b.operation)
-            .then_with(|| a.fact.canonical_cmp(&b.fact))
-    });
-    delta
-}
+#[cfg(test)]
+#[path = "model_reference.rs"]
+mod reference;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -560,7 +753,7 @@ pub(crate) mod tests {
             )
             .unwrap()
             .next;
-        assert!(removed.facts.is_empty());
+        assert!(removed.facts().is_empty());
         assert!(removed.catalog.require_known(&id).is_ok());
     }
 
@@ -594,7 +787,7 @@ pub(crate) mod tests {
                 ErrorCode::ConflictingBatch
             );
         }
-        assert!(model.facts.is_empty());
+        assert!(model.facts().is_empty());
         assert_eq!(model.catalog.snapshot.revision(), Revision::new(1));
     }
 
@@ -616,7 +809,7 @@ pub(crate) mod tests {
             .build()
             .unwrap();
         let result = empty().normalize(&tx).unwrap();
-        assert_eq!(result.next.facts.len(), 2);
+        assert_eq!(result.next.facts().len(), 2);
         let guessed: EntityId = "e1.00000000000000000000000000000001.0000000000000001"
             .parse()
             .unwrap();
@@ -695,7 +888,7 @@ pub(crate) mod tests {
         #[test]
         fn many_sets_match_independent_set_equation(initial in proptest::collection::vec(0_i64..16, 0..32), adds in proptest::collection::vec(0_i64..16, 0..32), removes in proptest::collection::vec(0_i64..16, 0..32)) {
             let (mut model, id) = setup(Cardinality::Many);
-            model.facts = initial.iter().map(|n| Fact { entity:id.clone(), attribute:attr("x/value"), value:Value::I64(*n) }).collect();
+            model.set_facts(initial.iter().map(|n| Fact { entity:id.clone(), attribute:attr("x/value"), value:Value::I64(*n) }).collect());
             let mut operations:Vec<_> = adds.iter().map(|n|change(&id,Operation::Assert,*n)).chain(removes.iter().map(|n|change(&id,Operation::Retract,*n))).collect();
             let tx = Tx { changes:operations.clone(), ..Tx::default() }; let result = model.normalize(&tx);
             operations.reverse(); let reversed = model.normalize(&Tx { changes:operations, ..Tx::default() });
@@ -705,28 +898,28 @@ pub(crate) mod tests {
             } else {
                 let result=result.unwrap(); let reversed=reversed.unwrap();
                 let original:BTreeSet<_> = initial.into_iter().collect(); let expected:BTreeSet<_> = original.difference(&remove_set).copied().chain(add_set).collect();
-                let actual:BTreeSet<_> = result.next.facts.iter().map(|f| match f.value {Value::I64(n)=>n,_=>unreachable!()}).collect();
-                prop_assert_eq!(actual,expected); prop_assert_eq!(result.next.facts,reversed.next.facts); prop_assert_eq!(result.effective_delta,reversed.effective_delta);
+                let actual:BTreeSet<_> = result.next.facts().iter().map(|f| match f.value {Value::I64(n)=>n,_=>unreachable!()}).collect();
+                prop_assert_eq!(actual,expected); prop_assert_eq!(result.next.facts(),reversed.next.facts()); prop_assert_eq!(result.effective_delta,reversed.effective_delta);
             }
         }
         #[test]
         fn valid_many_batches_match_set_equation_and_replay(initial in proptest::collection::vec(-16_i64..16, 0..32), adds in proptest::collection::vec(0_i64..16, 0..32), removes in proptest::collection::vec(-16_i64..0, 0..32)) {
             let (mut model,id)=setup(Cardinality::Many);
-            model.facts=initial.iter().map(|n|Fact {entity:id.clone(),attribute:attr("x/value"),value:Value::I64(*n)}).collect();
+            model.set_facts(initial.iter().map(|n|Fact {entity:id.clone(),attribute:attr("x/value"),value:Value::I64(*n)}).collect());
             let operations=adds.iter().map(|n|change(&id,Operation::Assert,*n)).chain(removes.iter().map(|n|change(&id,Operation::Retract,*n))).collect();
             let result=model.normalize(&Tx {changes:operations,..Tx::default()}).unwrap();
             let expected:BTreeSet<_>=initial.into_iter().filter(|n|!removes.contains(n)).chain(adds).collect();
-            let actual:BTreeSet<_>=result.next.facts.iter().map(|f|match f.value {Value::I64(n)=>n,_=>unreachable!()}).collect();
+            let actual:BTreeSet<_>=result.next.facts().iter().map(|f|match f.value {Value::I64(n)=>n,_=>unreachable!()}).collect();
             prop_assert_eq!(actual,expected);
-            let mut replay=model.facts;
+            let mut replay=model.facts().clone();
             for event in result.effective_delta { match event.operation {Operation::Retract=>{prop_assert!(replay.remove(&event.fact));},Operation::Assert=>{prop_assert!(replay.insert(event.fact));}} }
-            prop_assert_eq!(replay,result.next.facts);
+            prop_assert_eq!(&replay,result.next.facts());
         }
         #[test]
         fn one_valued_assertions_conflict_iff_distinct(a in any::<i64>(), b in any::<i64>()) {
             let (model,id)=setup(Cardinality::One); let tx=Tx::builder().assert(id.clone(),attr("x/value"),Value::I64(a)).assert(id,attr("x/value"),Value::I64(b)).build().unwrap();
             let result=model.normalize(&tx);
-            if a==b { prop_assert_eq!(result.unwrap().next.facts.len(),1); } else {prop_assert_eq!(result.unwrap_err().code(),ErrorCode::ConflictingBatch);}
+            if a==b { prop_assert_eq!(result.unwrap().next.facts().len(),1); } else {prop_assert_eq!(result.unwrap_err().code(),ErrorCode::ConflictingBatch);}
         }
     }
 }

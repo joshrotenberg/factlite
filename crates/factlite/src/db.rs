@@ -157,7 +157,7 @@ impl Db {
         self.read(|_, model| {
             filter.validate(&model.catalog.schema_at(self.snapshot.revision())?)?;
             let mut facts: Vec<_> = model
-                .facts
+                .facts()
                 .iter()
                 .filter(|fact| filter.matches(fact))
                 .cloned()
@@ -182,7 +182,7 @@ impl Db {
             let mut attributes = BTreeMap::new();
             for name in attrs {
                 let mut values: Vec<_> = model
-                    .facts
+                    .facts()
                     .iter()
                     .filter(|fact| &fact.entity == id && &fact.attribute == name)
                     .map(|fact| fact.value.clone())

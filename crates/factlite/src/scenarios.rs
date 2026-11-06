@@ -144,7 +144,7 @@ fn a_b_conditions_head_fences_and_nochange_reports() {
     assert_eq!(c.catalog.snapshot.revision(), Revision::new(3));
     assert!(report_c.effective_delta.is_empty());
     assert!(
-        a.facts
+        a.facts()
             .iter()
             .any(|f| f.attribute == attr("task/status") && f.value == Value::String("todo".into()))
     );
@@ -325,7 +325,7 @@ proptest! {
         let mut tx=Tx::builder().assert(b.clone(),attr("x/unique"),Value::I64(value)).retract(a,attr("x/unique"),Value::I64(value)).build().unwrap();
         if reversed{tx.changes.reverse();}
         let (next,report)=owned.evaluate(&tx).unwrap();
-        prop_assert_eq!(next.facts.len(),1);prop_assert_eq!(&next.facts.iter().next().unwrap().entity,&b);prop_assert_eq!(report.effective_delta.len(),2);
+        prop_assert_eq!(next.facts().len(),1);prop_assert_eq!(&next.facts().iter().next().unwrap().entity,&b);prop_assert_eq!(report.effective_delta.len(),2);
     }
     #[test]
     fn many_expectations_are_exact_sets(actual in proptest::collection::vec(-8_i64..8,0..16), expected in proptest::collection::vec(-8_i64..8,0..16), match_actual in any::<bool>()) {
@@ -420,8 +420,8 @@ fn all_six_types_share_exact_expectation_transfer_and_conflict_rules() {
                     .unwrap(),
             )
             .unwrap();
-        assert_eq!(transferred.facts.len(), 1);
-        assert_eq!(transferred.facts.iter().next().unwrap().value, value);
+        assert_eq!(transferred.facts().len(), 1);
+        assert_eq!(transferred.facts().iter().next().unwrap().value, value);
         assert_eq!(report.effective_delta.len(), 2);
     }
 }
@@ -470,14 +470,16 @@ fn exhaustive_three_value_batch_and_expectation_tables() {
                 continue;
             }
             let (mut model, id) = setup(cardinality);
-            model.facts = (0..3)
-                .filter(|n| old & (1 << n) != 0)
-                .map(|n| crate::Fact {
-                    entity: id.clone(),
-                    attribute: attr("x/value"),
-                    value: Value::I64(n),
-                })
-                .collect();
+            model.set_facts(
+                (0..3)
+                    .filter(|n| old & (1 << n) != 0)
+                    .map(|n| crate::Fact {
+                        entity: id.clone(),
+                        attribute: attr("x/value"),
+                        value: Value::I64(n),
+                    })
+                    .collect(),
+            );
             for adds in 0_u8..8 {
                 for removes in 0_u8..8 {
                     let mut builder = Tx::builder();
@@ -506,12 +508,15 @@ fn exhaustive_three_value_batch_and_expectation_tables() {
                         };
                         let (next, report) = result.unwrap();
                         let (next_reversed, reversed_report) = reversed.unwrap();
-                        let actual = next.facts.iter().fold(0_u8, |mask, fact| match fact.value {
-                            Value::I64(n) => mask | (1 << n),
-                            _ => unreachable!(),
-                        });
+                        let actual =
+                            next.facts()
+                                .iter()
+                                .fold(0_u8, |mask, fact| match fact.value {
+                                    Value::I64(n) => mask | (1 << n),
+                                    _ => unreachable!(),
+                                });
                         assert_eq!(actual, expected);
-                        assert_eq!(next.facts, next_reversed.facts);
+                        assert_eq!(next.facts(), next_reversed.facts());
                         assert_eq!(report, reversed_report);
                         assert_eq!(
                             report.effective_delta.len(),
