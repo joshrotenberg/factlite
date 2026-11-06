@@ -443,6 +443,57 @@ impl Model {
         Ok((self, report))
     }
 
+    /// The owner of `value` for a `unique_one` attribute visible at the
+    /// pre-state. Checks run in order: visible attribute, `unique_one`, value
+    /// type, owner. Resolved IDs are ordinary IDs from here on, so an ID and a
+    /// lookup naming one entity collapse before the batch conflict checks.
+    fn resolve_lookup(
+        &mut self,
+        schema: &crate::Schema,
+        attribute: &AttrName,
+        value: &Value,
+    ) -> Result<EntityId> {
+        let definition = schema.get(attribute).ok_or_else(|| {
+            Error::new(
+                ErrorCode::UnknownAttribute,
+                ErrorContext::Attribute {
+                    attribute: attribute.clone(),
+                },
+                "lookup attribute is unknown at pre-head",
+            )
+        })?;
+        if definition.uniqueness() != Uniqueness::UniqueOne {
+            return Err(Error::invalid(
+                "lookup",
+                "lookup attribute must be unique_one",
+            ));
+        }
+        if definition.value_type() != value.value_type() {
+            return Err(Error::new(
+                ErrorCode::TypeMismatch,
+                ErrorContext::TypeMismatch {
+                    expected: definition.value_type(),
+                    actual: value.value_type(),
+                },
+                "lookup value has the wrong attribute type",
+            ));
+        }
+        self.indexes()
+            .owners
+            .get(&(attribute.clone(), value.clone()))
+            .and_then(|owners| owners.iter().next().cloned())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::UnknownEntity,
+                    ErrorContext::Lookup {
+                        attribute: attribute.clone(),
+                        value: value.clone(),
+                    },
+                    "lookup matched no entity at pre-head",
+                )
+            })
+    }
+
     // Before this transition no unique value had two owners, and only an
     // assertion can add an owner, so only asserted values need checking. The
     // reported violation is the least attribute, then least value, as a
@@ -512,6 +563,10 @@ impl Model {
     fn normalize_in_place(&mut self, tx: &Tx) -> Result<(CatalogDelta, Vec<FactDelta>, Vec<Fact>)> {
         self.indexes();
         let pre = self.catalog.snapshot.revision();
+        // Lookups resolve against the pre-transaction schema and facts. No fact
+        // changes until every change is resolved, so the owners index is still
+        // the pre-state's while the loop runs.
+        let pre_schema = self.catalog.schema_at(pre)?;
         let catalog_delta = self.catalog.stage_in_place(&tx.schema, &tx.new_entities)?;
         let schema = self.catalog.schema_at(self.catalog.snapshot.revision())?;
         let mut assertions = HashSet::new();
@@ -527,6 +582,9 @@ impl Model {
                     .get(label)
                     .cloned()
                     .ok_or_else(|| Error::invalid("tempid", "undeclared temporary entity"))?,
+                EntityTerm::Lookup(attribute, value) => {
+                    self.resolve_lookup(&pre_schema, attribute, value)?
+                }
             };
             let value = match &change.value {
                 ValueTerm::Value(value) => {
@@ -539,6 +597,9 @@ impl Model {
                     Value::Ref(catalog_delta.tempids.get(label).cloned().ok_or_else(|| {
                         Error::invalid("tempid", "undeclared temporary reference")
                     })?)
+                }
+                ValueTerm::LookupRef(attribute, value) => {
+                    Value::Ref(self.resolve_lookup(&pre_schema, attribute, value)?)
                 }
             };
             let definition = schema.get(&change.attribute).ok_or_else(|| {

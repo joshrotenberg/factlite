@@ -491,15 +491,57 @@ pub(crate) fn model_for_request(
     use std::collections::BTreeSet;
     check_basis(connection, head)?;
     let schema = definitions_at(connection, head)?;
+    let stored = types(&schema);
     let mut named = BTreeSet::new();
     let mut pairs = BTreeSet::new();
     let mut owned = Vec::new();
-    for change in &tx.changes {
-        if let EntityTerm::Id(id) = &change.entity {
-            named.insert(id.clone());
-            pairs.insert((id.clone(), change.attribute.clone()));
+    let mut facts = HashSet::new();
+    // A lookup's owner at head, with the fact that makes it the owner. Lookups
+    // that evaluation will reject (unknown or non-unique attribute, wrong
+    // type, no owner) load nothing and resolve to nothing here, so the
+    // evaluator reports them in its own order.
+    let resolve = |attribute: &AttrName,
+                   value: &Value,
+                   facts: &mut HashSet<Fact>|
+     -> Result<Option<EntityId>> {
+        let Some((definition, _)) = schema.get(attribute) else {
+            return Ok(None);
+        };
+        if definition.uniqueness() != crate::Uniqueness::UniqueOne
+            || definition.value_type() != value.value_type()
+        {
+            return Ok(None);
         }
-        if let ValueTerm::Value(value) = &change.value {
+        let owners = facts_matching(
+            connection,
+            head,
+            &stored,
+            None,
+            Some(attribute),
+            Some(value),
+        )?;
+        let owner = owners.iter().map(|fact| fact.entity.clone()).min();
+        facts.extend(owners);
+        Ok(owner)
+    };
+    for change in &tx.changes {
+        let entity = match &change.entity {
+            EntityTerm::Id(id) => Some(id.clone()),
+            EntityTerm::Temp(_) => None,
+            EntityTerm::Lookup(attribute, value) => resolve(attribute, value, &mut facts)?,
+        };
+        if let Some(id) = entity {
+            named.insert(id.clone());
+            pairs.insert((id, change.attribute.clone()));
+        }
+        let value = match &change.value {
+            ValueTerm::Value(value) => Some(value.clone()),
+            ValueTerm::TempRef(_) => None,
+            ValueTerm::LookupRef(attribute, value) => {
+                resolve(attribute, value, &mut facts)?.map(Value::Ref)
+            }
+        };
+        if let Some(value) = &value {
             if let Value::Ref(id) = value {
                 named.insert(id.clone());
             }
@@ -528,8 +570,6 @@ pub(crate) fn model_for_request(
             entities.insert(id, created);
         }
     }
-    let stored = types(&schema);
-    let mut facts = HashSet::new();
     for (entity, attribute) in &pairs {
         facts.extend(facts_matching(
             connection,

@@ -91,6 +91,10 @@ impl<'a> Reader<'a> {
             1 => Ok(EntityTerm::Temp(
                 TempId::new(self.text()?).map_err(|error| corrupt(error.to_string()))?,
             )),
+            2 => {
+                let (attribute, value) = self.lookup()?;
+                Ok(EntityTerm::Lookup(attribute, value))
+            }
             _ => Err(corrupt("invalid canonical entity term")),
         }
     }
@@ -100,8 +104,19 @@ impl<'a> Reader<'a> {
             1 => Ok(ValueTerm::TempRef(
                 TempId::new(self.text()?).map_err(|error| corrupt(error.to_string()))?,
             )),
+            2 => {
+                let (attribute, value) = self.lookup()?;
+                Ok(ValueTerm::LookupRef(attribute, value))
+            }
             _ => Err(corrupt("invalid canonical value term")),
         }
+    }
+    fn lookup(&mut self) -> Result<(crate::AttrName, Value)> {
+        let attribute = self
+            .text()?
+            .parse()
+            .map_err(|error: Error| corrupt(error.to_string()))?;
+        Ok((attribute, self.value()?))
     }
 }
 
@@ -208,6 +223,42 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     #[test]
+    fn noncanonical_lookup_terms_fail() {
+        let attribute: crate::AttrName = "run/key".parse().unwrap();
+        let original = Tx::builder()
+            .assert(
+                crate::EntityTerm::Lookup(attribute.clone(), Value::f64(0.0).unwrap()),
+                attribute,
+                Value::I64(1),
+            )
+            .build()
+            .unwrap()
+            .canonical_request();
+        let bytes = original.bytes();
+        // The lookup tag, then the attribute text, then an f64 key.
+        let tag = bytes
+            .windows(9)
+            .position(|w| w[0] == 2 && w[1..] == 7_u64.to_be_bytes())
+            .unwrap();
+        let key = tag + 1 + 8 + "run/key".len() + 1;
+        for bits in [(-0.0_f64).to_bits(), f64::NAN.to_bits()] {
+            let mut damaged = bytes.to_vec();
+            damaged[key..key + 8].copy_from_slice(&bits.to_be_bytes());
+            assert_eq!(
+                decode_request(1, &damaged).unwrap_err().code(),
+                ErrorCode::Storage
+            );
+        }
+        for tag_byte in [3_u8, 255] {
+            let mut damaged = bytes.to_vec();
+            damaged[tag] = tag_byte;
+            assert_eq!(
+                decode_request(1, &damaged).unwrap_err().code(),
+                ErrorCode::Storage
+            );
+        }
+    }
+    #[test]
     fn retained_negative_zero_nonfinite_floats_and_oversized_counts_fail() {
         let original = Tx::builder()
             .metadata("f", Value::f64(0.0).unwrap())
@@ -243,6 +294,21 @@ mod tests {
             let tx = builder.build().unwrap(); let canonical = tx.canonical_request();
             prop_assert_eq!(decode_request(1,canonical.bytes()).unwrap(),tx);
             for end in 0..canonical.bytes().len() { prop_assert!(decode_request(1,&canonical.bytes()[..end]).is_err()); }
+        }
+        #[test]
+        fn lookup_terms_roundtrip_and_reject_every_truncation(value in any::<i64>(), bits in any::<u64>(), text in any::<String>(), reference in any::<bool>()) {
+            let attribute: crate::AttrName = "run/key".parse().unwrap();
+            let entity = crate::EntityTerm::Lookup(attribute.clone(), Value::String(text));
+            let key = Value::f64(f64::from_bits(bits)).unwrap_or(Value::I64(value));
+            let target = if reference {
+                crate::ValueTerm::LookupRef(attribute.clone(), key)
+            } else {
+                crate::ValueTerm::Value(key)
+            };
+            let tx = Tx::builder().assert(entity.clone(), attribute.clone(), target).retract(entity, attribute, Value::I64(value)).build().unwrap();
+            let canonical = tx.canonical_request();
+            prop_assert_eq!(decode_request(1, canonical.bytes()).unwrap(), tx);
+            for end in 0..canonical.bytes().len() { prop_assert!(decode_request(1, &canonical.bytes()[..end]).is_err()); }
         }
         #[test]
         fn arbitrary_retained_canonical_bytes_never_panic(bytes in proptest::collection::vec(any::<u8>(),0..256)) {

@@ -108,6 +108,9 @@ pub fn encode_error(error: &Error) -> String {
         ErrorContext::Attribute { attribute } => json!({"attr":attribute.as_str()}),
         ErrorContext::Entity { entity } => json!({"entity":{"id":entity.to_string()}}),
         ErrorContext::InvalidInput { field } => json!({"field":field}),
+        ErrorContext::Lookup { attribute, value } => {
+            json!({"lookup":{"attr":attribute.as_str(),"value":value_json(value)}})
+        }
         ErrorContext::TypeMismatch { expected, actual } => {
             json!({"expected":ty(*expected),"actual":ty(*actual)})
         }

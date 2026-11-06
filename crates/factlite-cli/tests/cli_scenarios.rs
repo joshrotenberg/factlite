@@ -1099,3 +1099,51 @@ fn query_negation_finds_absence_at_each_revision() {
         "UnknownAttribute",
     );
 }
+
+#[test]
+fn transaction_lookup_refs_resolve_retry_and_fail_by_lookup() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lookups.sqlite");
+    success(binary().arg("init").arg(&path));
+    let created = transact(
+        &path,
+        &json!({"version":1,
+            "schema":[
+                {"name":"run/key","type":"string","cardinality":"one","unique":"unique_one"},
+                {"name":"run/status","type":"string","cardinality":"one","unique":"none"},
+                {"name":"run/follows","type":"ref","cardinality":"one","unique":"none"}],
+            "new_entities":["a","b"],
+            "changes":[
+                {"op":"assert","entity":{"temp":"a"},"attr":"run/key","value":{"string":"A"}},
+                {"op":"assert","entity":{"temp":"b"},"attr":"run/key","value":{"string":"B"}}]}),
+    );
+    let lookup = |key: &str| json!({"lookup":{"attr":"run/key","value":{"string":key}}});
+    let request = json!({"version":1,"idempotency_key":"b-follows-a","changes":[
+        {"op":"assert","entity":lookup("B"),"attr":"run/status","value":{"string":"done"}},
+        {"op":"assert","entity":lookup("B"),"attr":"run/follows","value":{"ref":lookup("A")}}]});
+    let report = transact(&path, &request);
+    let a = created["tempids"]["a"].as_str().unwrap();
+    let b = created["tempids"]["b"].as_str().unwrap();
+    assert_eq!(
+        report["effective_delta"],
+        json!([
+            {"op":"assert","entity":{"id":b},"attr":"run/follows","value":{"ref":{"id":a}}},
+            {"op":"assert","entity":{"id":b},"attr":"run/status","value":{"string":"done"}}
+        ])
+    );
+    // An exact retry, in a new process, returns the original report.
+    assert_eq!(transact(&path, &request), report);
+    let missing = json!({"version":1,"changes":[
+        {"op":"assert","entity":lookup("Z"),"attr":"run/status","value":{"string":"done"}}]});
+    let error = failure(
+        db(&path)
+            .args(["transact", "--file", "-"])
+            .write_stdin(missing.to_string()),
+        2,
+        "UnknownEntity",
+    );
+    assert_eq!(
+        error["error"]["context"],
+        json!({"lookup":{"attr":"run/key","value":{"string":"Z"}}})
+    );
+}
