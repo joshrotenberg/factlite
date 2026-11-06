@@ -1,15 +1,25 @@
 # Work status
 
-Steps 0–7 and item 8.1 are complete locally. Typed atomic commits, authoritative
-replay, owned pinned reads, strict interchange, exact retries, historical SQL
-queries, CLI parity, process recovery and standalone backups are implemented and
-tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
-load the pinned state from that index instead of replaying the log. The latest
-gate passed 184 tests, including forty-nine 1,024-case properties, plus the
-asserted Rust workflow. Items 9 to 11 add indexed reads and commits, a babashka pod, and consumer
-requests (lookups, aggregates, keyword and inst types). The repository is
-published to a private GitHub remote, where CI passed 181 tests on Linux.
-Reviews are self-reviews; no independent review has run.
+## Current state
+
+Updated 2026-11-06. This section is the summary. The entries below are the full
+per-item log, oldest first, and are kept as written.
+
+- **Implemented:** plan steps 0 to 11, all checked in `plan.md`: the v1
+  contract, plus the temporal datom index and indexed reads and commits (9.1 to
+  9.5), the babashka pod (10.1), and consumer requests (11.1 to 11.5).
+  Storage format 4. Roadmap item 8 (CLI busy timeout, babashka in CI) is done.
+- **Tests:** 184 pass locally, including forty-nine 1,024-case properties and
+  the pod's babashka tests. CI on GitHub runs the same gate on Linux.
+- **Reviews:** entries 0001 to 0043 are self-reviews. Since 0044, reviews also
+  include independent Claude and Codex subagent reviews through kit.
+- **Hosting:** private repository `github.com/joshrotenberg/factlite`. Licensed
+  MIT OR Apache-2.0. Crates are unpublished.
+- **Waiting on the user:** decision briefs for roadmap items 3 (bounded open
+  time, PR #5), 4 (lookup refs in transactions, PR #7), 5 (query language,
+  PR #8) and 6 (history excision, PR #9).
+- **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
+  and pod registry publishing.
 
 ## 0.1 Inspect and initialize — done
 
