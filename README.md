@@ -1,8 +1,8 @@
 # Factlite
 
 An embedded Rust library for a typed, SQLite-backed fact database with atomic
-transactions and durable, revision-pinned reads. A thin CLI exercises the
-same library.
+transactions and durable, revision-pinned reads. A thin CLI and a babashka pod
+expose the same library.
 
 Factlite is being built incrementally. Typed values, schema definitions, owned
 requests, and the tested private semantic evaluator are in place. SQLite files
@@ -27,6 +27,7 @@ measurements document replay costs and the current optimization decision.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
 - [Acceptance audit](docs/acceptance.md): tests mapped to the supplied contract.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
+- [Babashka pod](crates/factlite-pod/README.md): Clojure API, value mapping and errors.
 - [Measurements](docs/measurements.md): reproducible workloads, replay and index costs.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.

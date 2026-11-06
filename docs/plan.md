@@ -197,3 +197,22 @@ state without changing semantics. The log stays authoritative.
   revision-bounded SQL over the interval table, without loading the complete
   state at R. Compare every path with the reference evaluator over replayed
   state, including historical schema and the forced writer interleaving.
+
+## Step 10: Babashka pod
+
+Authorized by the user on 2026-11-05, for the clajent agent kit: durable,
+queryable agent-run records with history from Babashka. The pod is a thin
+adapter. Storage semantics stay in the library and validation stays in the
+strict wire decoders.
+
+- [x] **10.1 Pod crate.** Add `factlite-pod` (binary `pod-factlite`) on the
+  published `babashka-pod` crate, using transit+json. Expose open/close, head,
+  transact, schema, pull, facts, history, transactions and query, with optional
+  `:at` snapshots or revisions for reads. Translate Clojure data to the version-1
+  JSON wire requests and back, so the pod reuses the strict wire validators. Each
+  of the six value types maps to one Clojure type and back without loss.
+  Anything else is rejected, never coerced. Return every library error as
+  `ex-info` data with its stable code, context and commit outcome. Test the
+  translation in Rust, run a babashka script over stdio and socket transports,
+  and run several pod processes committing to one file concurrently with no lost
+  or merged writes.

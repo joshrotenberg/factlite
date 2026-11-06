@@ -30,6 +30,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "babashka-pod"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b35d394e846144b3b0688d9ab6367bd969fd1191900d8e0c83551b0c46317e2"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -125,6 +135,18 @@ dependencies = [
  "assert_cmd",
  "factlite",
  "rusqlite",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "factlite-pod"
+version = "0.1.0"
+dependencies = [
+ "babashka-pod",
+ "base64",
+ "factlite",
+ "proptest",
  "serde_json",
  "tempfile",
 ]
@@ -516,6 +538,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]
