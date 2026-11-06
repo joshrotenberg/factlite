@@ -8,6 +8,8 @@ Each step has a branch, implementation, validation, recorded self-review, and
 merge. Large steps may use multiple bounded branches, each covering one or more
 items. Every item closes with done, decisions, blockers, and what's next in
 `status.md`. Reviews live in `reviews/`; no branch merges with known unmet checks.
+Candidate work that is not yet authorized lives in [`roadmap.md`](roadmap.md)
+and moves here as an item when approved.
 
 ## Step 0: Repository and development baseline
 
