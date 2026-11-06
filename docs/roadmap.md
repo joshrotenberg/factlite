@@ -114,10 +114,12 @@ None of these needs a design decision; each could be done directly.
 - **Design:** [`design/json-rpc.md`](design/json-rpc.md). It lives in this
   workspace as `crates/factlite-rpc`: a dispatch library and a stdio server
   binary over the strict wire contract.
-- **When to build:** after items 3 (open-time integrity) and 4 (lookup refs in
-  transactions) are decided, or when a consumer (Elixir, or agents through MCP)
-  is ready. Building it needs the user's authorization, like the pod did.
-- **Prerequisites that can land earlier:** read results that carry their basis
-  snapshot; a wire envelope for `lookup`; and a defined CLI outcome when a
-  commit succeeds but writing its report fails. The last changes the CLI's
-  exit-code contract, so it needs a decision.
+- **When to build:** only after items 3 (open-time integrity) and 4 (lookup
+  refs in transactions) are decided. A ready consumer (Elixir, or agents
+  through MCP) raises the priority but does not skip that condition. Building
+  it needs the user's authorization, like the pod did.
+- **Prerequisites that can land earlier:** public wire decoders for read
+  requests (entity, filter, revision and lookup params, which the CLI parses
+  itself today); and a defined CLI outcome when a commit succeeds but writing
+  its report fails. The latter changes the CLI's exit-code contract, so it
+  needs a decision.
