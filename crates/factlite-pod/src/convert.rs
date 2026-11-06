@@ -1312,6 +1312,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded.query.negations[0].join, Some(Vec::new()));
+        let decoded = query_in(
+            &query(list(vec![
+                sym("not-join"),
+                vector(vec![sym("?run")]),
+                outcome("?o"),
+            ])),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            decoded.query.negations[0].join,
+            Some(vec![factlite::QueryName::new("run").unwrap()])
+        );
         for bad in [
             list(vec![sym("not-join")]),
             list(vec![

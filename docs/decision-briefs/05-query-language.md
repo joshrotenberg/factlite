@@ -1,6 +1,7 @@
 # Decision brief: query language extensions (roadmap item 5)
 
-Status: decided 2026-11-06 (see Decision). Not yet implemented.
+Status: decided 2026-11-06 (see Decision). `not` and `not-join` are
+implemented (plan item 12.2); the rest is not.
 
 ## The question
 

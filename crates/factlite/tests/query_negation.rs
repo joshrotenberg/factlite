@@ -58,7 +58,7 @@ fn runs_query(negations: Vec<Negation>) -> Query {
 }
 
 struct Fixture {
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
     store: Store,
     /// run1 done/ok, run2 done/failed, run3 running with no outcome.
     at_a: Db,
@@ -127,7 +127,7 @@ fn fixture() -> Fixture {
         )
         .unwrap();
     Fixture {
-        _dir: dir,
+        dir,
         store,
         at_a,
         runs,
@@ -171,10 +171,17 @@ fn absence_is_evaluated_at_the_view_revision() {
     );
     // A reopened store pinned at A agrees.
     let a = f.at_a.snapshot().clone();
-    drop(f.at_a);
+    let Fixture {
+        dir,
+        store,
+        at_a,
+        runs,
+    } = f;
+    drop((store, at_a));
+    let reopened = Store::open(dir.path().join("runs.sqlite")).unwrap();
     assert_eq!(
-        entities(&f.store.db_at(&a).unwrap(), &absent, &none),
-        vec![f.runs[2].clone()]
+        entities(&reopened.db_at(&a).unwrap(), &absent, &none),
+        vec![runs[2].clone()]
     );
 }
 
@@ -348,11 +355,12 @@ fn groups_beyond_the_sql_budget_give_the_same_results() {
         vec![pattern(var("r"), "run/outcome", var("o"))],
         vec![],
     )]);
-    // 33 group patterns exceed the SQL pattern budget only when counted with
-    // the positive pattern, so this query uses the reference evaluator.
+    // 65 group aliases plus the outer one exceed SQLite's 64-table join
+    // limit, so this query succeeds only because group patterns count toward
+    // the budget and send it to the reference evaluator.
     let large = runs_query(vec![not_join(
         &["r"],
-        vec![pattern(var("r"), "run/outcome", var("o")); 32],
+        vec![pattern(var("r"), "run/outcome", var("o")); 65],
         vec![],
     )]);
     let none = Params::new();

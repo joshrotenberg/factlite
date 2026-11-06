@@ -36,7 +36,7 @@ expectation lookups with canonical request version 2.
 
 Decided 2026-11-06 ([brief](decision-briefs/05-query-language.md)):
 
-- `not` and `not-join` now (plan item 12.2);
+- `not` and `not-join` now (plan item 12.2, done);
 - next, `avg` and HAVING as their own item, needing no further decision;
 - `or` and recursion only on demand;
 - nested pull as a separate read API.

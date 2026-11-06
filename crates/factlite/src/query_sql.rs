@@ -682,6 +682,16 @@ mod tests {
                 order: vec![order("e", Direction::Asc), order("v", Direction::Asc)],
                 ..base.clone()
             },
+            // Variables bound at value positions outside used at entity
+            // positions inside, and the reverse: no link back from p to e.
+            Query {
+                negations: vec![negation(
+                    None,
+                    vec![pattern(var("p"), "x/link", var("e"))],
+                    vec![],
+                )],
+                ..base.clone()
+            },
             // Uncorrelated absence with no positive patterns and an empty join.
             Query {
                 patterns: vec![],
@@ -760,7 +770,7 @@ mod tests {
             values in proptest::collection::vec((0_usize..4, 0_i64..4), 0..6),
             flags in proptest::collection::vec(0_usize..4, 0..3),
             later in proptest::collection::vec((0_usize..3, 0_usize..4, 0_i64..4), 0..6),
-            cut in 0_i64..4, limit in 0_u64..6,
+            cut in 0_i64..4, limit in 1_u64..8,
         ) {
             let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("not.sqlite"); let store = Store::open(&path).unwrap();
             let mut tx = Tx::builder().define_attribute(definition("x/link", ValueType::Ref)).define_attribute(definition("x/value", ValueType::I64)).define_attribute(definition("x/flag", ValueType::Bool));
@@ -786,7 +796,7 @@ mod tests {
             }
             store.commit(tx.build().unwrap()).unwrap();
             let mut tx = Tx::builder();
-            for (e, v) in values.iter().take(2) { tx = tx.retract(ids[*e].clone(), "x/value".parse().unwrap(), Value::I64(*v)); }
+            for (e, v) in values.iter().take(2).collect::<std::collections::BTreeSet<_>>() { tx = tx.retract(ids[*e].clone(), "x/value".parse().unwrap(), Value::I64(*v)); }
             for e in flags.iter().take(1) { tx = tx.retract(ids[*e].clone(), "x/flag".parse().unwrap(), Value::Bool(true)); }
             store.commit(tx.build().unwrap()).unwrap();
             for (q, expected) in queries.iter().zip(&expected) {
