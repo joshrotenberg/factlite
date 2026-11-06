@@ -653,3 +653,13 @@ scenario testing. See `testing.md` for the verification policy.
 - Pod: Clojure keywords in value positions are keyword values, and `#inst`
   values are insts. Keywords in pod-defined positions (attribute names, labels,
   enum options) keep their meaning there.
+
+## License (2026-11-05)
+
+- The user chose MIT OR Apache-2.0, the usual Rust dual license and the same as
+  `babashka-pod`. `LICENSE-MIT` and `LICENSE-APACHE` are at the root, every
+  crate sets `license.workspace = true`, and the README states it. Crates stay
+  `publish = false`; publishing to crates.io is a separate decision.
+- The Elixir NIF (roadmap item 7) is deferred by the user.
+- The pod is not published to the babashka pod registry (user decision,
+  2026-11-05). It stays in this repository and is built from source.

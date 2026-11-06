@@ -701,4 +701,4 @@ offline. The database and CLI require no outbound network access.
 ## Open repository decisions
 
 - Remote hosting destination: private `github.com/joshrotenberg/factlite`.
-- License: none selected; publishing is disabled.
+- License: MIT OR Apache-2.0 (chosen 2026-11-05). Crates remain unpublished.

@@ -74,3 +74,8 @@ busy timeout. A live store may have SQLite sidecar files; `Store::backup` uses S
 to produce a validated standalone copy. See [storage decisions](docs/decisions.md).
 
 Remote hosting and licensing remain to be decided. Packages are not published.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.

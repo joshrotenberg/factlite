@@ -13,21 +13,16 @@ and in CI.
 ## 1. Publish (plan item 8.2): done
 
 Published to the private repository `github.com/joshrotenberg/factlite` on
-2026-11-05. CI passed there. A license is still unselected; it matters before
-any public release, including item 2.
+2026-11-05. CI passed there. The user chose MIT OR Apache-2.0 on 2026-11-05;
+the crates and README carry it.
 
-## 2. Pod release packaging
+## 2. Pod release packaging: decided, not now
 
-- **Why:** The clajent kit runs the pod from a local release build. Only macOS
-  arm64 has been built and tested.
-- **Decision needed:** Whether to publish to the babashka pod registry, and
-  which platforms to build: macOS arm64 and x86_64, Linux x86_64 and aarch64,
-  Windows x86_64.
-- **Work once decided:** Per-platform builds with the babashka test run on
-  each, versioned release tags, and a registry manifest. The `babashka-pod`
-  repository already has release tooling for its own pods that could be
-  reused.
-- **Depends on:** a license, and a public repository or release host.
+The user decided on 2026-11-05 not to publish to the babashka pod registry.
+The pod stays in this repository and is built from source
+(`cargo build --release -p factlite-pod`), as `crates/factlite-pod/README.md`
+describes. Revisit if another machine or user needs prebuilt binaries; only
+macOS arm64 has been built and tested so far.
 
 ## 3. Bounded open time
 
@@ -85,15 +80,11 @@ any public release, including item 2.
 - **Note:** This is a large semantic change. The design excluded pruning that
   discards semantic history.
 
-## 7. Elixir NIF
+## 7. Elixir NIF: deferred
 
-- **Why:** The design names an Elixir server through a NIF as a possible
-  consumer.
-- **Decision needed:** Whether it is still wanted, and whether it should be a
-  NIF (in-process, with crash isolation concerns) or a port or sidecar process
-  like the babashka pod.
-- **Note:** The pod showed that a thin adapter over the strict wire contract
-  works. The same approach would apply.
+The user deferred this on 2026-11-05. When it returns, the open questions are
+whether it should be a NIF or a port or sidecar process like the babashka pod,
+and which consumer needs it.
 
 ## 8. Small operational gaps
 
