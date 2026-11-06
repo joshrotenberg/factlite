@@ -299,14 +299,22 @@ pub(crate) fn reports_between(
         |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
     )?;
     let mut reports = Vec::new();
+    let mut expected = after;
     for row in rows {
         let (revision, bytes) = row?;
         let report = codec::decode_report(&bytes)?;
         if decode_revision(&revision)? != report.after.revision() {
             return Err(corrupt("transaction row revision differs from report"));
         }
+        // Retained history is contiguous; a gap means missing transactions.
+        expected = expected.next()?;
+        if report.after.revision() != expected {
+            return Err(corrupt("retained transaction log has a gap"));
+        }
         reports.push(report);
     }
+    // A missing tail cannot reach here: reads first check that their basis
+    // revision is retained (`index::check_basis`).
     Ok(reports)
 }
 

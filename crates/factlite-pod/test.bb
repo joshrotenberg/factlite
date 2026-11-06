@@ -249,6 +249,17 @@
 (let [later (f/transact conn {:metadata {:after-reader true}})]
   (check "read-only sees later commits" (= (:after later) (f/head reader))))
 (f/close reader)
+(def fast (f/open path {:read-only true :validation :structural}))
+(check "structural read-only open reads" (= (f/head conn) (f/head fast)))
+(check "verify on a structural connection" (= (f/head conn) (f/verify fast)))
+(check "verify on a writable connection" (= (f/head conn) (f/verify conn)))
+(f/close fast)
+(let [fresh (str path ".structural")]
+  (check "structural writable open refused without creating a file"
+         (and (= "InvalidRequest" (:code (failure #(f/open fresh {:validation :structural}))))
+              (not (.exists (java.io.File. fresh))))))
+(check "unknown validation refused"
+       (= "InvalidRequest" (:code (failure #(f/open path {:read-only true :validation :fast})))))
 (let [instant (f/open path {:busy-timeout-ms 0})]
   (check "busy timeout zero" (= (f/head conn) (f/head instant)))
   (f/close instant))

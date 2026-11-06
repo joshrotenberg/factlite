@@ -131,6 +131,16 @@ fn compile(
         from.push(format!("main.datoms AS {alias}"));
         let attribute = compiler.bind(SqlValue::Text(pattern.attribute.as_str().to_owned()));
         conditions.push(format!("{alias}.attribute = {attribute}"));
+        // The stored tag must be the attribute's type, so a mistyped row (only
+        // possible in a corrupted file) never matches and is never
+        // reinterpreted as the schema type when decoded.
+        let tag = compiler.bind(SqlValue::Integer(i64::from(codec::type_tag(
+            schema
+                .get(&pattern.attribute)
+                .expect("validated attribute")
+                .value_type(),
+        ))));
+        conditions.push(format!("{alias}.type_tag = {tag}"));
         conditions.push(format!(
             "{alias}.asserted <= ?1 AND ({alias}.retracted IS NULL OR {alias}.retracted > ?1)"
         ));
@@ -420,11 +430,12 @@ mod tests {
         let compiled = compile(&q, &Params::new(), &db.schema().unwrap(), db.snapshot()).unwrap();
         assert_eq!(
             compiled.sql,
-            "SELECT DISTINCT f0.value FROM main.datoms AS f0 WHERE f0.attribute = ?2 AND f0.asserted <= ?1 AND (f0.retracted IS NULL OR f0.retracted > ?1) AND f0.entity = ?3 AND f0.value = ?4 ORDER BY 1 ASC LIMIT ?5"
+            "SELECT DISTINCT f0.value FROM main.datoms AS f0 WHERE f0.attribute = ?2 AND f0.type_tag = ?3 AND f0.asserted <= ?1 AND (f0.retracted IS NULL OR f0.retracted > ?1) AND f0.entity = ?4 AND f0.value = ?5 ORDER BY 1 ASC LIMIT ?6"
         );
         assert!(matches!(&compiled.bindings[1], SqlValue::Text(name) if name == attr));
-        assert!(matches!(&compiled.bindings[2], SqlValue::Text(id) if id.starts_with("e1.")));
-        assert!(matches!(compiled.bindings[4], SqlValue::Integer(-1)));
+        assert!(matches!(compiled.bindings[2], SqlValue::Integer(3)));
+        assert!(matches!(&compiled.bindings[3], SqlValue::Text(id) if id.starts_with("e1.")));
+        assert!(matches!(compiled.bindings[5], SqlValue::Integer(-1)));
         assert_eq!(
             parity(&store.db().unwrap(), &q, &Params::new()).rows.len(),
             1

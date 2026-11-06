@@ -246,3 +246,10 @@ Through the pod on the clajent store copy (24,452 effective events), history
 p50 over 20 calls, `main` at `45d3e28` against the 11.3 branch: entity and
 attribute 16.28 → 0.12 ms (3 events), attribute only 19.24 → 3.43 ms (600
 events), unfiltered 129.9 → 130.3 ms (unchanged path).
+
+## Structural read-only open (12.1): 2026-11-06
+
+Median of seven CLI `schema` runs, including process start. On the 120,000-fact
+synthetic store (875 revisions), full validation took 774 ms and structural
+3.2 ms. On a copy of the clajent store (3,205 revisions), full validation took
+156 ms and structural 4.1 ms. `verify` costs the same as a full open.

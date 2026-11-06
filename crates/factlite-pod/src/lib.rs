@@ -15,7 +15,7 @@ mod convert;
 use babashka_pod::transit::Value as Clj;
 use babashka_pod::{Handle, Handles, Namespace, PodError};
 use convert::{Fields, Result, invalid, library_error};
-use factlite::{Db, Revision, SnapshotId, Store, StoreOptions};
+use factlite::{Db, Revision, SnapshotId, Store, StoreOptions, Validation};
 
 /// The namespace this pod defines.
 pub const NAMESPACE: &str = "pod.joshrotenberg.factlite";
@@ -124,6 +124,18 @@ fn open_options(value: Option<&Clj>) -> Result<(bool, StoreOptions)> {
             .with_busy_timeout(std::time::Duration::from_millis(millis))
             .map_err(library_error)?;
     }
+    if let Some(validation) = fields.take("validation") {
+        options = options.with_validation(match validation {
+            Clj::Keyword(name) if name == "full" => Validation::Full,
+            Clj::Keyword(name) if name == "structural" => Validation::Structural,
+            _ => {
+                return Err(invalid(
+                    "validation",
+                    ":validation must be :full or :structural",
+                ));
+            }
+        });
+    }
     fields.finish()?;
     Ok((read_only, options))
 }
@@ -160,6 +172,16 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
         arity(&args, "head", 1, 1, "[conn]")?;
         let head = conn(&s, &args[0])?.latest()?;
         Ok(convert::snapshot_out(head.snapshot()))
+    });
+    let s = stores.clone();
+    let verify: Var = Box::new(move |args| {
+        arity(&args, "verify", 1, 1, "[conn]")?;
+        let head = match conn(&s, &args[0])? {
+            Conn::Writer(store) => store.verify(),
+            Conn::Reader(db) => db.verify(),
+        }
+        .map_err(library_error)?;
+        Ok(convert::snapshot_out(&head))
     });
     let s = stores.clone();
     let transact: Var = Box::new(move |args| {
@@ -321,7 +343,8 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
             "open",
             "Opens or creates a Factlite database file and returns a connection. \
              opts: :read-only true opens an existing file without write access; \
-             :busy-timeout-ms sets the lock wait (default 2000).",
+             :busy-timeout-ms sets the lock wait (default 2000); \
+             :validation :structural (read-only only) skips replaying the log at open.",
             &["[path]", "[path opts]"],
             open,
         ),
@@ -336,6 +359,13 @@ fn vars(stores: &Handles<Conn>) -> Vec<(&'static str, &'static str, &'static [&'
             "Returns the latest committed snapshot.",
             &["[conn]"],
             head,
+        ),
+        (
+            "verify",
+            "Fully validates the latest committed state and returns the verified \
+             snapshot. Failures are ex-info with :code Storage, UnsupportedFormat or Busy.",
+            &["[conn]"],
+            verify,
         ),
         (
             "transact",

@@ -8,11 +8,12 @@ use std::{
     process::ExitCode,
 };
 
-use factlite::{Db, ErrorCode, FactFilter, Revision, Store, StoreOptions, wire};
+use factlite::{Db, ErrorCode, FactFilter, Revision, Store, StoreOptions, Validation, wire};
 use serde_json::json;
 
 const HELP: &str = "Usage:
   factlite init PATH [--busy-timeout-ms MS]
+  factlite --db PATH verify
   factlite --db PATH backup --to PATH
   factlite --db PATH transact --file PATH|-
   factlite --db PATH pull --entity ID --attrs ATTR[,ATTR...] [VIEW]
@@ -27,6 +28,8 @@ const HELP: &str = "Usage:
 VIEW: --at SNAPSHOT_TOKEN or --at-file PATH|- (otherwise capture head once)
 FILTER: --entity ID, --attr ATTR, --value TAGGED_JSON
 --after defaults to 0. Empty --attrs projects no fields.
+Read commands accept --validation full|structural (default full). Structural
+skips replaying the log at open; run verify to validate fully.
 Every database command also accepts --busy-timeout-ms MS: how long to wait for
 a lock held by another process before failing busy (default 2000; 0 fails at
 once).
@@ -122,6 +125,7 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
             .ok_or_else(|| invalid("missing database command"))?,
     )?;
     let allowed: &[&str] = match command.as_str() {
+        "verify" => &[],
         "backup" => &["--to"],
         "transact" => &["--file"],
         "query" => &["--file", "--at", "--at-file"],
@@ -143,7 +147,14 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
     let mut options = BTreeMap::new();
     while let Some(option) = args.next() {
         let option = text(option)?;
-        if option != "--busy-timeout-ms" && !allowed.contains(&option.as_str()) {
+        let read_command = matches!(
+            command.as_str(),
+            "schema" | "facts" | "pull" | "lookup" | "history" | "transactions" | "query"
+        );
+        if option != "--busy-timeout-ms"
+            && !(option == "--validation" && read_command)
+            && !allowed.contains(&option.as_str())
+        {
             return Err(invalid(format!("unknown option for {command}: {option}")));
         }
         let value = args
@@ -174,7 +185,14 @@ fn parse(args: Vec<OsString>) -> Result<Command> {
         }
     }
     // Validated here, with the other options, before any input is read.
-    let store = store_options(options.remove("--busy-timeout-ms"))?;
+    let mut store = store_options(options.remove("--busy-timeout-ms"))?;
+    if let Some(validation) = options.remove("--validation") {
+        store = store.with_validation(match text(validation)?.as_str() {
+            "full" => Validation::Full,
+            "structural" => Validation::Structural,
+            _ => return Err(invalid("--validation expects full or structural")),
+        });
+    }
     Ok(Command::Database {
         path,
         command,
@@ -229,6 +247,12 @@ fn run(command: Command) -> Result<String> {
             store,
             mut options,
         } => {
+            if command == "verify" {
+                // Read-only, so verifying never takes the write lock.
+                let db =
+                    Db::open_read_only_with(&path, &store.with_validation(Validation::Structural))?;
+                return Ok(wire::encode_snapshot(&db.verify()?));
+            }
             if command == "backup" {
                 let destination =
                     PathBuf::from(options.remove("--to").expect("required during parse"));

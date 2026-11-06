@@ -94,6 +94,7 @@ reject unknown keys.
 | `open` | `[path]` `[path opts]` | a connection |
 | `close` | `[conn]` | nil |
 | `head` | `[conn]` | the latest snapshot |
+| `verify` | `[conn]` | fully validates; returns the latest snapshot |
 | `transact` | `[conn tx]` | the transaction report |
 | `schema` | `[conn]` `[conn opts]` | attribute definitions |
 | `pull` | `[conn entity attrs]` `[conn entity attrs opts]` | `{:id ...}` plus present attributes, or nil |
@@ -113,6 +114,11 @@ reject unknown keys.
   `UnsupportedFormat` until a writable open has upgraded them.
 - `:busy-timeout-ms n` sets how long operations wait for another process's
   lock before failing `Busy` (default 2000; 0 fails at once).
+- `:validation :structural`, with `:read-only true` only, skips replaying the
+  log at open: a few milliseconds instead of time proportional to history.
+  Corruption is then found only by `(f/verify conn)`, which fully validates the
+  latest state and returns its snapshot. A writable open with it fails
+  `InvalidRequest`.
 
 ### Transactions
 
