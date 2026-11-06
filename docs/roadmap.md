@@ -94,8 +94,9 @@ None of these needs a design decision; each could be done directly.
   defaults, which were adequate for every measured query.
 - CLI read commands open the file per process and so replay the whole log
   every time. They would benefit from 3.
-- No check verifies that documentation links resolve. A link checker in
-  `scripts/check.sh` would catch dead links like one found in review of item 9.
+- Done 2026-11-06: `crates/factlite/tests/doc_links.rs` checks that every
+  relative link in the repository's Markdown resolves, as part of
+  `cargo test`.
 
 ## 9. Documentation: done
 

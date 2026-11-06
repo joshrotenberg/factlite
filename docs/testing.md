@@ -167,3 +167,8 @@ CI installs babashka 1.13.229 from its pinned release, verified by checksum, and
 sets `REQUIRE_BB`, so the pod's babashka tests fail rather than skip if `bb` is
 missing. A CLI scenario holds a write lock and checks that `--busy-timeout-ms`
 bounds the wait, that reads are unaffected, and that invalid values exit 2.
+
+`crates/factlite/tests/doc_links.rs` checks that every relative link in the
+repository's Markdown files (outside `target` and hidden directories, and
+outside code blocks and spans) resolves to an existing path. External URLs,
+same-page anchors and anchor targets are not checked.
