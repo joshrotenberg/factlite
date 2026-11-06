@@ -1147,3 +1147,80 @@ fn transaction_lookup_refs_resolve_retry_and_fail_by_lookup() {
         json!({"lookup":{"attr":"run/key","value":{"string":"Z"}}})
     );
 }
+
+#[test]
+fn query_avg_and_having_filter_groups_before_the_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("avg.sqlite");
+    success(binary().arg("init").arg(&path));
+    let mut changes = Vec::new();
+    for (index, (recipe, cost)) in [("a", 1), ("a", 2), ("a", 2), ("b", 10), ("c", 7)]
+        .into_iter()
+        .enumerate()
+    {
+        let temp = json!({"temp": format!("r{index}")});
+        changes.push(
+            json!({"op":"assert","entity":temp,"attr":"run/recipe","value":{"string":recipe}}),
+        );
+        changes.push(
+            json!({"op":"assert","entity":temp,"attr":"run/cost","value":{"i64":cost.to_string()}}),
+        );
+    }
+    transact(
+        &path,
+        &json!({"version":1,
+            "schema":[
+                {"name":"run/recipe","type":"string","cardinality":"one","unique":"none"},
+                {"name":"run/cost","type":"i64","cardinality":"one","unique":"none"}
+            ],
+            "new_entities":["r0","r1","r2","r3","r4"],
+            "changes":changes}),
+    );
+    let query = |q: Json| {
+        success(
+            db(&path)
+                .args(["query", "--file", "-"])
+                .write_stdin(q.to_string()),
+        )
+    };
+    let per_recipe = |having: Json, limit: u64| {
+        json!({"version":1,"query":{
+            "inputs":{"floor":"f64"},
+            "match":[[{"var":"run"},"run/recipe",{"var":"recipe"}],
+                     [{"var":"run"},"run/cost",{"var":"cost"}]],
+            "select":["recipe"],
+            "with":["run"],
+            "aggregates":[{"fn":"avg","var":"cost","name":"mean"},
+                          {"fn":"count","var":"run","name":"n"}],
+            "having":having,
+            "order":[{"field":"mean","direction":"asc"}],
+            "limit":limit
+        },"params":{"floor":{"f64":"2"}}})
+    };
+    // Without HAVING the first row by mean is recipe a, (1 + 2 + 2) / 3.
+    assert_eq!(
+        query(per_recipe(json!([]), 1)),
+        json!({"version":1,"columns":["recipe","mean","n"],
+               "rows":[[{"string":"a"},{"f64":"1.6666666666666667"},{"i64":"3"}]]})
+    );
+    // HAVING drops recipe a before ordering and the limit.
+    assert_eq!(
+        query(per_recipe(
+            json!([{"left":{"var":"mean"},"op":"gt","right":{"param":"floor"}}]),
+            1
+        ))["rows"],
+        json!([[{"string":"c"},{"f64":"7"},{"i64":"1"}]])
+    );
+    // HAVING names result columns only; `cost` is a pattern variable.
+    failure(
+        db(&path).args(["query", "--file", "-"]).write_stdin(
+            per_recipe(
+                json!([{"left":{"var":"cost"},"op":"gt","right":{"i64":"1"}}]),
+                5,
+            )
+            .to_string(),
+        ),
+        2,
+        "InvalidRequest",
+    );
+}

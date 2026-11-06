@@ -2,7 +2,7 @@
 
 ## Current state
 
-Updated 2026-11-06 (plan step 12 done). This section is the summary. The entries below are the full
+Updated 2026-11-06 (plan item 12.5 done). This section is the summary. The entries below are the full
 per-item log, oldest first, and are kept as written, so older entries describe
 the state at their time. Where they disagree with this section, this section is
 current.
@@ -15,8 +15,8 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 220 pass locally with babashka installed and `REQUIRE_BB=1`,
-  including fifty-one 1,024-case properties and the pod's three babashka
+- **Tests:** 228 pass locally with babashka installed and `REQUIRE_BB=1`,
+  including fifty-four 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions is unavailable for
   this account this month, so the local gate stands in for CI.
 - **Reviews:** entries 0001 to 0043 in `reviews/` are self-reviews. Since 0044,
@@ -29,7 +29,8 @@ current.
   - 12.1: read-only structural open and verify (done);
   - 12.2: query negation (done);
   - 12.3: transaction lookup refs (done);
-  - 12.4: permanence and encryption guidance (done).
+  - 12.4: permanence and encryption guidance (done);
+  - 12.5: `avg` and HAVING (done).
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
 
@@ -813,6 +814,24 @@ current.
 - **What's next:** plan step 12 is complete. The remaining candidates have no
   plan items yet: `avg` and HAVING, expectation lookups (canonical request
   version 2), and the open roadmap entries. Each needs the user's go-ahead.
+
+## 12.5 avg and HAVING: done
+
+- **Done:** `AggregateFn::Avg` (F64 result; an I64 mean rounds the exact
+  quotient once) and `Query::having` over result columns, applied after
+  aggregation and before ordering and the limit. Wire `"fn":"avg"` and
+  `"having"`, pod `(avg ?x)` and `:having`, and a CLI scenario. 228 tests
+  pass with `REQUIRE_BB=1`, including three new rounding properties. Review:
+  `reviews/0053-avg-having.md`.
+- **Decisions:** see `decisions.md`, "avg and HAVING (12.5)": the f64 mean is
+  the ascending-order sum over the count, an aggregate error in a dropped
+  group still fails, limit zero never aggregates, and the validation order.
+- **Validation:** local only; GitHub Actions is unavailable.
+- **Left open:** `or`, recursion and nested pull stay on demand. HAVING has no
+  SQL form; it runs in Rust over the aggregated rows.
+- **What's next:** no authorized plan item remains. Candidates are expectation
+  lookups (canonical request version 2) and the open roadmap entries; each
+  needs the user's go-ahead.
 
 ## Environment notes
 

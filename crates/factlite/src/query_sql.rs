@@ -321,7 +321,7 @@ pub(crate) fn evaluate(
             schema,
             basis,
         )?;
-        return crate::query_aggregate::finish(query, tuples.rows);
+        return crate::query_aggregate::finish(query, params, tuples.rows);
     }
     let compiled = compile(query, params, schema, basis)?;
     let mut output = Vec::new();
@@ -752,8 +752,11 @@ mod tests {
             ];
             if matches!(domain, ValueType::I64 | ValueType::F64) {
                 aggregates.push(crate::Aggregate { function: crate::AggregateFn::Sum, var: name("v"), name: name("total") });
+                aggregates.push(crate::Aggregate { function: crate::AggregateFn::Avg, var: name("v"), name: name("mean") });
             }
-            let grouped = Query { select: vec![name("e")], with: vec![name("peer")], aggregates, order: vec![order("e", direction)], limit: Some(limit), ..q.clone() };
+            // HAVING bounds the per-entity link count from above or below.
+            let having = vec![Predicate { left: var("n"), comparison: if descending { Comparison::Ge } else { Comparison::Le }, right: Term::Const(Value::I64(i64::try_from(op).unwrap() % 3)) }];
+            let grouped = Query { select: vec![name("e")], with: vec![name("peer")], aggregates, having, order: vec![order("e", direction)], limit: Some(limit), ..q.clone() };
             let grouped_expected = parity_or_error(&db_a,&grouped,&params);
             // Later commits retract and add values and links; A must not see them.
             store.commit(Tx::builder().define_attribute(definition("later/value",ValueType::Bool)).retract(ids[0].clone(),"x/value".parse().unwrap(),values[0].clone()).assert(ids[1].clone(),"x/link".parse().unwrap(),ValueTerm::Value(Value::Ref(ids[2].clone()))).build().unwrap()).unwrap();
