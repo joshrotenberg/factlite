@@ -124,7 +124,28 @@ impl Db {
     /// This cannot initialize or commit main-database changes; queries may use
     /// connection-local temporary tables. Backups preserve original tokens.
     pub fn open_read_only(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        Store::reader(path.as_ref())
+        Store::reader(path.as_ref(), &crate::StoreOptions::default())
+    }
+
+    /// Like [`Db::open_read_only`], with explicit connection settings.
+    pub fn open_read_only_with(
+        path: impl AsRef<std::path::Path>,
+        options: &crate::StoreOptions,
+    ) -> Result<Self> {
+        Store::reader(path.as_ref(), options)
+    }
+
+    /// A new view of the latest committed head over this view's connection.
+    /// This view stays pinned; a read-only view refreshes only explicitly,
+    /// without reopening or revalidating the file.
+    pub fn at_head(&self) -> Result<Self> {
+        self.store.db()
+    }
+
+    /// A new view of a retained snapshot over this view's connection, validated
+    /// like [`Store::db_at`].
+    pub fn at(&self, snapshot: &SnapshotId) -> Result<Self> {
+        self.store.db_at(snapshot)
     }
 
     /// Open a retained full snapshot through a read-only file connection.
@@ -133,7 +154,7 @@ impl Db {
         path: impl AsRef<std::path::Path>,
         snapshot: &SnapshotId,
     ) -> Result<Self> {
-        let reader = Store::reader(path.as_ref())?;
+        let reader = Store::reader(path.as_ref(), &crate::StoreOptions::default())?;
         reader.store.db_at(snapshot)
     }
 

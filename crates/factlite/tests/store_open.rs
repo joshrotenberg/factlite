@@ -226,3 +226,78 @@ fn concurrent_first_opens_initialize_one_store_identity() {
     assert!(heads.iter().all(|head| head == &heads[0]));
     assert_eq!(heads[0].revision(), Revision::ZERO);
 }
+
+#[test]
+fn busy_timeout_is_configurable_and_validated() {
+    use factlite::StoreOptions;
+    use std::time::{Duration, Instant};
+    for invalid in [
+        Duration::from_micros(1500),
+        Duration::from_millis(i32::MAX as u64 + 1),
+    ] {
+        assert_eq!(
+            StoreOptions::new()
+                .with_busy_timeout(invalid)
+                .unwrap_err()
+                .code(),
+            ErrorCode::InvalidRequest
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("timeout.sqlite");
+    let options = StoreOptions::new()
+        .with_busy_timeout(Duration::from_millis(150))
+        .unwrap();
+    assert_eq!(options.busy_timeout(), Duration::from_millis(150));
+    let store = Store::open_with(&path, &options).unwrap();
+    let blocker = Connection::open(&path).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let started = Instant::now();
+    let error = store.commit(factlite::Tx::default()).unwrap_err();
+    let waited = started.elapsed();
+    assert_eq!(error.code(), ErrorCode::Busy);
+    assert!(
+        waited >= Duration::from_millis(150) && waited < Duration::from_secs(2),
+        "{waited:?}"
+    );
+    // Zero fails at once.
+    let instant = Store::open_with(
+        &path,
+        &StoreOptions::new()
+            .with_busy_timeout(Duration::ZERO)
+            .unwrap(),
+    )
+    .unwrap();
+    let started = Instant::now();
+    assert_eq!(
+        instant.commit(factlite::Tx::default()).unwrap_err().code(),
+        ErrorCode::Busy
+    );
+    assert!(started.elapsed() < Duration::from_millis(100));
+    blocker.execute_batch("ROLLBACK").unwrap();
+    assert!(store.commit(factlite::Tx::default()).is_ok());
+}
+
+#[test]
+fn read_only_views_refresh_only_explicitly_over_one_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("refresh.sqlite");
+    let store = Store::open(&path).unwrap();
+    let a = store.commit(factlite::Tx::default()).unwrap().after;
+    let reader = factlite::Db::open_read_only_with(&path, &factlite::StoreOptions::new()).unwrap();
+    assert_eq!(reader.snapshot(), &a);
+    let b = store.commit(factlite::Tx::default()).unwrap().after;
+    // The pinned view does not move; an explicit refresh does.
+    assert_eq!(reader.snapshot(), &a);
+    assert_eq!(reader.transactions(Revision::ZERO).unwrap().len(), 1);
+    let latest = reader.at_head().unwrap();
+    assert_eq!(latest.snapshot(), &b);
+    assert_eq!(latest.transactions(Revision::ZERO).unwrap().len(), 2);
+    assert_eq!(reader.at(&a).unwrap().snapshot(), &a);
+    let future =
+        factlite::SnapshotId::new(b.store().clone(), b.lineage().clone(), Revision::new(9));
+    assert_eq!(
+        reader.at(&future).err().unwrap().code(),
+        ErrorCode::InvalidSnapshot
+    );
+}

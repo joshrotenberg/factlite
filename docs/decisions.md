@@ -541,3 +541,17 @@ scenario testing. See `testing.md` for the verification policy.
   order is allocation order. A test compares it with the full catalog's value.
 - Open, reads and replay are unchanged. Open still replays and validates the
   whole log, so its cost stays linear in revisions plus live state.
+
+## Open options and read-only pod connections (11.1)
+
+- `StoreOptions` carries the busy timeout for `Store::open_with` and
+  `Db::open_read_only_with`; `open` and `open_read_only` keep two seconds. The
+  timeout must be whole milliseconds no greater than `i32::MAX` (SQLite's
+  unit and limit); zero fails at once.
+- `Db::at_head` and `Db::at` return new views over the same connection. A view
+  still never refreshes itself; these are explicit and do not reopen or
+  revalidate the file, which matters now that open replays the whole log.
+- The pod's connection registry holds a writer `Store` or a read-only `Db`.
+  Read-only connections read at the latest head on each call, as writer
+  connections do, and `transact` on them fails `InvalidRequest` before any
+  storage access.

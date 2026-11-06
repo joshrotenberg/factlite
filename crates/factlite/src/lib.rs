@@ -67,6 +67,6 @@ pub use query::{
     Comparison, Direction, Order, Params, Pattern, Predicate, Query, QueryName, QueryResult, Term,
 };
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
-pub use store::Store;
+pub use store::{Store, StoreOptions};
 pub use tx::{Change, EntityTerm, Expectation, Operation, Tx, TxBuilder, ValueTerm};
 pub use value::{FiniteF64, Value, ValueType};
