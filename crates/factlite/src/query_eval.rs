@@ -29,7 +29,7 @@ fn resolve<'a>(term: &'a Term, binding: &'a Binding, params: &'a Params) -> &'a 
         Term::Param(name) => params.get(name).expect("validated input"),
     }
 }
-fn compare(left: &Value, comparison: Comparison, right: &Value) -> Result<bool> {
+pub(crate) fn compare(left: &Value, comparison: Comparison, right: &Value) -> Result<bool> {
     Ok(match comparison {
         Comparison::Eq => left == right,
         Comparison::Ne => left != right,
@@ -156,7 +156,7 @@ pub(crate) fn evaluate(
         }
     }
     if !query.aggregates.is_empty() {
-        return crate::query_aggregate::finish(query, distinct.into_iter().collect());
+        return crate::query_aggregate::finish(query, params, distinct.into_iter().collect());
     }
     let mut rows: Vec<_> = distinct.into_iter().collect();
     crate::query_aggregate::order_and_limit(query, &query.select, &mut rows);

@@ -109,6 +109,11 @@ pub enum AggregateFn {
     Min,
     /// The greatest value of the variable in the group, in its type.
     Max,
+    /// The mean over the group's tuples of an I64 or F64 variable, as F64.
+    /// An I64 mean divides the exact sum by the count and rounds once to the
+    /// nearest F64, ties to even. An F64 mean divides the ascending-order sum,
+    /// as `Sum` computes it, by the count; a non-finite sum is an error.
+    Avg,
 }
 
 /// One aggregate column, named in the result after the selected columns.
@@ -152,7 +157,7 @@ pub type Params = BTreeMap<QueryName, Value>;
 /// With aggregates, evaluation is: match, filter and apply negations; project the selected
 /// variables, the `with` variables and each aggregate's variable; remove
 /// duplicate tuples; group by the selected variables; aggregate each group;
-/// then order and limit. Only distinct tuples are aggregated, so include a
+/// keep the rows that pass `having`; then order and limit. Only distinct tuples are aggregated, so include a
 /// variable in `with` (such as the entity) when equal values from different
 /// matches must each count. No matching tuples yield no rows, even without
 /// selected variables.
@@ -177,6 +182,11 @@ pub struct Query {
     pub with: Vec<QueryName>,
     /// Aggregate columns, after the selected columns. Selected variables group.
     pub aggregates: Vec<Aggregate>,
+    /// Comparisons over result columns (selected variables and aggregate
+    /// names), constants and parameters, applied to each aggregated row before
+    /// ordering and the limit. A variable here names a result column, not a
+    /// pattern variable. Requires at least one aggregate.
+    pub having: Vec<Predicate>,
 }
 
 /// Owned relation of named columns and typed tuples. Entity-domain columns use
@@ -275,6 +285,11 @@ impl Query {
                 ));
             }
         }
+        let mut columns: BTreeMap<&QueryName, ValueType> = self
+            .select
+            .iter()
+            .map(|name| (name, variables[name]))
+            .collect();
         for aggregate in &self.aggregates {
             let ty = *variables.get(&aggregate.var).ok_or_else(|| {
                 Error::invalid(
@@ -282,7 +297,7 @@ impl Query {
                     format!("unbound variable: {}", aggregate.var.as_str()),
                 )
             })?;
-            if aggregate.function == AggregateFn::Sum
+            if matches!(aggregate.function, AggregateFn::Sum | AggregateFn::Avg)
                 && !matches!(ty, ValueType::I64 | ValueType::F64)
             {
                 return Err(Error::new(
@@ -291,7 +306,7 @@ impl Query {
                         expected: ValueType::I64,
                         actual: ty,
                     },
-                    "sum requires an i64 or f64 variable",
+                    "sum and avg require an i64 or f64 variable",
                 ));
             }
             if !selected.insert(&aggregate.name) {
@@ -299,6 +314,37 @@ impl Query {
                     "aggregates",
                     "aggregate name duplicates another column",
                 ));
+            }
+            let result = match aggregate.function {
+                AggregateFn::Count | AggregateFn::CountDistinct => ValueType::I64,
+                AggregateFn::Avg => ValueType::F64,
+                AggregateFn::Sum | AggregateFn::Min | AggregateFn::Max => ty,
+            };
+            columns.insert(&aggregate.name, result);
+        }
+        if !self.having.is_empty() && self.aggregates.is_empty() {
+            return Err(Error::invalid(
+                "having",
+                "having requires at least one aggregate",
+            ));
+        }
+        for predicate in &self.having {
+            let column_type = |term: &Term| match term {
+                Term::Var(name) => columns.get(name).copied().ok_or_else(|| {
+                    Error::invalid(
+                        "having",
+                        format!(
+                            "having may name only selected and aggregate columns: {}",
+                            name.as_str()
+                        ),
+                    )
+                }),
+                _ => self.term_type(term, &variables),
+            };
+            let left = column_type(&predicate.left)?;
+            let right = column_type(&predicate.right)?;
+            if !matches!(predicate.comparison, Comparison::Eq | Comparison::Ne) && left != right {
+                return Err(mismatch(left, right));
             }
         }
         for order in &self.order {

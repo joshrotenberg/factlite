@@ -321,7 +321,7 @@ pub(crate) fn evaluate(
             schema,
             basis,
         )?;
-        return crate::query_aggregate::finish(query, tuples.rows);
+        return crate::query_aggregate::finish(query, params, tuples.rows);
     }
     let compiled = compile(query, params, schema, basis)?;
     let mut output = Vec::new();

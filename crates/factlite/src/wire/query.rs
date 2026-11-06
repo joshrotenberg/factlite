@@ -202,6 +202,7 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
                 "sum" => AggregateFn::Sum,
                 "min" => AggregateFn::Min,
                 "max" => AggregateFn::Max,
+                "avg" => AggregateFn::Avg,
                 _ => return Err(Error::invalid("fn", "unknown aggregate function")),
             };
             let var = QueryName::new(text(object.required("var")?, "var")?)?;
@@ -214,6 +215,7 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
             })
         })
         .collect::<Result<_>>()?;
+    let having = decode_predicates(object.array("having")?)?;
     let limit = object
         .optional("limit")
         .map(|value| {
@@ -239,6 +241,7 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
             limit,
             with,
             aggregates,
+            having,
         },
         params,
     ))
@@ -291,12 +294,16 @@ pub fn encode_query(query: &Query, params: &Params) -> String {
                         AggregateFn::Sum => "sum",
                         AggregateFn::Min => "min",
                         AggregateFn::Max => "max",
+                        AggregateFn::Avg => "avg",
                     },
                     "var": aggregate.var.as_str(),
                     "name": aggregate.name.as_str(),
                 }))
                 .collect::<Vec<_>>()
         );
+    }
+    if !query.having.is_empty() {
+        inner["having"] = json!(query.having.iter().map(predicate_json).collect::<Vec<_>>());
     }
     json!({"version":1,"query":inner,"params":params.iter().map(|(name,value)| (name.as_str().to_owned(),value_json(value))).collect::<Map<_,_>>()}).to_string()
 }
