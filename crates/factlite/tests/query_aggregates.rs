@@ -237,15 +237,25 @@ fn having_filters_aggregated_rows_before_ordering_and_the_limit() {
         having: vec![having(var("n"), Comparison::Gt, Term::Const(i(10)))],
         ..base
     };
+    let overflowing = overflowing.db().unwrap();
     assert_eq!(
         overflowing
-            .db()
-            .unwrap()
             .query(&never, &Params::new())
             .unwrap_err()
             .code(),
         ErrorCode::InvalidRequest
     );
+    // A limit of zero returns no rows without aggregating, so it cannot fail.
+    let none = overflowing
+        .query(
+            &Query {
+                limit: Some(0),
+                ..never
+            },
+            &Params::new(),
+        )
+        .unwrap();
+    assert!(none.rows.is_empty());
 }
 
 #[test]
@@ -436,6 +446,37 @@ fn aggregate_queries_are_validated_before_execution() {
             "{mismatched:?}"
         );
     }
+    // Validation order: aggregates, then HAVING, then ordering.
+    let field = |query: Query| match db.query(&query, &Params::new()).unwrap_err().context() {
+        factlite::ErrorContext::InvalidInput { field } => *field,
+        other => panic!("{other:?}"),
+    };
+    let bad_order = vec![Order {
+        field: name("nope"),
+        direction: Direction::Asc,
+    }];
+    let bad_having = vec![having(
+        var("nope"),
+        Comparison::Eq,
+        Term::Const(Value::I64(1)),
+    )];
+    assert_eq!(
+        field(Query {
+            having: bad_having.clone(),
+            order: bad_order.clone(),
+            ..base.clone()
+        }),
+        "having"
+    );
+    assert_eq!(
+        field(Query {
+            aggregates: vec![agg(AggregateFn::Count, "nope", "x")],
+            having: bad_having,
+            order: bad_order,
+            ..base.clone()
+        }),
+        "aggregates"
+    );
     // Equality across types is allowed and simply never holds.
     assert!(
         db.query(

@@ -252,7 +252,29 @@
        (= [] (:rows (f/q conn '{:match [[?run :agg/cost ?cost] [?run :task/status ?s]]
                                 :select [(count ?run)]}))))
 (check "sum of a string fails" (= "TypeMismatch" (:code (failure #(f/q conn '{:match [[?r :agg/recipe ?x]] :select [(sum ?x)]})))))
-(check "unknown aggregate fails" (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?r :agg/cost ?x]] :select [(avg ?x)]})))))
+(check "unknown aggregate fails" (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?r :agg/cost ?x]] :select [(median ?x)]})))))
+(check "avg per group is a double"
+       (= [["a" (/ 5.0 3)] ["b" 4.0]]
+          (:rows (f/q conn '{:match [[?run :agg/recipe ?recipe] [?run :agg/cost ?cost]]
+                             :select [?recipe (avg ?cost)]
+                             :with [?run]
+                             :order [[?recipe :asc]]}))))
+(check ":having filters groups by an aggregate column"
+       (= [["a" 3]] (:rows (f/q conn '{:match [[?run :agg/recipe ?recipe] [?run :agg/cost ?cost]]
+                                       :select [?recipe (count ?run)]
+                                       :with [?run]
+                                       :having [(>= (count ?run) 2)]}))))
+(check ":having takes inputs and selected variables"
+       (= [["b" 4.0]] (:rows (f/q conn '{:match [[?run :agg/recipe ?recipe] [?run :agg/cost ?cost]]
+                                         :select [?recipe (avg ?cost)]
+                                         :with [?run]
+                                         :inputs {:floor :f64}
+                                         :having [(> (avg ?cost) $floor) (not= ?recipe "c")]}
+                                  {:floor 2.0}))))
+(check ":having names only result columns"
+       (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?run :agg/recipe ?recipe] [?run :agg/cost ?cost]]
+                                                        :select [?recipe (count ?run)]
+                                                        :having [(> ?cost 1.0)]})))))
 
 (let [[[b-run]] (:rows (f/q conn '{:match [[?run :agg/recipe "b"]] :select [?run]}))
       [cheap] (sort-by :id (map first (:rows (f/q conn '{:match [[?run :agg/cost 1.5]] :select [?run]}))))]

@@ -550,11 +550,12 @@ fn column(value: &Clj, field: &str) -> Result<(String, Option<(&'static str, Str
                 "sum" => ("sum", "sum"),
                 "min" => ("min", "min"),
                 "max" => ("max", "max"),
+                "avg" => ("avg", "avg"),
                 other => {
                     return Err(invalid(
                         field,
                         format!(
-                            "unknown aggregate {other}: use count, count-distinct, sum, min or max"
+                            "unknown aggregate {other}: use count, count-distinct, sum, avg, min or max"
                         ),
                     ));
                 }
@@ -583,7 +584,20 @@ fn term_in(value: &Clj) -> Result<Json> {
 }
 
 fn predicate_in(value: &Clj) -> Result<Json> {
-    let [op, left, right] = exactly::<3>(value, "where", "(op left right)")?;
+    comparison_in(value, "where", term_in)
+}
+
+/// A `:having` term: `(fn ?x)` names that aggregate's result column, `?x` a
+/// selected variable, and `$x` or a value works as in `:where`.
+fn having_term_in(value: &Clj) -> Result<Json> {
+    if let Clj::List(_) = unmeta(value) {
+        return Ok(json!({"var": column(value, "having")?.0}));
+    }
+    term_in(value)
+}
+
+fn comparison_in(value: &Clj, field: &str, term: fn(&Clj) -> Result<Json>) -> Result<Json> {
+    let [op, left, right] = exactly::<3>(value, field, "(op left right)")?;
     let op = match unmeta(op) {
         Clj::Symbol(op) => match op.as_str() {
             "=" => "eq",
@@ -592,16 +606,16 @@ fn predicate_in(value: &Clj) -> Result<Json> {
             "<=" => "le",
             ">" => "gt",
             ">=" => "ge",
-            _ => return Err(invalid("where", format!("unknown comparison {op}"))),
+            _ => return Err(invalid(field, format!("unknown comparison {op}"))),
         },
         _ => {
             return Err(invalid(
-                "where",
+                field,
                 "a predicate is (op left right) with op =, not=, <, <=, > or >=",
             ));
         }
     };
-    Ok(json!({"left": term_in(left)?, "op": op, "right": term_in(right)?}))
+    Ok(json!({"left": term(left)?, "op": op, "right": term(right)?}))
 }
 
 fn pattern_in(value: &Clj) -> Result<Json> {
@@ -761,6 +775,13 @@ pub(crate) fn query_in(query: &Clj, params: Option<&Clj>) -> Result<PodQuery> {
             })
             .collect::<Result<Vec<_>>>()?;
         inner.insert("order".into(), json!(order));
+    }
+    if let Some(having) = fields.take("having") {
+        let having = items(&having, "having")?
+            .iter()
+            .map(|clause| comparison_in(clause, "having", having_term_in))
+            .collect::<Result<Vec<_>>>()?;
+        inner.insert("having".into(), json!(having));
     }
     if let Some(limit) = fields.take("limit") {
         match unmeta(&limit) {
@@ -1519,9 +1540,92 @@ mod tests {
         assert_eq!(decoded.query.order[0].field.as_str(), "sum-cost");
         let unknown = map(vec![(
             "select",
-            vector(vec![list(vec![sym("avg"), sym("?cost")])]),
+            vector(vec![list(vec![sym("median"), sym("?cost")])]),
         )]);
         assert!(code(query_in(&unknown, None).err().unwrap()).contains("InvalidRequest"));
+    }
+
+    #[test]
+    fn having_terms_name_aggregate_and_selected_columns() {
+        let list = |items: Vec<Clj>| Clj::List(items);
+        let query = map(vec![
+            (
+                "match",
+                vector(vec![
+                    vector(vec![sym("?run"), kw("run/recipe"), sym("?recipe")]),
+                    vector(vec![sym("?run"), kw("run/cost"), sym("?cost")]),
+                ]),
+            ),
+            (
+                "select",
+                vector(vec![
+                    sym("?recipe"),
+                    list(vec![sym("avg"), sym("?cost")]),
+                    list(vec![sym("count"), sym("?run")]),
+                ]),
+            ),
+            ("with", vector(vec![sym("?run")])),
+            ("inputs", map(vec![("floor", kw("f64"))])),
+            (
+                "having",
+                vector(vec![
+                    list(vec![
+                        sym(">"),
+                        list(vec![sym("avg"), sym("?cost")]),
+                        sym("$floor"),
+                    ]),
+                    list(vec![sym("not="), sym("?recipe"), Clj::String("x".into())]),
+                    list(vec![
+                        sym(">="),
+                        list(vec![sym("count"), sym("?run")]),
+                        Clj::Int(2),
+                    ]),
+                ]),
+            ),
+        ]);
+        let params = map(vec![("floor", Clj::Float(1.5))]);
+        let decoded = query_in(&query, Some(&params)).unwrap();
+        assert_eq!(decoded.columns, ["recipe", "avg-cost", "count-run"]);
+        let having: Vec<_> = decoded
+            .query
+            .having
+            .iter()
+            .map(|predicate| format!("{:?} {:?}", predicate.left, predicate.right))
+            .collect();
+        assert_eq!(
+            having,
+            [
+                r#"Var(QueryName("avg-cost")) Param(QueryName("floor"))"#,
+                r#"Var(QueryName("recipe")) Const(String("x"))"#,
+                r#"Var(QueryName("count-run")) Const(I64(2))"#,
+            ]
+        );
+        for bad in [
+            list(vec![
+                sym(">"),
+                list(vec![sym("median"), sym("?cost")]),
+                Clj::Int(1),
+            ]),
+            list(vec![sym("between"), sym("?recipe"), Clj::Int(1)]),
+            vector(vec![sym("?recipe")]),
+        ] {
+            let query = map(vec![
+                (
+                    "match",
+                    vector(vec![vector(vec![
+                        sym("?run"),
+                        kw("run/cost"),
+                        sym("?cost"),
+                    ])]),
+                ),
+                (
+                    "select",
+                    vector(vec![list(vec![sym("count"), sym("?run")])]),
+                ),
+                ("having", vector(vec![bad])),
+            ]);
+            assert!(code(query_in(&query, None).err().unwrap()).contains("InvalidRequest"));
+        }
     }
 
     #[test]

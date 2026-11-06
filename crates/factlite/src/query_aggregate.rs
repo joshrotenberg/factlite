@@ -220,7 +220,8 @@ pub(crate) fn order_and_limit(query: &Query, columns: &[QueryName], rows: &mut V
 /// Groups distinct `tuples` (in `tuple_columns` order) by the selected
 /// variables, aggregates every group, keeps the rows that pass `having`, then
 /// orders and limits. An aggregate error in any group fails the query, even a
-/// group that `having` would drop.
+/// group that `having` would drop. Callers return before this for a limit of
+/// zero, so such a query never aggregates and cannot fail here.
 pub(crate) fn finish(
     query: &Query,
     params: &Params,
@@ -351,6 +352,11 @@ mod tests {
         // 2^53 + 1 is a tie between 2^53 and 2^53 + 2; ties go to even.
         assert_eq!(mean(&[(1 << 53) + 1]), (1_u64 << 53) as f64);
         assert_eq!(mean(&[(1 << 53) + 3]), ((1_u64 << 53) + 4) as f64);
+        // The exact sum 2^53 + 1 is not an f64; the mean is an integer.
+        assert_eq!(mean(&[1 << 53, 1, 0]), 3002399751580331.0);
+        assert_ne!(((1_u64 << 53) + 1) as f64 / 3.0, 3002399751580331.0);
+        // Rounding up 54 one bits carries into the next power of two.
+        assert_eq!(mean(&[(1 << 54) - 1]), (1_u64 << 54) as f64);
     }
 
     #[test]

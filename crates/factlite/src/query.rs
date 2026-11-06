@@ -185,7 +185,9 @@ pub struct Query {
     /// Comparisons over result columns (selected variables and aggregate
     /// names), constants and parameters, applied to each aggregated row before
     /// ordering and the limit. A variable here names a result column, not a
-    /// pattern variable. Requires at least one aggregate.
+    /// pattern variable. Requires at least one aggregate. Every group is
+    /// aggregated before filtering, so an aggregate error in a group that
+    /// `having` would drop still fails the query, unless the limit is zero.
     pub having: Vec<Predicate>,
 }
 
