@@ -6,9 +6,7 @@ and what decision it needs. When an entry is approved, it moves into
 recorded in [`status.md`](status.md) and [`decisions.md`](decisions.md).
 Nothing here is a commitment or a promise of order.
 
-State as of 2026-11-05: `main` at `250bc6b` on the private GitHub remote,
-storage format 4, plan items 0 through 11.5 complete. 181 tests pass locally
-and in CI.
+For the current state, see the summary at the top of [`status.md`](status.md).
 
 ## 1. Publish (plan item 8.2): done
 
@@ -96,23 +94,24 @@ None of these needs a design decision; each could be done directly.
   defaults, which were adequate for every measured query.
 - CLI read commands open the file per process and so replay the whole log
   every time. They would benefit from 3.
+- No check verifies that documentation links resolve. A link checker in
+  `scripts/check.sh` would catch dead links like one found in review of item 9.
 
-## 9. Documentation
+## 9. Documentation: done
 
-- **Why:** `status.md` is a growing per-item log (about 40 KB). The README's
-  summary paragraph drifts from it, and `handoff.md` describes the state at
-  item 8.1.
-- **Decision needed:** Whether to keep `status.md` as the full log and add a
-  short current-state page, or trim it.
+Done 2026-11-06. `status.md` keeps its full per-item log, which `AGENTS.md`
+requires. It gains a short current-state section at the top that replaces the
+drifting summary. The README overview and `handoff.md` are rewritten for the
+current state.
 
 ## 10. JSON-RPC interface: designed, deferred
 
 - **Why:** One process-boundary protocol for every language. A long-lived
   process opens a store once, and the same dispatch can back an MCP server.
   The library stays the core.
-- **Design:** [`design/json-rpc.md`](design/json-rpc.md). It lives in this
-  workspace as `crates/factlite-rpc`: a dispatch library and a stdio server
-  binary over the strict wire contract.
+- **Design:** [`design/json-rpc.md`](design/json-rpc.md). It would live in this
+  workspace as `crates/factlite-rpc`, a dispatch library and a stdio server
+  binary over the strict wire contract. No such crate exists yet.
 - **When to build:** only after items 3 (open-time integrity) and 4 (lookup
   refs in transactions) are decided. A ready consumer (Elixir, or agents
   through MCP) raises the priority but does not skip that condition. Building

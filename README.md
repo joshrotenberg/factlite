@@ -4,23 +4,35 @@ An embedded Rust library for a typed, SQLite-backed fact database with atomic
 transactions and durable, revision-pinned reads. A thin CLI and a babashka pod
 expose the same library.
 
-Factlite is being built incrementally. Typed values, schema definitions, owned
-requests, and the tested private semantic evaluator are in place. SQLite files
-can be initialized/opened and atomic commits persist exact reports and history.
-`Store::db()` captures a stable view, and `db_at()` reopens a retained snapshot.
-Schema, facts, flat pull, history, and transaction enumeration use that pinned
-basis and return owned results.
-Exact keyed retries return the original report before current-state validation,
-without allocating or advancing revision again. Strict versioned JSON decoders
-share the Rust request/value invariants.
-The CLI supports init, transact, schema, facts, pull, history, transactions, and
-joined queries, including portable snapshots and exact retries. Rust and JSON
-queries share typed validation and results. Reads and commits load the pinned state
-from a derived datom interval index, verified against full log replay on every
-open. Bound SQL joins use a temporary relation built from that state; large ASTs
-retain the reference evaluator as a fallback. Process recovery and safe standalone backups
-are verified; read-only views preserve historical tokens. Reproducible workload
-measurements document replay costs and the current optimization decision.
+Current state (format 4): see [status](docs/status.md) for what is implemented and
+[roadmap](docs/roadmap.md) for what is not.
+
+- **Data model:** typed facts with eight value types (bool, i64, f64, string,
+  bytes, entity reference, keyword, inst). Typed equality never coerces.
+- **Transactions:**
+  - immutable schema, with cardinality-one and cardinality-many attributes and
+    unique values;
+  - atomic declarative batches, validated against their final state;
+  - exact conditional updates, and fencing on an expected head;
+  - exact idempotent retries.
+- **Reads:** `Store::db()` and `db_at()` return views pinned to a revision,
+  which stay stable across reopen and backups. Facts, pull, lookups by unique
+  value, entity- or attribute-filtered history and joined queries run as
+  revision-bounded SQL over a derived datom interval index. Schema reads
+  schema events. Transaction enumeration and unfiltered history read the
+  retained reports. Aggregates are computed in Rust over the distinct tuples
+  that SQL returns, and very large queries fall back to the reference
+  evaluator.
+- **Commits:** each commit loads only the state its request can touch.
+- **Integrity:** every open replays and validates the retained log
+  incrementally and checks the index against it. The log stays authoritative.
+- **Interfaces:** the Rust library is the core. A CLI and a babashka pod
+  (`crates/factlite-pod`) are thin adapters over the same strict, versioned JSON
+  wire contract. A JSON-RPC interface is designed but deferred.
+- **Operations:** WAL with FULL synchronization and a configurable busy
+  timeout. Opening an existing current-format store validates it without
+  blocking writers; initialization and format upgrades take the write lock.
+  SQLite-safe standalone backups and crash recovery are tested.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
@@ -34,20 +46,20 @@ measurements document replay costs and the current optimization decision.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 - [Rust guide](docs/rust.md): an executable application workflow and API choices.
-- [Handoff](docs/handoff.md): restore, verify, publish Git history and resume work.
+- [Handoff](docs/handoff.md): clone, verify and resume work.
 
-The user has authorized incremental implementation and the branch, work, review,
-merge workflow. The handoff's earlier requirement for separate authorization is
-therefore satisfied. Recommended v1 decisions in the design are the working
-contract; departures require a recorded reason and corresponding test changes.
+Recommended v1 decisions in the design are the working contract; departures
+require a recorded reason and corresponding test changes, recorded in
+[decisions](docs/decisions.md).
 
 ## Development workflow
 
-Start each bounded increment on a branch from `main`. Implement its items, run
-appropriate checks, review the entire diff, address findings, and record the
-review and item status before merging with a merge commit. Never claim validation
-that did not run. Infrastructure-only checks establish build health, not database
-correctness.
+Start each bounded increment on a branch from `main`, with a draft pull request
+whose description is the plan. Implement it, run `scripts/check.sh`, and record
+the review in `docs/reviews/`. Implementation PRs are reviewed by independent
+Claude and Codex subagents, and findings are checked against the code before
+they are fixed or rejected. Merge with a merge commit once CI passes. Never
+claim validation that did not run.
 
 ## Build and check
 
@@ -63,15 +75,16 @@ cargo run --locked -p factlite-cli -- --help
 
 The check script runs formatting, Clippy with warnings treated as errors, tests,
 the asserted Rust workflow example,
-and documentation with warnings treated as errors. GitHub Actions uses the same
-script when a remote is connected. See [testing policy](docs/testing.md) for unit,
+and documentation with warnings treated as errors. GitHub Actions runs the same
+script on pull requests and pushes to `main`, with babashka installed so the
+pod's babashka tests run. See [testing policy](docs/testing.md) for unit,
 property, integration, and scenario coverage.
 
 The lockfile is committed. Storage uses rusqlite with bundled SQLite and UUIDs
 for durable store/lineage identity. Proptest and tempfile support test coverage.
 
-Storage configures WAL, FULL synchronization, foreign keys, and a two-second
-busy timeout. A live store may have SQLite sidecar files; `Store::backup` uses SQLite
+Storage configures WAL, FULL synchronization, foreign keys, and a busy timeout
+(two seconds unless set through `StoreOptions` or `--busy-timeout-ms`). A live store may have SQLite sidecar files; `Store::backup` uses SQLite
 to produce a validated standalone copy. See [storage decisions](docs/decisions.md).
 
 The repository is hosted privately on GitHub. Packages are not published.
