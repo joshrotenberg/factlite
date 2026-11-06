@@ -67,24 +67,23 @@ fn operation_sql_snapshot_keeps_head_and_log_consistent_while_writer_commits() {
 #[test]
 fn every_public_read_stays_at_a_when_writer_commits_between_head_and_replay() {
     // `store_info` forces B before the operation's SQL snapshot starts, so B is
-    // visible and only revision bounds keep results at A. Later tables force B
-    // after the snapshot has started, so B must be invisible to the operation.
+    // visible and only revision bounds keep results at A. Every later table an
+    // operation reads forces B after the snapshot has started, so B must be
+    // invisible to the operation.
     let mut cases = Vec::new();
-    for operation in [
-        "schema",
-        "facts",
-        "pull",
-        "history",
-        "transactions",
-        "query",
+    for (operation, tables) in [
+        ("schema", &["schema_events"][..]),
+        ("facts", &["schema_events", "datoms"][..]),
+        ("pull", &["schema_events", "entity_events", "datoms"][..]),
+        ("history", &["schema_events", "transactions"][..]),
+        ("transactions", &["transactions"][..]),
+        ("query", &["schema_events", "datoms"][..]),
     ] {
         cases.push((operation, "store_info"));
-        cases.push((operation, "datoms"));
+        for table in tables {
+            cases.push((operation, *table));
+        }
     }
-    for operation in ["history", "transactions"] {
-        cases.push((operation, "transactions"));
-    }
-    cases.push(("query", "factlite_query_facts"));
     for (operation, table) in cases {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("interleaving.sqlite");

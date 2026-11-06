@@ -193,10 +193,12 @@ state without changing semantics. The log stays authoritative.
   rather than replaying the log. Test index/replay parity for every revision of
   randomized typed histories, migration, tampered or missing intervals, rollback
   leaving no interval rows, and the forced writer interleaving for every read.
-- [ ] **9.2 Direct indexed reads.** Answer `facts`, `pull` and `query` with
+- [x] **9.2 Direct indexed reads.** Answer `facts`, `pull` and `query` with
   revision-bounded SQL over the interval table, without loading the complete
   state at R. Compare every path with the reference evaluator over replayed
   state, including historical schema and the forced writer interleaving.
+  Format 3 adds the attribute/value index this needs; writable opens upgrade
+  formats 1 and 2.
 - [x] **9.3 Open without the write lock.** Validate an existing current-format
   file in a deferred read transaction. Take the write lock only to initialize an
   empty file or upgrade format 1, rechecking the file once it is held. Test that

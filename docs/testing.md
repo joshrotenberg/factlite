@@ -134,3 +134,12 @@ applied through both report paths, which must agree on acceptance and state. A
 deterministic case checks the unique-violation choice among several
 simultaneous violations. Replay parity and the tampering suite compare
 incremental replay with full-state replay.
+
+SQL reads are compared with full log replay at every revision of 1,024 random
+typed histories: `schema`, `facts` under every filter shape (none, entity,
+entity and attribute, attribute, attribute and value, value only, unknown and
+foreign entities), and `pull` of every attribute for every known, unknown and
+foreign entity. The typed query property now commits retractions and new
+values and links after view A, and requires A's results to be unchanged. The
+forced-writer test covers every table each read touches. Format-2 upgrade and
+a missing datom index are tested on writable and read-only opens.

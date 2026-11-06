@@ -201,7 +201,7 @@ fn format_one_upgrades_on_writable_open_and_preserves_every_view() {
         let version: i32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         assert_parity(&connection, &head);
     }
     assert_eq!(
@@ -272,5 +272,180 @@ fn tampered_missing_or_extra_intervals_fail_every_open() {
             ErrorCode::Storage,
             "{mutation}"
         );
+    }
+}
+
+fn downgrade_to_v2(path: &std::path::Path) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute_batch(
+            "DROP INDEX datoms_avet; UPDATE store_info SET format=2; PRAGMA user_version=2;",
+        )
+        .unwrap();
+}
+
+#[test]
+fn format_two_gains_the_attribute_value_index_on_writable_open() {
+    let steps: Vec<Step> = (0..6).map(|ty| (ty, true, 1, 2, true)).collect();
+    let (_directory, path, head) = run(&steps, 1);
+    let before = Db::open_read_only_at(&path, &head)
+        .unwrap()
+        .facts(Default::default())
+        .unwrap();
+    downgrade_to_v2(&path);
+    assert_eq!(
+        Db::open_read_only(&path).err().unwrap().code(),
+        ErrorCode::UnsupportedFormat
+    );
+    let store = Store::open(&path).unwrap();
+    {
+        let connection = store.connection().unwrap();
+        let version: i32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let indexes: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name='datoms_avet'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!((version, indexes), (3, 1));
+        assert_parity(&connection, &head);
+    }
+    assert_eq!(
+        store.db().unwrap().facts(Default::default()).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn a_missing_datom_index_fails_every_open() {
+    let (_directory, path, _) = run(&[(1, false, 0, 1, true)], 1);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("DROP INDEX datoms_avet")
+        .unwrap();
+    assert_eq!(Store::open(&path).err().unwrap().code(), ErrorCode::Storage);
+    assert_eq!(
+        Db::open_read_only(&path).err().unwrap().code(),
+        ErrorCode::Storage
+    );
+}
+
+/// SQL reads at `basis` against the authoritative replayed state.
+fn assert_reads_match_replay(store: &Store, basis: &SnapshotId) {
+    use crate::{FactFilter, PulledValue};
+    let replayed = {
+        let connection = store.connection().unwrap();
+        log::replay(&connection, basis).unwrap()
+    };
+    let db = store.db_at(basis).unwrap();
+    let schema = replayed.catalog.schema_at(basis.revision()).unwrap();
+    assert_eq!(db.schema().unwrap(), schema);
+    let mut entities: Vec<EntityId> = replayed.catalog.entities.keys().cloned().collect();
+    // Never allocated, and allocated only in another store.
+    entities.push(EntityId::allocated(basis.store().clone(), 0xfffff).unwrap());
+    entities.push(
+        EntityId::allocated("s1.00000000000000000000000000000009".parse().unwrap(), 1).unwrap(),
+    );
+    let attributes: Vec<AttrName> = schema.attributes().map(|d| d.name().clone()).collect();
+    let mut values: Vec<Value> = replayed.facts().iter().map(|f| f.value.clone()).collect();
+    values.push(Value::I64(12345));
+    let reference = |filter: &FactFilter| {
+        let mut facts: Vec<_> = replayed
+            .facts()
+            .iter()
+            .filter(|fact| {
+                filter.entity.as_ref().is_none_or(|id| id == &fact.entity)
+                    && filter
+                        .attribute
+                        .as_ref()
+                        .is_none_or(|a| a == &fact.attribute)
+                    && filter.value.as_ref().is_none_or(|v| v == &fact.value)
+            })
+            .cloned()
+            .collect();
+        facts.sort_by(crate::Fact::canonical_cmp);
+        facts
+    };
+    let mut filters = vec![FactFilter::default()];
+    for entity in &entities {
+        filters.push(FactFilter {
+            entity: Some(entity.clone()),
+            ..Default::default()
+        });
+        for attribute in &attributes {
+            filters.push(FactFilter {
+                entity: Some(entity.clone()),
+                attribute: Some(attribute.clone()),
+                ..Default::default()
+            });
+        }
+    }
+    for attribute in &attributes {
+        filters.push(FactFilter {
+            attribute: Some(attribute.clone()),
+            ..Default::default()
+        });
+        for value in &values {
+            if schema.get(attribute).unwrap().value_type() == value.value_type() {
+                filters.push(FactFilter {
+                    attribute: Some(attribute.clone()),
+                    value: Some(value.clone()),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    for value in &values {
+        filters.push(FactFilter {
+            value: Some(value.clone()),
+            ..Default::default()
+        });
+    }
+    for filter in &filters {
+        assert_eq!(
+            db.facts(filter.clone()).unwrap(),
+            reference(filter),
+            "{filter:?} at {basis}"
+        );
+    }
+    for entity in &entities {
+        let pulled = db.pull(entity, &attributes).unwrap();
+        let known = replayed.catalog.known_at(entity, basis.revision()).unwrap();
+        assert_eq!(pulled.is_some(), known, "{entity} at {basis}");
+        if let Some(pulled) = pulled {
+            for attribute in &attributes {
+                let mut expected: Vec<_> = replayed
+                    .facts()
+                    .iter()
+                    .filter(|f| &f.entity == entity && &f.attribute == attribute)
+                    .map(|f| f.value.clone())
+                    .collect();
+                expected.sort_by(Value::canonical_cmp);
+                let actual = match pulled.attributes.get(attribute) {
+                    None => Vec::new(),
+                    Some(PulledValue::One(value)) => vec![value.clone()],
+                    Some(PulledValue::Many(values)) => values.clone(),
+                };
+                assert_eq!(actual, expected, "{entity} {attribute} at {basis}");
+            }
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+    #[test]
+    fn sql_reads_equal_replayed_state_at_every_revision(
+        steps in proptest::collection::vec((0_usize..6, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..18),
+    ) {
+        let (_directory, path, head) = run(&steps, 2);
+        let store = Store::open(&path).unwrap();
+        for revision in 0..=head.revision().get() {
+            let basis = SnapshotId::new(head.store().clone(), head.lineage().clone(), Revision::new(revision));
+            assert_reads_match_replay(&store, &basis);
+        }
     }
 }
