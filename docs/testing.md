@@ -149,3 +149,9 @@ the full state at head, and with the store's actual commit, in 1,024 random
 request sequences from the transition generator: identical reports on success,
 identical code/context/message on failure. Each trace reopens the store at the
 end. A deterministic test compares the next allocation with the full catalog's.
+
+Interval-based history is compared with log-based history in 1,024 random
+typed histories, at head and at half of head, with lower bounds of zero, half
+and the view's revision. Filters are every entity (including an unknown one),
+every attribute, every entity/attribute pair and attribute/value pair that
+ever changed (including since-retracted values), and pairs that never changed.

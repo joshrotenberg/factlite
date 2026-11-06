@@ -239,3 +239,10 @@ latencies of 0.52 ms and 0.23 ms, including the babashka round trip. That open
 also upgraded the file from format 2 to 3 and took 184 ms.
 
 Open is now the only operation linear in live state: 870 ms at 120,001 facts.
+
+## Indexed filtered history (11.3): 2026-11-05
+
+Through the pod on the clajent store copy (24,452 effective events), history
+p50 over 20 calls, `main` at `45d3e28` against the 11.3 branch: entity and
+attribute 16.28 → 0.12 ms (3 events), attribute only 19.24 → 3.43 ms (600
+events), unfiltered 129.9 → 130.3 ms (unchanged path).

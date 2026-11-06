@@ -273,7 +273,40 @@ impl Db {
     }
 
     /// Effective events in (after, basis], in revision/ordinal order.
+    /// Filters naming an entity or attribute read datom intervals; others
+    /// read every retained report in the range.
     pub fn history(&self, filter: FactFilter, after: Revision) -> Result<Vec<FactEvent>> {
+        if filter.entity.is_some() || filter.attribute.is_some() {
+            self.history_from_index(filter, after)
+        } else {
+            self.history_from_log(filter, after)
+        }
+    }
+
+    pub(crate) fn history_from_index(
+        &self,
+        filter: FactFilter,
+        after: Revision,
+    ) -> Result<Vec<FactEvent>> {
+        self.validate_after(after)?;
+        self.read_basis(|transaction| {
+            filter.validate(&crate::index::schema_at(transaction, &self.snapshot)?)?;
+            crate::index::history_matching(
+                transaction,
+                &self.snapshot,
+                after,
+                filter.entity.as_ref(),
+                filter.attribute.as_ref(),
+                filter.value.as_ref(),
+            )
+        })
+    }
+
+    pub(crate) fn history_from_log(
+        &self,
+        filter: FactFilter,
+        after: Revision,
+    ) -> Result<Vec<FactEvent>> {
         self.validate_after(after)?;
         self.read_basis(|transaction| {
             filter.validate(&crate::index::schema_at(transaction, &self.snapshot)?)?;

@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 172 tests, including forty-seven 1,024-case properties, plus the
+gate passed 173 tests, including forty-eight 1,024-case properties, plus the
 asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
 into the strict wire requests. Remote publication (8.2) and direct indexed reads
 (9.2) are open. Reviews are self-reviews; remote CI and independent review have not
@@ -625,6 +625,18 @@ run.
   `decisions.md`.
 - **Blockers:** None locally.
 - **What's next:** 11.3 indexed filtered history.
+
+## 11.3 Indexed filtered history: done
+
+- **Done:** History filtered by entity or attribute reads datom intervals and
+  per-revision events instead of every report. All 173 tests passed, including
+  forty-eight 1,024-case properties; full checks passed.
+  Review: `reviews/0040-indexed-history.md`.
+- **Measured:** Entity and attribute history on the clajent store copy fell
+  from 16.3 ms to 0.12 ms. See `measurements.md`.
+- **Blockers:** None locally.
+- **What's next:** Aggregates and new value types (keyword, inst) were deferred
+  in the original design and need a user decision before any work.
 
 ## Environment notes
 
