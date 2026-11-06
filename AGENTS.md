@@ -24,6 +24,8 @@ the core; avoid placeholder tests or tests that merely repeat implementation.
 
 Do not add a server, NIF, generic backend, or other deferred scope. The user
 authorized one Babashka pod crate (`factlite-pod`) on 2026-11-05; keep it a thin
-adapter over the library and the strict wire contract, like the CLI. Preserve
+adapter over the library and the strict wire contract, like the CLI. A JSON-RPC
+server (`crates/factlite-rpc`) is designed in `docs/design/json-rpc.md` but not
+authorized to build. Preserve
 typed equality, final-state batch validation, historical schema visibility, and
 the distinction between a new no-change commit and an idempotent replay.

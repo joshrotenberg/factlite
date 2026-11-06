@@ -105,3 +105,19 @@ None of these needs a design decision; each could be done directly.
   item 8.1.
 - **Decision needed:** Whether to keep `status.md` as the full log and add a
   short current-state page, or trim it.
+
+## 10. JSON-RPC interface: designed, deferred
+
+- **Why:** One process-boundary protocol for every language. A long-lived
+  process opens a store once, and the same dispatch can back an MCP server.
+  The library stays the core.
+- **Design:** [`design/json-rpc.md`](design/json-rpc.md). It lives in this
+  workspace as `crates/factlite-rpc`: a dispatch library and a stdio server
+  binary over the strict wire contract.
+- **When to build:** after items 3 (open-time integrity) and 4 (lookup refs in
+  transactions) are decided, or when a consumer (Elixir, or agents through MCP)
+  is ready. Building it needs the user's authorization, like the pod did.
+- **Prerequisites that can land earlier:** read results that carry their basis
+  snapshot; a wire envelope for `lookup`; and a defined CLI outcome when a
+  commit succeeds but writing its report fails. The last changes the CLI's
+  exit-code contract, so it needs a decision.

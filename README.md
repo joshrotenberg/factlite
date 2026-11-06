@@ -26,6 +26,7 @@ measurements document replay costs and the current optimization decision.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
 - [Roadmap](docs/roadmap.md): candidate work not yet authorized, and the decision each needs.
+- [JSON-RPC design](docs/design/json-rpc.md): the deferred process-boundary interface.
 - [Acceptance audit](docs/acceptance.md): tests mapped to the supplied contract.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
 - [Babashka pod](crates/factlite-pod/README.md): Clojure API, value mapping and errors.
