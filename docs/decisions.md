@@ -465,3 +465,36 @@ scenario testing. See `testing.md` for the verification policy.
   again once the lock is held, so concurrent first opens create one identity.
 - Open time is unchanged: full replay validation is still proportional to
   revisions times live state. That is a separate decision.
+
+## Incremental replay validation (9.4)
+
+- Chosen by the user on 2026-11-05 over checkpoints and an explicit verify
+  step, after the clajent session measured 7.5 s opens at 2,803 revisions.
+  Profiling showed every transition cloning, re-validating and diffing the
+  complete fact set and cloning the entity catalog, so replay cost was
+  revisions times live state.
+- Transitions now run in place on an owned model. Commit and replay consume
+  their model; borrowing `evaluate`/`apply_report` exist for tests. Catalog
+  staging mutates in place, and concrete identities are checked against the
+  pre-head revision, as before.
+- The model keeps two indexes, built on the first transition and maintained by
+  every fact change: values per entity/attribute, and owners per unique
+  attribute/value. Read paths never build them.
+- Checks are restricted by an induction argument. The empty model is valid. A
+  transition never removes entities or definitions, so untouched facts stay
+  known and typed. Only asserted facts can break cardinality one, typing or
+  unique ownership. Only touched facts can differ between the states before and
+  after, so the effective delta is computed from them. Each transition
+  therefore checks its asserted facts and touched facts only, and validity holds
+  at every revision.
+- Error selection is preserved. A unique violation reports the least
+  attribute, then least value, with all owners, as the full scan in
+  attribute/value order did. Replay maps every validation failure to `Storage`
+  either way.
+- `model_reference.rs` keeps the former full-state transitions verbatim in test
+  builds. `log::replay_reference` uses them, and evaluates keyed records then
+  reapplies their reports, so replay parity compares against the most
+  conservative path.
+- Not changed: open still replays the whole log, so open is linear in retained
+  revisions. Commits and reads still load the complete state at head, so they
+  are linear in live state (item 9.2).

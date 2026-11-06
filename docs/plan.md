@@ -203,6 +203,11 @@ state without changing semantics. The log stays authoritative.
   open succeeds promptly while another connection holds the write lock, that
   concurrent first opens create one identity, and that initialization and
   commits still fail `Busy` within a bound.
+- [x] **9.4 Incremental replay validation.** Chosen by the user on 2026-11-05.
+  Make each transition's checks visit only the facts it touches, keeping
+  every invariant open validates. Retain the full-state transitions in test
+  builds and require identical states, reports and errors on random batches
+  and tampered reports, plus replay parity and the existing tampering cases.
 
 ## Step 10: Babashka pod
 

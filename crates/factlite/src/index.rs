@@ -217,10 +217,10 @@ pub(crate) fn model_at(connection: &Connection, basis: &SnapshotId) -> Result<Mo
             value: codec::decode_value(tag, &bytes)?,
         });
     }
-    Ok(Model {
-        catalog: Catalog::retained(basis.clone(), schema, entities),
+    Ok(Model::new(
+        Catalog::retained(basis.clone(), schema, entities),
         facts,
-    })
+    ))
 }
 
 /// Open-time cross-check: the indexed state at head equals full replay.
@@ -237,5 +237,5 @@ pub(crate) fn same_state(a: &Model, b: &Model) -> bool {
         && a.catalog.schema == b.catalog.schema
         && a.catalog.entities == b.catalog.entities
         && a.catalog.next_allocation() == b.catalog.next_allocation()
-        && a.facts == b.facts
+        && a.facts() == b.facts()
 }

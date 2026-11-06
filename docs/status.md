@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 160 tests, including forty-four 1,024-case properties, plus the
+gate passed 162 tests, including forty-five 1,024-case properties, plus the
 asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
 into the strict wire requests. Remote publication (8.2) and direct indexed reads
 (9.2) are open. Reviews are self-reviews; remote CI and independent review have not
@@ -556,6 +556,24 @@ run.
   at 2,803 revisions in that store). Profiling shows per-revision whole-state
   work in replay validation. Choosing incremental validation, checkpoints or an
   explicit verify step needs a user decision.
+
+## 9.4 Incremental replay validation: done
+
+- **Done:** Transitions run in place and check only the facts they touch, using
+  indexes maintained across replay. All 162 tests passed, including forty-five
+  1,024-case properties; full checks passed.
+  Review: `reviews/0035-incremental-replay-validation.md`.
+- **Decisions:** Chosen by the user over checkpoints or an explicit verify step.
+  Open still validates every invariant at every revision; the induction argument
+  and retained full-state reference are in `decisions.md`.
+- **Measured:** Open on a copy of the clajent store fell from about 7.5 s to
+  0.14 s. At 1,000 tasks, open is 46 ms at 2,000 revisions (was 1.29 s) and
+  138 ms at 8,000. See `measurements.md`.
+- **Blockers:** None locally.
+- **What's next:** Commits and reads load the full state at head, so they are
+  linear in live state (163 ms commits at 120,000 facts). Item 9.2 addresses
+  reads; commits would need state loaded only for the entities and attributes a
+  request touches.
 
 ## Environment notes
 

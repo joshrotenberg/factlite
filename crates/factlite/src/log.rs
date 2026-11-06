@@ -59,20 +59,67 @@ pub(crate) fn persist_report(
 }
 
 pub(crate) fn replay(connection: &Connection, basis: &SnapshotId) -> Result<Model> {
-    replay_impl::<true>(connection, basis)
+    replay_impl::<Incremental>(connection, basis)
 }
 
-// Retain the pre-optimization path for differential tests. Both paths perform
-// exactly the same format, identity, event and canonical-request checks.
+// Retain the pre-7.3 and pre-9.4 path for differential tests: full-state
+// transitions, and keyed records evaluated then reapplied from their report.
+// Both paths perform exactly the same format, identity, event and
+// canonical-request checks.
 #[cfg(test)]
 pub(crate) fn replay_reference(connection: &Connection, basis: &SnapshotId) -> Result<Model> {
-    replay_impl::<false>(connection, basis)
+    replay_impl::<Reference>(connection, basis)
 }
 
-fn replay_impl<const REUSE_EVALUATED: bool>(
-    connection: &Connection,
-    basis: &SnapshotId,
-) -> Result<Model> {
+/// How replay advances its model by one retained record.
+trait Transitions {
+    fn unkeyed(model: Model, report: &TxReport) -> Result<Model>;
+    fn keyed(model: Model, request: &crate::Tx, report: &TxReport) -> Result<Model>;
+}
+
+fn retained_report(evaluated: Result<(Model, TxReport)>, report: &TxReport) -> Result<Model> {
+    let (evaluated, expected) = evaluated.map_err(|error| {
+        corrupt(format!(
+            "retained retry request cannot produce its report: {error}"
+        ))
+    })?;
+    if &expected != report {
+        return Err(corrupt("retained retry request and report disagree"));
+    }
+    Ok(evaluated)
+}
+
+/// Incremental transitions in place (9.4). A keyed record's evaluated state is
+/// kept after exact report equality (7.3): evaluation has validated the batch
+/// and produced canonical declarations, allocations and effective
+/// differences, so reapplying the identical report adds no evidence.
+struct Incremental;
+
+impl Transitions for Incremental {
+    fn unkeyed(model: Model, report: &TxReport) -> Result<Model> {
+        model.apply_report_owned(report)
+    }
+    fn keyed(model: Model, request: &crate::Tx, report: &TxReport) -> Result<Model> {
+        retained_report(model.evaluate_owned(request), report)
+    }
+}
+
+/// Full-state transitions, with keyed records evaluated and then reapplied.
+#[cfg(test)]
+struct Reference;
+
+#[cfg(test)]
+impl Transitions for Reference {
+    fn unkeyed(model: Model, report: &TxReport) -> Result<Model> {
+        model.apply_report_reference(report)
+    }
+    fn keyed(model: Model, request: &crate::Tx, report: &TxReport) -> Result<Model> {
+        drop(retained_report(model.evaluate_reference(request), report)?);
+        model.apply_report_reference(report)
+    }
+}
+
+fn replay_impl<T: Transitions>(connection: &Connection, basis: &SnapshotId) -> Result<Model> {
     let head = read_head(connection)?;
     if head.store() != basis.store()
         || head.lineage() != basis.lineage()
@@ -116,27 +163,10 @@ fn replay_impl<const REUSE_EVALUATED: bool>(
         }
         check_events(connection, &revision, &report)?;
         model = match (key, canonical_version, canonical_request) {
-            (None, None, None) => model.apply_report(&report)?,
+            (None, None, None) => T::unkeyed(model, &report)?,
             (Some(_), Some(version), Some(bytes)) => {
                 let request = crate::canonical_decode::decode_request(version, &bytes)?;
-                let (evaluated, expected) = model.evaluate(&request).map_err(|error| {
-                    corrupt(format!(
-                        "retained retry request cannot produce its report: {error}"
-                    ))
-                })?;
-                if expected != report {
-                    return Err(corrupt("retained retry request and report disagree"));
-                }
-                // Evaluation has validated the batch and produced canonical
-                // declarations, allocations and effective differences. Exact
-                // report equality proves this is the same retained transition;
-                // reconstructing/validating it again adds no evidence.
-                if REUSE_EVALUATED {
-                    evaluated
-                } else {
-                    drop(evaluated);
-                    model.apply_report(&report)?
-                }
+                T::keyed(model, &request, &report)?
             }
             _ => return Err(corrupt("incomplete retained retry evidence")),
         };
@@ -358,8 +388,8 @@ mod tests {
         drop(store);
         let reopened = Store::open(&path).unwrap();
         let connection = reopened.connection().unwrap();
-        assert_eq!(replay(&connection, &ra.after).unwrap().facts, a.facts);
-        assert_eq!(replay(&connection, &rb.after).unwrap().facts, b.facts);
+        assert_eq!(replay(&connection, &ra.after).unwrap().facts(), a.facts());
+        assert_eq!(replay(&connection, &rb.after).unwrap().facts(), b.facts());
         let bytes: Vec<u8> = connection
             .query_row(
                 "SELECT report FROM transactions WHERE revision=?1",
@@ -420,7 +450,7 @@ mod tests {
         let (mut next, mut noop) = model.evaluate(&Tx::default()).unwrap();
         noop.effective_delta = report.effective_delta;
         assert!(model.apply_report(&noop).is_err());
-        next.facts.clear();
+        next.set_facts(Default::default());
         assert!(
             next.catalog
                 .require_known(&report.created_entities[0])
@@ -432,8 +462,8 @@ mod tests {
         #[test]
         fn persisted_revision_sequences_equal_reference_evaluation(values in proptest::collection::vec(-3_i64..4,0..8)){
             let dir=tempfile::tempdir().unwrap();let store=Store::open(dir.path().join("property.sqlite")).unwrap();let(mut model,report)=create(&store);let id=report.created_entities[0].clone();let mut snapshots=vec![model.clone()];
-            for value in values{let request=Tx::builder().assert(id.clone(),attr("x/value"),Value::I64(value)).build().unwrap();let(expected,_)=model.evaluate(&request).unwrap();let(next,_)=write(&store,&request);prop_assert_eq!(&next.facts,&expected.facts);model=expected;snapshots.push(model.clone());}
-            let connection=store.connection().unwrap();for expected in snapshots{let actual=replay(&connection,&expected.catalog.snapshot).unwrap();prop_assert_eq!(actual.facts,expected.facts);prop_assert_eq!(actual.catalog.schema,expected.catalog.schema);prop_assert_eq!(actual.catalog.entities,expected.catalog.entities);}
+            for value in values{let request=Tx::builder().assert(id.clone(),attr("x/value"),Value::I64(value)).build().unwrap();let(expected,_)=model.evaluate(&request).unwrap();let(next,_)=write(&store,&request);prop_assert_eq!(&next.facts(),&expected.facts());model=expected;snapshots.push(model.clone());}
+            let connection=store.connection().unwrap();for expected in snapshots{let actual=replay(&connection,&expected.catalog.snapshot).unwrap();prop_assert_eq!(actual.facts(),expected.facts());prop_assert_eq!(actual.catalog.schema,expected.catalog.schema);prop_assert_eq!(actual.catalog.entities,expected.catalog.entities);}
         }
     }
 }
