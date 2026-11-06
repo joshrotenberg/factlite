@@ -1,6 +1,6 @@
 # Decision brief: history retention and excision (roadmap item 6)
 
-Status: awaiting the user's decision. Nothing is implemented.
+Status: decided 2026-11-06 (see Decision). Not yet implemented.
 
 ## The question
 
@@ -179,3 +179,11 @@ Its corrections, checked against the code and adopted:
 - **Sanitized export and whole-store destruction were missing alternatives.**
 - **D's hashes keep guessable secrets findable and break exact retry
   equality.**
+
+## Decision (user, 2026-11-06)
+
+Adopted the recommendation:
+
+- **Now:** options A and B, as documentation only (plan item 12.4).
+- **Only if a real deletion requirement appears:** design option C.
+- **Ruled out:** option D.

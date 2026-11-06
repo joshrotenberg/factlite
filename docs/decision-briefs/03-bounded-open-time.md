@@ -1,6 +1,6 @@
 # Decision brief: bounded open time (roadmap item 3)
 
-Status: awaiting the user's decision. Nothing is implemented.
+Status: decided 2026-11-06 (see Decision). Not yet implemented.
 
 ## The question
 
@@ -183,3 +183,16 @@ revision adopts its other points:
   workloads should precede D.
 - **Optimizing the existing passes (E) was a missing option.**
 - **verify needs a defined contract.**
+
+## Decision (user, 2026-11-06)
+
+- **Default:** keep full validation on every open (option A).
+- **Opt-in:** a `Structural` validation option in `StoreOptions`, allowed for
+  read-only opens only. It checks format markers, the table and index sets,
+  and that the head matches the latest transaction.
+- **Writable opens:** they always validate fully, because a commit on an
+  unvalidated index could write a wrong result into the authoritative log.
+- **Verify:** add an explicit `Store::verify` and `Db::verify`, a CLI `verify`
+  command and `--validation structural` flag, and pod `:validation` and
+  `verify`.
+- **Plan item:** 12.1.

@@ -1,6 +1,6 @@
 # Decision brief: query language extensions (roadmap item 5)
 
-Status: awaiting the user's decision. Nothing is implemented.
+Status: decided 2026-11-06 (see Decision). Not yet implemented.
 
 ## The question
 
@@ -244,3 +244,13 @@ Its corrections, checked against the code and adopted:
   aggregation.**
 - **Negation should come first, alone,** with `avg` and HAVING as a separate
   item. The recommendation now follows this.
+
+## Decision (user, 2026-11-06)
+
+Adopted the recommendation:
+
+- **Now:** `not` and `not-join`, with the semantics above (plan item 12.2).
+- **Next:** `avg` and HAVING, as their own item with an independent oracle
+  (roadmap 5).
+- **Only on demand:** `or` and recursion.
+- **Separately:** nested pull, as a read API.

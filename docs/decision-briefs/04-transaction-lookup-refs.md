@@ -1,6 +1,6 @@
 # Decision brief: lookup refs in transactions (roadmap item 4)
 
-Status: awaiting the user's decision. Nothing is implemented.
+Status: decided 2026-11-06 (see Decision). Not yet implemented.
 
 ## The question
 
@@ -178,3 +178,13 @@ Its corrections, all checked against the code and adopted:
   create-on-failure path is not atomic.
 - Expectations by lookup follow the current owner, which is a semantic trap
   worth stating.
+
+## Decision (user, 2026-11-06)
+
+- **Adopted:** option A1. Lookup terms in changes and reference values, with
+  their own canonical tags, resolved inside evaluation against the pre-state.
+  A missing match fails `UnknownEntity`, with no upsert. Reports are
+  unchanged.
+- **Later:** expectation lookups, as a separate item with canonical request
+  version 2.
+- **Plan item:** 12.3.

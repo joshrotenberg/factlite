@@ -22,62 +22,30 @@ The pod stays in this repository and is built from source
 describes. Revisit if another machine or user needs prebuilt binaries; only
 macOS arm64 has been built and tested so far.
 
-## 3. Bounded open time
+## 3. Bounded open time: decided
 
-- **Why:** Open replays and validates the whole retained log, so its cost
-  grows with history and live state: about 0.9 s at 120,000 facts. Reads and
-  commits no longer have this cost (items 9.2, 9.4, 9.5).
-- **Decision needed:** How integrity is established when open does not replay
-  everything. The options are:
-  - **Verified checkpoints:** persist the validated state at a revision, verify
-    the checkpoint itself, and replay only later revisions.
-  - **An explicit `verify` operation:** open would do cheap structural checks
-    only. Full validation becomes a separate CLI command and API, and
-    corruption goes undetected until it runs.
-  - **No change:** keep one open per process.
-- **Note:** Checkpoints add derived persistent state that has to be checked
-  against the log, as the datom index is.
+Decided 2026-11-06 ([brief](decision-briefs/03-bounded-open-time.md)): full
+validation by default, an opt-in structural open for read-only connections,
+and an explicit verify. Plan item 12.1.
+## 4. Lookup refs in transactions: decided
 
-## 4. Lookup refs in transactions
+Decided 2026-11-06 ([brief](decision-briefs/04-transaction-lookup-refs.md)):
+option A1, lookups in changes and reference values, plan item 12.3. Later:
+expectation lookups with canonical request version 2.
+## 5. Query language: decided in stages
 
-- **Why:** The last open request from the clajent kit. Writers could address an
-  entity by a unique key (`[:run/key "A/run-3"]`) without first reading its ID.
-- **Decision needed:** Lookup terms change the submitted request. Either they
-  enter the canonical encoding as new term tags, so retries compare the lookup
-  rather than the resolved ID; or they resolve before canonicalization, so
-  retry identity depends on state. The first fits the existing contract better.
-- **Also decide:** Whether a lookup that finds nothing fails `UnknownEntity`
-  or may create the entity. Creating it would be an identity upsert, which the
-  design excludes.
+Decided 2026-11-06 ([brief](decision-briefs/05-query-language.md)):
 
-## 5. Query language
+- `not` and `not-join` now (plan item 12.2);
+- next, `avg` and HAVING as their own item, needing no further decision;
+- `or` and recursion only on demand;
+- nested pull as a separate read API.
+## 6. History retention and excision: decided
 
-- **Why:** The query AST is conjunctive with aggregates (item 11.4).
-- **Candidates:**
-  - Negation (`not`) and disjunction (`or`).
-  - Rules and recursion (SQLite recursive CTEs make this feasible).
-  - Predicates on aggregate results (HAVING).
-  - `avg`.
-  - Nested pull patterns.
-- **Decision needed:** Which ones, and their exact semantics. For example:
-  what negation means for an attribute that is absent at the view's revision;
-  `avg` rounding; and how recursion interacts with historical schema. The
-  design deferred all of these because each changes correctness commitments.
-- **Evidence standard:** Each addition needs reference-evaluator parity, as for
-  existing queries and aggregates.
-
-## 6. History retention and excision
-
-- **Why:** All history is kept forever. There is no way to remove data that
-  must not be retained, such as secrets written by mistake or personal data.
-- **Decision needed:** Whether excision is ever allowed, and what it means.
-  - For integrity: replay validation, retained reports and canonical retry
-    evidence all assume complete history.
-  - For snapshot tokens: views before an excision would change.
-  - For backups.
-- **Note:** This is a large semantic change. The design excluded pruning that
-  discards semantic history.
-
+Decided 2026-11-06 ([brief](decision-briefs/06-history-excision.md)): history
+stays immutable. Document the permanence rule and the application-level
+encryption pattern (plan item 12.4). Design a lineage rewrite only if a real
+deletion requirement appears. In-place excision is ruled out.
 ## 7. Elixir NIF: deferred
 
 The user deferred this on 2026-11-05. When it returns, the open questions are
