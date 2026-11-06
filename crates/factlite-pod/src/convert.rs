@@ -584,19 +584,40 @@ fn term_in(value: &Clj) -> Result<Json> {
 }
 
 fn predicate_in(value: &Clj) -> Result<Json> {
-    comparison_in(value, "where", term_in)
+    comparison_in(value, "where", &term_in)
 }
 
-/// A `:having` term: `(fn ?x)` names that aggregate's result column, `?x` a
-/// selected variable, and `$x` or a value works as in `:where`.
-fn having_term_in(value: &Clj) -> Result<Json> {
-    if let Clj::List(_) = unmeta(value) {
-        return Ok(json!({"var": column(value, "having")?.0}));
+/// A `:having` term: `(fn ?x)` names that aggregate's result column and must
+/// be in `:select`; `?x` must be a selected variable; `$x` or a value works as
+/// in `:where`. Checking against the selection keeps an aggregate and a
+/// variable whose name equals its column name apart.
+fn having_term_in(value: &Clj, variables: &[String], aggregates: &[String]) -> Result<Json> {
+    match unmeta(value) {
+        Clj::List(_) => {
+            let name = column(value, "having")?.0;
+            if !aggregates.contains(&name) {
+                return Err(invalid(
+                    "having",
+                    format!("having aggregates must also be in :select: {name}"),
+                ));
+            }
+            Ok(json!({"var": name}))
+        }
+        Clj::Symbol(symbol) if symbol.starts_with('?') => {
+            let name = variable(value, "having")?;
+            if !variables.contains(&name) {
+                return Err(invalid(
+                    "having",
+                    format!("having variables must be selected: ?{name}"),
+                ));
+            }
+            Ok(json!({"var": name}))
+        }
+        _ => term_in(value),
     }
-    term_in(value)
 }
 
-fn comparison_in(value: &Clj, field: &str, term: fn(&Clj) -> Result<Json>) -> Result<Json> {
+fn comparison_in(value: &Clj, field: &str, term: &dyn Fn(&Clj) -> Result<Json>) -> Result<Json> {
     let [op, left, right] = exactly::<3>(value, field, "(op left right)")?;
     let op = match unmeta(op) {
         Clj::Symbol(op) => match op.as_str() {
@@ -735,15 +756,17 @@ pub(crate) fn query_in(query: &Clj, params: Option<&Clj>) -> Result<PodQuery> {
         }
     }
     let mut order_of_columns = Vec::new();
+    let mut variables = Vec::new();
+    let mut aggregate_columns = Vec::new();
     if let Some(select) = fields.take("select") {
-        let mut variables = Vec::new();
         let mut aggregates = Vec::new();
         for entry in items(&select, "select")? {
             let (name, aggregate) = column(entry, "select")?;
             match aggregate {
                 None => variables.push(name.clone()),
                 Some((function, var)) => {
-                    aggregates.push(json!({"fn": function, "var": var, "name": name}))
+                    aggregates.push(json!({"fn": function, "var": var, "name": name}));
+                    aggregate_columns.push(name.clone());
                 }
             }
             order_of_columns.push(name);
@@ -779,7 +802,11 @@ pub(crate) fn query_in(query: &Clj, params: Option<&Clj>) -> Result<PodQuery> {
     if let Some(having) = fields.take("having") {
         let having = items(&having, "having")?
             .iter()
-            .map(|clause| comparison_in(clause, "having", having_term_in))
+            .map(|clause| {
+                comparison_in(clause, "having", &|term| {
+                    having_term_in(term, &variables, &aggregate_columns)
+                })
+            })
             .collect::<Result<Vec<_>>>()?;
         inner.insert("having".into(), json!(having));
     }
@@ -1600,12 +1627,40 @@ mod tests {
                 r#"Var(QueryName("count-run")) Const(I64(2))"#,
             ]
         );
+        // `?avg-cost` is a selected variable, not the unselected `(avg ?cost)`.
+        let collision = map(vec![
+            (
+                "match",
+                vector(vec![vector(vec![
+                    sym("?avg-cost"),
+                    kw("run/cost"),
+                    sym("?cost"),
+                ])]),
+            ),
+            (
+                "select",
+                vector(vec![
+                    sym("?avg-cost"),
+                    list(vec![sym("count"), sym("?cost")]),
+                ]),
+            ),
+            (
+                "having",
+                vector(vec![list(vec![
+                    sym("="),
+                    list(vec![sym("avg"), sym("?cost")]),
+                    Clj::Int(1),
+                ])]),
+            ),
+        ]);
+        assert!(code(query_in(&collision, None).err().unwrap()).contains("InvalidRequest"));
         for bad in [
             list(vec![
                 sym(">"),
                 list(vec![sym("median"), sym("?cost")]),
                 Clj::Int(1),
             ]),
+            list(vec![sym(">"), sym("?cost"), Clj::Int(1)]),
             list(vec![sym("between"), sym("?recipe"), Clj::Int(1)]),
             vector(vec![sym("?recipe")]),
         ] {

@@ -180,8 +180,11 @@ input range, the result must lie within half a unit in the last place of the
 exact quotient, checked in integer arithmetic. Deterministic cases, with
 expected bits from Python's `Fraction`, are means that converting the sum to
 f64 before dividing gets wrong, plus ties, cancellation and a rounding carry.
-The grouped-aggregate oracle property gains `avg` and an optional HAVING
-threshold computed from the generated data. Integration tests pin HAVING
+A third property checks exact ties round to even. A unit test pins the f64
+mean as the ascending-order sum over the count, which differs from the exact
+mean, for every input order. The grouped-aggregate oracle property gains
+`avg` and an optional random minimum group size in HAVING, filtered
+independently. Integration tests pin HAVING
 before the limit, parameters, an aggregate named like a pattern variable,
 overflow in a dropped group, limit zero, and validation order. The SQL parity
 property adds `avg` and HAVING, but shares `finish` with the reference.

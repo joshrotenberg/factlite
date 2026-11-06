@@ -269,8 +269,8 @@
                                          :select [?recipe (avg ?cost)]
                                          :with [?run]
                                          :inputs {:floor :f64}
-                                         :having [(> (avg ?cost) $floor) (not= ?recipe "c")]}
-                                  {:floor 2.0}))))
+                                         :having [(> (avg ?cost) $floor) (not= ?recipe "a")]}
+                                  {:floor 1.0}))))
 (check ":having names only result columns"
        (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?run :agg/recipe ?recipe] [?run :agg/cost ?cost]]
                                                         :select [?recipe (count ?run)]

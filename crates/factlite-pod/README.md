@@ -212,8 +212,9 @@ the exact quotient. A query with no matches returns no rows, even
 `(count ?x)` alone.
 
 `:having` holds comparisons applied to each aggregated row before `:order` and
-`:limit`. In it, `(fn ?x)` names that aggregate's column and `?x` a selected
-variable; other pattern variables are rejected. Inputs and values work as in
+`:limit`. In it, `(fn ?x)` names that aggregate's column and must also be in
+`:select`, and `?x` must be a selected variable; other pattern variables are
+rejected. Inputs and values work as in
 `:where`. A query with `:having` needs at least one aggregate.
 
 ```clojure

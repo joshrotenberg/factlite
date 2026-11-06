@@ -154,12 +154,12 @@ pub type Params = BTreeMap<QueryName, Value>;
 /// limited to one level of `not` and `not-join` groups; there are no optional,
 /// disjunctive or recursive patterns.
 ///
-/// With aggregates, evaluation is: match, filter and apply negations; project the selected
-/// variables, the `with` variables and each aggregate's variable; remove
-/// duplicate tuples; group by the selected variables; aggregate each group;
-/// keep the rows that pass `having`; then order and limit. Only distinct tuples are aggregated, so include a
-/// variable in `with` (such as the entity) when equal values from different
-/// matches must each count. No matching tuples yield no rows, even without
+/// With aggregates, evaluation is: match, filter and apply negations; project
+/// the selected variables, the `with` variables and each aggregate's variable;
+/// remove duplicate tuples; group by the selected variables; aggregate each
+/// group; keep the rows that pass `having`; then order and limit. Only
+/// distinct tuples are aggregated, so include a variable in `with` (such as
+/// the entity) when equal values from different matches must each count. No matching tuples yield no rows, even without
 /// selected variables.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Query {

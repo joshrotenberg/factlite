@@ -318,7 +318,9 @@ Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
   before ordering and the limit, never sent to SQL, and requiring at least one
   aggregate. Wire `"having"` and `"fn":"avg"`; pod `(avg ?x)` and `:having`
   with `(fn ?x)` naming aggregate columns. Coverage:
-  - an independent oracle for `avg` rounding and HAVING filtering;
+  - an independent oracle for `avg` rounding and HAVING filtering (the
+    grouped-aggregate property and the rounding unit properties; SQL parity
+    shares the aggregation code and is not one);
   - deterministic rounding cases that a double-rounding division gets wrong;
   - validation of HAVING scope, types and parameters;
   - wire, CLI and pod scenarios.

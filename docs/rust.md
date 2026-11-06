@@ -81,6 +81,7 @@ limited results. Every declared parameter must be supplied, even for limit zero.
 `Query::negations` holds `Negation` groups: `join: None` is `not`, and
 `join: Some(vars)` is `not-join` with group-local variables. A binding survives
 only if no group holds for it at the view's revision.
+
 `AggregateFn::Avg` returns F64; an I64 mean rounds the exact quotient once.
 `Query::having` filters aggregated rows before ordering and the limit; its
 variables name result columns (selected variables and aggregate names).

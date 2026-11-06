@@ -59,9 +59,11 @@ fn overflow(message: &str) -> Error {
     Error::invalid("aggregates", message)
 }
 
-/// Adds F64 values in ascending order, so the rounding sequence is
-/// deterministic. A non-finite running total is an error.
+/// Adds F64 values in ascending order, so the rounding sequence does not
+/// depend on input order. A non-finite running total is an error.
 fn f64_sum(values: &[&Value]) -> Result<f64> {
+    let mut values = values.to_vec();
+    values.sort_by(|a, b| a.canonical_cmp(b));
     let mut total = 0.0_f64;
     for value in values {
         let Value::F64(x) = value else {
@@ -154,15 +156,11 @@ fn aggregate(function: AggregateFn, values: Vec<&Value>) -> Result<Value> {
                 _ => unreachable!("validated numeric, nonempty group"),
             }
         }
-        AggregateFn::Avg => {
-            let mut values = values;
-            values.sort_by(|a, b| a.canonical_cmp(b));
-            match values.first() {
-                Some(Value::I64(_)) => Value::f64(i64_mean(&values)),
-                Some(Value::F64(_)) => Value::f64(f64_sum(&values)? / values.len() as f64),
-                _ => unreachable!("validated numeric, nonempty group"),
-            }
-        }
+        AggregateFn::Avg => match values.first() {
+            Some(Value::I64(_)) => Value::f64(i64_mean(&values)),
+            Some(Value::F64(_)) => Value::f64(f64_sum(&values)? / values.len() as f64),
+            _ => unreachable!("validated numeric, nonempty group"),
+        },
         AggregateFn::Min | AggregateFn::Max => {
             let mut values = values.into_iter();
             let mut best = values.next().expect("groups are nonempty").clone();
@@ -364,6 +362,22 @@ mod tests {
         let max = Value::f64(f64::MAX).unwrap();
         let error = aggregate(AggregateFn::Avg, vec![&max, &max]).unwrap_err();
         assert_eq!(error.code(), crate::ErrorCode::InvalidRequest);
+        // The documented mean is the ascending-order sum over the count, not
+        // the exact mean: -2^54 + 1 rounds to -2^54, so the sum is 0, while
+        // the exact mean is 1/3. Input order does not matter.
+        let big = Value::f64(2.0_f64.powi(54)).unwrap();
+        let small = Value::f64(1.0).unwrap();
+        let negative = Value::f64(-(2.0_f64.powi(54))).unwrap();
+        for order in [
+            vec![&big, &small, &negative],
+            vec![&negative, &big, &small],
+            vec![&small, &negative, &big],
+        ] {
+            assert_eq!(
+                aggregate(AggregateFn::Avg, order).unwrap(),
+                Value::f64(0.0).unwrap()
+            );
+        }
         let low = Value::f64(1.0).unwrap();
         let high = Value::f64(2.0).unwrap();
         assert_eq!(
@@ -386,13 +400,28 @@ mod tests {
                 (numerator as f64 / denominator as f64).to_bits()
             );
         }
-        // For larger numerators, the result brackets the exact quotient within
-        // half a unit in the last place, checked in exact integer arithmetic.
+        // An exact tie between two adjacent f64s rounds to the even one. The
+        // quotient (2m + 1) / 2 lies halfway between m and m + 1, both exact.
+        #[test]
+        fn nearest_quotient_breaks_exact_ties_to_even(
+            half in 1_u64 << 52..1 << 53,
+            scale in 1_u128..1 << 10,
+        ) {
+            let m = u128::from(half);
+            let result = nearest_quotient((2 * m + 1) * scale, 2 * scale);
+            let even = if m % 2 == 0 { m } else { m + 1 };
+            prop_assert_eq!(result.to_bits(), (even as f64).to_bits());
+        }
+        // Over the full input range, with numerators spread across bit lengths,
+        // the result lies within half a unit in the last place of the exact
+        // quotient, checked in integer arithmetic.
         #[test]
         fn nearest_quotient_is_within_half_an_ulp(
-            numerator in 1_u128..1 << 127,
+            raw in any::<u128>(),
+            bits in 1_u32..127,
             denominator in 1_u128..1 << 64,
         ) {
+            let numerator = (raw >> (128 - bits)).max(1);
             let result = nearest_quotient(numerator, denominator);
             let bits = result.to_bits();
             let mantissa = u128::from((bits & ((1 << 52) - 1)) | (1 << 52));
