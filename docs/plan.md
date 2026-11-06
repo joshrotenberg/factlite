@@ -175,7 +175,7 @@ decisions; neither changes the local semantic implementation sequence.
   with branch names. Exclude machine state. Restore independently and compare
   commit, tree, branch heads and tracked bytes; check Git integrity and run the
   public Rust workflow from the restored checkout.
-- [ ] **8.2 Publish and verify.** Push to the selected remote without replacing
+- [x] **8.2 Publish and verify.** Push to the selected remote without replacing
   unrelated history, compare remote refs with local refs and verify a fresh
   remote clone. Deliver the final archive, manifest and SHA-256 checksum for
   the exact published commit. Report remote CI separately from local evidence.

@@ -68,6 +68,10 @@ uploading the archive again. Verify a fresh remote clone's main hash and Git
 integrity before treating the remote handoff as complete. Remote CI may start
 when GitHub Actions receives these branches; inspect the main commit's run.
 
+Published 2026-11-05 to the private repository
+`https://github.com/joshrotenberg/factlite`. Clone it instead of restoring an
+archive. CI runs on pushes to `main` and on pull requests.
+
 ## Resume intentionally
 
 There are no known incomplete acceptance rows for the implemented contract.
