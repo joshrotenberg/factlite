@@ -6,20 +6,15 @@ and what decision it needs. When an entry is approved, it moves into
 recorded in [`status.md`](status.md) and [`decisions.md`](decisions.md).
 Nothing here is a commitment or a promise of order.
 
-State as of 2026-11-05: local `main` at `ac5a720`, storage format 4, plan items
-0 through 11.5 complete except 8.2. 181 tests pass locally. No remote is
-configured and no CI has run.
+State as of 2026-11-05: `main` at `250bc6b` on the private GitHub remote,
+storage format 4, plan items 0 through 11.5 complete. 181 tests pass locally
+and in CI.
 
-## 1. Publish (plan item 8.2)
+## 1. Publish (plan item 8.2): done
 
-- **Why:** No CI has ever run. All history exists on one machine. The pod
-  cannot be shared or released without a public repository.
-- **Decision needed:** A remote destination and a license.
-- **Work once decided:** Push every branch without replacing history, compare
-  remote and local refs, verify a fresh clone, and produce the archive,
-  manifest and checksum described in [`handoff.md`](handoff.md). Report remote
-  CI separately from local evidence.
-- **Unblocks:** 2 (pod releases), and the CI gaps in 8.
+Published to the private repository `github.com/joshrotenberg/factlite` on
+2026-11-05. CI passed there. A license is still unselected; it matters before
+any public release, including item 2.
 
 ## 2. Pod release packaging
 
@@ -32,7 +27,7 @@ configured and no CI has run.
   each, versioned release tags, and a registry manifest. The `babashka-pod`
   repository already has release tooling for its own pods that could be
   reused.
-- **Depends on:** 1.
+- **Depends on:** a license, and a public repository or release host.
 
 ## 3. Bounded open time
 
@@ -106,7 +101,7 @@ None of these needs a design decision; each could be done directly.
 
 - The CLI has no busy-timeout flag; the library and pod do (item 11.1).
 - CI (`.github/workflows`) does not install babashka, so the pod's babashka
-  tests would be skipped there. Set `REQUIRE_BB` once babashka is installed.
+  tests skip there. Installing it and setting `REQUIRE_BB` would make them run.
 - No query-planner statistics (`ANALYZE`) are kept. Plans rely on SQLite
   defaults, which were adequate for every measured query.
 - CLI read commands open the file per process and so replay the whole log

@@ -6,10 +6,10 @@ queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
 gate passed 181 tests, including forty-nine 1,024-case properties, plus the
-asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
-into the strict wire requests. Remote publication (8.2) and direct indexed reads
-(9.2) are open. Reviews are self-reviews; remote CI and independent review have not
-run.
+asserted Rust workflow. Items 9 to 11 add indexed reads and commits, a babashka pod, and consumer
+requests (lookups, aggregates, keyword and inst types). The repository is
+published to a private GitHub remote, where CI passed 181 tests on Linux.
+Reviews are self-reviews; no independent review has run.
 
 ## 0.1 Inspect and initialize — done
 
@@ -666,6 +666,29 @@ run.
 - **What's next:** All clajent requests are addressed except transaction
   lookup refs, which need a canonical-identity decision.
 
+## 8.2 Publish and verify: done
+
+- **Done:** The user created the private repository
+  `github.com/joshrotenberg/factlite` and pushed `main`. All 45 branches were
+  then pushed. Every remote branch ref equals the local ref. A fresh mirror
+  clone passes `git fsck --full` with the same 89 reachable commits. A fresh
+  working clone checks out `main` at `250bc6b` with tree `3f1e186` and
+  byte-identical tracked files, and the asserted Rust workflow example runs
+  from it. Review: `reviews/0043-publish-verified.md`.
+- **Remote CI:** The first run (`main`, `250bc6b`, ubuntu-latest, Rust 1.99.0)
+  passed `scripts/check.sh`: 181 tests, 1 ignored. babashka is not installed on
+  the runner, so the three pod babashka tests skip there.
+- **Branch runs:** Pushing the historical branches started 32 runs although the
+  workflow was disabled during the push: GitHub processed the push events after
+  it was re-enabled. 27 were cancelled and 5 completed successfully; none
+  failed. The push trigger is now limited to `main`, with pull requests
+  covering branches.
+- **Archive:** `factlite-handoff.tar.gz` (757,342 bytes), its `.sha256` and
+  `factlite-handoff-manifest.json` were built from the remote for `250bc6b` and
+  delivered to the user. They are not stored in the repository.
+- **Decisions:** No license is selected; the repository is private.
+- **What's next:** See `roadmap.md`. Future items use draft pull requests.
+
 ## Environment notes
 
 The local toolchain lives outside Git in `/workspace/.factlite-tools`. For this
@@ -677,5 +700,5 @@ offline. The database and CLI require no outbound network access.
 
 ## Open repository decisions
 
-- Remote hosting destination: none configured in this checkout; branch/review/merge is local.
+- Remote hosting destination: private `github.com/joshrotenberg/factlite`.
 - License: none selected; publishing is disabled.
