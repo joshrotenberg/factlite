@@ -135,6 +135,13 @@ impl Db {
         Store::reader(path.as_ref(), options)
     }
 
+    /// Fully validates the latest committed state over this view's connection
+    /// and returns the validated head; see [`Store::verify`]. This view stays
+    /// pinned to its own revision.
+    pub fn verify(&self) -> Result<SnapshotId> {
+        self.store.verify()
+    }
+
     /// A new view of the latest committed head over this view's connection.
     /// This view stays pinned; a read-only view refreshes only explicitly,
     /// without reopening or revalidating the file.

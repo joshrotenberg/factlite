@@ -975,3 +975,46 @@ fn busy_timeout_option_bounds_lock_waits_and_is_validated() {
         "InvalidRequest",
     );
 }
+
+#[test]
+fn structural_reads_and_verify_report_tampering_differently() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verify.sqlite");
+    success(binary().arg("init").arg(&path));
+    let created = transact(
+        &path,
+        &json!({"version":1,"schema":[{"name":"x/n","type":"i64","cardinality":"one","unique":"none"}],
+          "new_entities":["e"],
+          "changes":[{"op":"assert","entity":{"temp":"e"},"attr":"x/n","value":{"i64":"1"}}]}),
+    );
+    let verified = success(db(&path).arg("verify"));
+    assert_eq!(verified, created["after"]);
+    // Tamper with a derived interval without touching the authoritative log.
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute("UPDATE datoms SET value=X'8000000000000063'", [])
+        .unwrap();
+    drop(connection);
+    failure(db(&path).arg("schema"), 5, "Storage");
+    let schema = success(db(&path).args(["schema", "--validation", "structural"]));
+    assert_eq!(schema["schema"].as_array().unwrap().len(), 1);
+    failure(db(&path).arg("verify"), 5, "Storage");
+    // Only read commands take the option, and only these two values.
+    failure(
+        db(&path)
+            .args(["transact", "--file", "-", "--validation", "structural"])
+            .write_stdin(r#"{"version":1}"#),
+        2,
+        "InvalidRequest",
+    );
+    failure(
+        db(&path).args(["verify", "--validation", "full"]),
+        2,
+        "InvalidRequest",
+    );
+    failure(
+        db(&path).args(["schema", "--validation", "fast"]),
+        2,
+        "InvalidRequest",
+    );
+}

@@ -192,6 +192,7 @@ pub(crate) fn model_at(connection: &Connection, basis: &SnapshotId) -> Result<Mo
             .map_err(|err: Error| corrupt(err.to_string()))?;
         entities.insert(entity, decode_revision(&revision)?);
     }
+    let stored_types = types(&schema);
     let mut facts = HashSet::new();
     for row in connection
         .prepare("SELECT entity,attribute,type_tag,value FROM datoms WHERE asserted<=?1 AND (retracted IS NULL OR retracted>?1)")?
@@ -205,16 +206,7 @@ pub(crate) fn model_at(connection: &Connection, basis: &SnapshotId) -> Result<Mo
         })?
     {
         let (entity, attribute, tag, bytes) = row?;
-        let tag = u8::try_from(tag).map_err(|_| corrupt("invalid stored type tag"))?;
-        facts.insert(Fact {
-            entity: entity
-                .parse()
-                .map_err(|err: Error| corrupt(err.to_string()))?,
-            attribute: attribute
-                .parse()
-                .map_err(|err: Error| corrupt(err.to_string()))?,
-            value: codec::decode_value(tag, &bytes)?,
-        });
+        facts.insert(fact_row(&stored_types, entity, attribute, tag, &bytes)?);
     }
     Ok(Model::new(
         Catalog::retained(basis.clone(), schema, entities),
@@ -225,10 +217,23 @@ pub(crate) fn model_at(connection: &Connection, basis: &SnapshotId) -> Result<Mo
 /// Fails unless `basis` names this store and lineage at a retained revision.
 /// Every read checks this inside its own SQL snapshot before reading.
 pub(crate) fn check_basis(connection: &Connection, basis: &SnapshotId) -> Result<()> {
+    use rusqlite::OptionalExtension;
     let head = read_head(connection)?;
+    // The revision must be retained, not just at or below head: a structural
+    // open does not prove that history is contiguous.
+    let retained = basis.revision() == Revision::ZERO
+        || connection
+            .query_row(
+                "SELECT 1 FROM transactions WHERE revision=?1",
+                [revision_bytes(basis.revision()).as_slice()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
     if head.store() != basis.store()
         || head.lineage() != basis.lineage()
         || basis.revision() > head.revision()
+        || !retained
     {
         return Err(Error::new(
             ErrorCode::InvalidSnapshot,
@@ -322,6 +327,7 @@ pub(crate) fn facts_matching(
         bindings.push(codec::encode_value(value).into());
         sql.push_str(&format!(" AND value=?{}", bindings.len()));
     }
+    let types = types(&definitions_at(connection, basis)?);
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(rusqlite::params_from_iter(&bindings), |row| {
         Ok((
@@ -333,13 +339,41 @@ pub(crate) fn facts_matching(
     })?;
     rows.map(|row| {
         let (entity, attribute, tag, bytes) = row?;
-        fact_row(entity, attribute, tag, &bytes)
+        fact_row(&types, entity, attribute, tag, &bytes)
     })
     .collect()
 }
 
-fn fact_row(entity: String, attribute: String, tag: i64, bytes: &[u8]) -> Result<Fact> {
+/// Stored type tag of each attribute visible at a basis.
+fn types(schema: &Definitions) -> BTreeMap<String, u8> {
+    schema
+        .iter()
+        .map(|(name, (definition, _))| {
+            (
+                name.as_str().to_owned(),
+                codec::type_tag(definition.value_type()),
+            )
+        })
+        .collect()
+}
+
+/// Decodes a stored fact, failing unless its attribute is visible at the basis
+/// and its type tag is the attribute's type. Full validation at open also
+/// guarantees this; checking here keeps structurally opened views from passing
+/// a mistyped value to code that relies on schema types.
+fn fact_row(
+    types: &BTreeMap<String, u8>,
+    entity: String,
+    attribute: String,
+    tag: i64,
+    bytes: &[u8],
+) -> Result<Fact> {
     let tag = u8::try_from(tag).map_err(|_| corrupt("invalid stored type tag"))?;
+    if types.get(&attribute) != Some(&tag) {
+        return Err(corrupt(
+            "stored fact type or attribute differs from the visible schema",
+        ));
+    }
     Ok(Fact {
         entity: entity
             .parse()
@@ -397,6 +431,7 @@ pub(crate) fn history_matching(
         endpoint("asserted", 1),
         endpoint("retracted", 0)
     );
+    let stored_types = types(&definitions_at(connection, basis)?);
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(rusqlite::params_from_iter(&bindings), |row| {
         Ok((
@@ -419,7 +454,7 @@ pub(crate) fn history_matching(
                 1 => Operation::Assert,
                 _ => return Err(corrupt("invalid persisted operation")),
             },
-            fact: fact_row(entity, attribute, tag, &bytes)?,
+            fact: fact_row(&stored_types, entity, attribute, tag, &bytes)?,
         })
     })
     .collect()

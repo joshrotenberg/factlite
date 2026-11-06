@@ -85,16 +85,32 @@ fn fact_events_table(name: &str) -> String {
     )
 }
 
+/// How much an open checks before returning.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Validation {
+    /// Replay and validate the complete retained log, and check the datom
+    /// index against it. Required for writable opens.
+    #[default]
+    Full,
+    /// Check only the format markers, the table and index sets, and that the
+    /// head row matches the latest transaction. Read-only opens only. Later
+    /// reads trust the stored index; a corrupted file can give wrong answers or
+    /// `Storage` errors until [`Store::verify`] or [`crate::Db::verify`] runs.
+    Structural,
+}
+
 /// Connection settings for [`Store::open_with`] and [`crate::Db::open_read_only_with`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StoreOptions {
     busy_timeout: Duration,
+    validation: Validation,
 }
 
 impl Default for StoreOptions {
     fn default() -> Self {
         Self {
             busy_timeout: Duration::from_secs(2),
+            validation: Validation::Full,
         }
     }
 }
@@ -122,6 +138,18 @@ impl StoreOptions {
     /// The configured busy timeout.
     pub fn busy_timeout(&self) -> Duration {
         self.busy_timeout
+    }
+
+    /// How much an open validates. [`Validation::Structural`] is accepted only
+    /// by read-only opens; [`Store::open_with`] refuses it.
+    pub fn with_validation(mut self, validation: Validation) -> Self {
+        self.validation = validation;
+        self
+    }
+
+    /// The configured validation.
+    pub fn validation(&self) -> Validation {
+        self.validation
     }
 }
 
@@ -210,6 +238,14 @@ impl Store {
     /// Like [`Store::open`], with explicit connection settings.
     pub fn open_with(path: impl AsRef<Path>, options: &StoreOptions) -> Result<Self> {
         let path = path.as_ref();
+        // A commit evaluates against the stored index, so a writable store must
+        // be fully validated. Refuse before the file is opened or created.
+        if options.validation != Validation::Full {
+            return Err(Error::invalid(
+                "validation",
+                "structural validation is only for read-only opens",
+            ));
+        }
         if path.as_os_str().is_empty() || path == Path::new(":memory:") {
             return Err(Error::invalid(
                 "path",
@@ -284,13 +320,29 @@ impl Store {
         connection.busy_timeout(options.busy_timeout)?;
         connection.pragma_update(None, "foreign_keys", true)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
-        validate_existing(&transaction)?;
+        match options.validation {
+            Validation::Full => validate_existing(&transaction)?,
+            Validation::Structural => validate_structure(&transaction)?,
+        }
         let basis = read_head(&transaction)?;
         transaction.commit()?;
         let store = Self {
             connection: Arc::new(Mutex::new(connection)),
         };
         Ok(crate::Db::pinned(store, basis))
+    }
+
+    /// Fully validates the latest committed state, as a full open does, in one
+    /// short read transaction, and returns the head it validated. Errors keep
+    /// their codes: `Storage` names the failed check, `UnsupportedFormat` a
+    /// changed format marker, and `Busy` a lock that outlasted the timeout.
+    pub fn verify(&self) -> Result<SnapshotId> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        validate_existing(&transaction)?;
+        let head = read_head(&transaction)?;
+        transaction.commit()?;
+        Ok(head)
     }
 
     /// Captures the latest committed head in one short SQLite read transaction.
@@ -550,7 +602,17 @@ fn table_names(connection: &Connection) -> Result<Vec<String>> {
     Ok(connection.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*' ORDER BY name")?.query_map([],|row|row.get(0))?.collect::<std::result::Result<_,_>>()?)
 }
 
-pub(crate) fn validate_existing(connection: &Connection) -> Result<()> {
+/// The format markers, table and index sets, and head row only.
+fn validate_structure(connection: &Connection) -> Result<()> {
+    check_markers(connection)?;
+    if table_names(connection)? != TABLES {
+        return Err(corrupt("database tables do not match the supported format"));
+    }
+    validate_indexes(connection)?;
+    check_head_row(connection).map(|_| ())
+}
+
+fn check_markers(connection: &Connection) -> Result<()> {
     let application: i32 =
         connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
     let version: i32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -561,10 +623,16 @@ pub(crate) fn validate_existing(connection: &Connection) -> Result<()> {
             "file is not a supported Factlite database",
         ));
     }
+    Ok(())
+}
+
+pub(crate) fn validate_existing(connection: &Connection) -> Result<()> {
+    check_markers(connection)?;
     validate_current(connection)
 }
 
-fn validate_head(connection: &Connection) -> Result<()> {
+/// The head row is well formed and equals the latest retained transaction.
+fn check_head_row(connection: &Connection) -> Result<SnapshotId> {
     let basis = read_head(connection)?;
     let head = basis.revision();
     let maximum: Option<Vec<u8>> =
@@ -579,6 +647,11 @@ fn validate_head(connection: &Connection) -> Result<()> {
             "committed head does not match retained transaction log",
         ));
     }
+    Ok(basis)
+}
+
+fn validate_head(connection: &Connection) -> Result<()> {
+    let basis = check_head_row(connection)?;
     crate::log::verify_foreign_keys(connection)?;
     let replayed = crate::log::replay(connection, &basis)?;
     crate::index::verify(connection)?;
