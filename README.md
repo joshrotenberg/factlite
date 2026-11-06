@@ -34,6 +34,10 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
   timeout. Opening an existing current-format store validates it without
   blocking writers; initialization and format upgrades take the write lock.
   SQLite-safe standalone backups and crash recovery are tested.
+- **Permanence:** committed values, metadata and retry records are kept for the
+  life of the store and copied into later backups. Nothing deletes them. Keep
+  data that may have to be deleted outside the store, or encrypt it under a key
+  the application can destroy; see [permanence](docs/permanence.md).
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
@@ -45,6 +49,7 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
 - [Babashka pod](crates/factlite-pod/README.md): Clojure API, value mapping and errors.
 - [Measurements](docs/measurements.md): reproducible workloads, replay and index costs.
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
+- [Permanence](docs/permanence.md): retained history, sensitive data, encryption limits and physical deletion.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 - [Rust guide](docs/rust.md): an executable application workflow and API choices.
 - [Handoff](docs/handoff.md): clone, verify and resume work.
