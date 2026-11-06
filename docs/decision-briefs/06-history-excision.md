@@ -1,6 +1,7 @@
 # Decision brief: history retention and excision (roadmap item 6)
 
-Status: decided 2026-11-06 (see Decision). Not yet implemented.
+Status: decided 2026-11-06 (see Decision). Options A and B are documented in
+`docs/permanence.md` (plan item 12.4).
 
 ## The question
 

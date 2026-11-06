@@ -140,6 +140,11 @@ including WAL commits, without replacing an existing path or sidecar. Read it
 with the usual schema/facts/pull/history/transactions/query commands. See
 [backup and lineage rules](backup.md) before resuming writes from a restored copy.
 
+Committed values, metadata and retry records are permanent, and a backup copies
+all of them through its captured revision. See [permanence and sensitive data](permanence.md) before storing
+data that may have to be deleted. Error JSON on stderr can include values from
+the request.
+
 ## Busy timeout
 
 `init` and every database command accept `--busy-timeout-ms MS`: how long to

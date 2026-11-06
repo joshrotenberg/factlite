@@ -50,6 +50,17 @@ Use `expect(entity, attribute, values)` for an exact pre-state set condition;
 an empty set means absence. Use `expect_head(snapshot)` when any intervening
 commit, including a no-change commit, must invalidate the request.
 
+## Permanent values
+
+Every committed value, metadata entry, temporary label and idempotency key is
+kept for the life of the store and copied into later backups; a keyed request
+also keeps its expectation and lookup values. Retraction ends a fact's interval
+but does not remove the value. Store data that may have to be deleted in an
+external record and keep a reference, or store it as `Value::Bytes` encrypted
+under a key held outside Factlite. Encrypted values compare, enforce uniqueness
+and query as ciphertext, and a keyed retry must resend the original ciphertext.
+See [permanence and sensitive data](permanence.md).
+
 ## Read one basis
 
 `store.db()` captures head once. `store.db_at(&snapshot)` reopens a retained

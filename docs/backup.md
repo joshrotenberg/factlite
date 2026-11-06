@@ -26,7 +26,9 @@ complete destination has appeared; inspect it through read-only access.
 
 The result is a standalone file with all retained revisions, schema, allocations,
 metadata, reports, retry evidence and original store/lineage identity. Saved
-tokens still work. Rust uses `Db::open_read_only(path)` or
+tokens still work. A backup keeps every value committed through its captured revision,
+including retracted values and keyed retry evidence, even after the source is
+destroyed; see [permanence](permanence.md). Rust uses `Db::open_read_only(path)` or
 `Db::open_read_only_at(path, &token)`; these use SQLite read-only connections and
 cannot initialize files or expose commits. CLI read commands use the same path.
 Temporary query relations remain connection-local. Reads of a standalone backup

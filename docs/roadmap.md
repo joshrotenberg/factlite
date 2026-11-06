@@ -44,7 +44,8 @@ Decided 2026-11-06 ([brief](decision-briefs/05-query-language.md)):
 
 Decided 2026-11-06 ([brief](decision-briefs/06-history-excision.md)): history
 stays immutable. Document the permanence rule and the application-level
-encryption pattern (plan item 12.4). Design a lineage rewrite only if a real
+encryption pattern (plan item 12.4, done in
+[permanence](permanence.md)). Design a lineage rewrite only if a real
 deletion requirement appears. In-place excision is ruled out.
 ## 7. Elixir NIF: deferred
 

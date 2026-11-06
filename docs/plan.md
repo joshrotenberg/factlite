@@ -304,7 +304,7 @@ Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
   - retry identity and replay;
   - full, touched-state and replay parity;
   - existing canonical bytes unchanged.
-- [ ] **12.4 Permanence and encryption guidance** (roadmap 6). Document in
+- [x] **12.4 Permanence and encryption guidance** (roadmap 6). Document in
   the README and the Rust and pod guides that fact values are permanent, and
   describe the application-level encryption pattern with its equality,
   uniqueness, retry and key-destruction limits, and what physical deletion

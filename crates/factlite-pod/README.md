@@ -253,6 +253,18 @@ outcome could not be confirmed (retry with the same idempotency key).
 Errors from the pod runtime itself, such as a closed connection, carry a
 message only.
 
+## Permanent values
+
+Every committed value, metadata entry, temporary label and idempotency key is
+kept for the life of the store and copied into later backups; a keyed request
+also keeps its expectation and lookup values. Retraction ends a fact's interval
+but does not remove the value. Keep data that may have to be deleted outside
+the store and transact a reference, or transact a byte array encrypted under a
+key held outside Factlite. Encrypted values compare, enforce uniqueness and
+query as ciphertext, and a keyed retry must resend the original byte array, not
+a fresh encryption. See
+[permanence and sensitive data](../../docs/permanence.md).
+
 ## Several processes
 
 Any number of pod processes may open one file. Writers serialize on SQLite's

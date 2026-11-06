@@ -2,7 +2,7 @@
 
 ## Current state
 
-Updated 2026-11-06 (decisions recorded). This section is the summary. The entries below are the full
+Updated 2026-11-06 (plan step 12 done). This section is the summary. The entries below are the full
 per-item log, oldest first, and are kept as written, so older entries describe
 the state at their time. Where they disagree with this section, this section is
 current.
@@ -29,7 +29,7 @@ current.
   - 12.1: read-only structural open and verify (done);
   - 12.2: query negation (done);
   - 12.3: transaction lookup refs (done);
-  - 12.4: permanence and encryption guidance.
+  - 12.4: permanence and encryption guidance (done).
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
 
@@ -795,6 +795,24 @@ current.
   decision deferred. Generated traces carry no idempotency keys, so replay of
   keyed lookups on reopen is covered by deterministic tests only.
 - **What's next:** 12.4, permanence and encryption guidance.
+
+## 12.4 Permanence and encryption guidance: done
+
+- **Done:** `permanence.md` states that committed values are permanent and
+  lists every place a value is kept, including keyed canonical requests,
+  labels, metadata and idempotency keys. It describes keeping sensitive data
+  outside the store, the application-level encryption pattern with its
+  equality, uniqueness, query, retry and key-destruction limits, and what
+  physical deletion requires. The README, the Rust guide, the pod README, the
+  CLI guide and the backup guide link to it. Documentation only; no behavior
+  changed. Review: `reviews/0052-permanence-guidance.md`.
+- **Decisions:** none new; this documents options A and B of decision brief 06.
+- **Validation:** local only; GitHub Actions is unavailable.
+- **Left open:** a lineage rewrite (option C) is designed only if a real
+  deletion requirement appears. Factlite provides no encryption helper.
+- **What's next:** plan step 12 is complete. The remaining candidates have no
+  plan items yet: `avg` and HAVING, expectation lookups (canonical request
+  version 2), and the open roadmap entries. Each needs the user's go-ahead.
 
 ## Environment notes
 
