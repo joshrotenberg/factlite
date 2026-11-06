@@ -862,3 +862,63 @@ fn lookup_resolves_unique_values_at_a_view_and_reports_errors() {
         "InvalidRequest",
     );
 }
+
+#[test]
+fn busy_timeout_option_bounds_lock_waits_and_is_validated() {
+    use std::time::{Duration, Instant};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("timeout.sqlite");
+    success(
+        binary()
+            .arg("init")
+            .arg(&path)
+            .args(["--busy-timeout-ms", "500"]),
+    );
+    let blocker = rusqlite::Connection::open(&path).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let started = Instant::now();
+    failure(
+        db(&path)
+            .args(["transact", "--file", "-", "--busy-timeout-ms", "150"])
+            .write_stdin(r#"{"version":1}"#),
+        4,
+        "Busy",
+    );
+    let waited = started.elapsed();
+    // At least the requested wait, and well under the 2 s default.
+    assert!(
+        waited >= Duration::from_millis(150) && waited < Duration::from_millis(1800),
+        "{waited:?}"
+    );
+    // Reads do not take the write lock, so they succeed while it is held.
+    success(db(&path).args(["schema", "--busy-timeout-ms", "0"]));
+    blocker.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(
+        success(
+            db(&path)
+                .args(["transact", "--busy-timeout-ms", "0", "--file", "-"])
+                .write_stdin(r#"{"version":1}"#)
+        )["after"]["revision"],
+        "1"
+    );
+    for invalid in ["-1", "abc", "1.5", "", "2147483648"] {
+        failure(
+            db(&path).args(["schema", "--busy-timeout-ms", invalid]),
+            2,
+            "InvalidRequest",
+        );
+    }
+    failure(
+        db(&path).args(["schema", "--busy-timeout-ms", "1", "--busy-timeout-ms", "2"]),
+        2,
+        "InvalidRequest",
+    );
+    failure(
+        binary()
+            .arg("init")
+            .arg(dir.path().join("x.sqlite"))
+            .args(["--busy-timeout-ms", "x"]),
+        2,
+        "InvalidRequest",
+    );
+}
