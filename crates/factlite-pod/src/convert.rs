@@ -577,6 +577,79 @@ fn predicate_in(value: &Clj) -> Result<Json> {
     Ok(json!({"left": term_in(left)?, "op": op, "right": term_in(right)?}))
 }
 
+fn pattern_in(value: &Clj) -> Result<Json> {
+    let [entity, attribute, value] = exactly::<3>(value, "match", "[entity attr value]")?;
+    Ok(json!([
+        term_in(entity)?,
+        name(attribute, "attr")?,
+        term_in(value)?
+    ]))
+}
+
+/// `Some(false)` for a `(not ...)` clause, `Some(true)` for `(not-join ...)`,
+/// `None` for anything else.
+fn negation_kind(value: &Clj) -> Option<bool> {
+    let Clj::List(items) = unmeta(value) else {
+        return None;
+    };
+    match items.first().map(unmeta) {
+        Some(Clj::Symbol(head)) if head == "not" => Some(false),
+        Some(Clj::Symbol(head)) if head == "not-join" => Some(true),
+        _ => None,
+    }
+}
+
+/// `(not clause ...)` or `(not-join [?var ...] clause ...)`, where a vector
+/// clause is a pattern and a list clause is a comparison. Groups do not nest.
+fn negation_in(value: &Clj, join: bool) -> Result<Json> {
+    let Clj::List(items) = unmeta(value) else {
+        unreachable!("negation_kind matched a list")
+    };
+    let mut rest = &items[1..];
+    let mut group = Map::new();
+    if join {
+        let Some((vars, clauses)) = rest.split_first() else {
+            return Err(invalid("not-join", "(not-join [?var ...] clause ...)"));
+        };
+        let Clj::Vector(vars) = unmeta(vars) else {
+            return Err(invalid(
+                "not-join",
+                "not-join takes a vector of join ?variables first",
+            ));
+        };
+        let vars = vars
+            .iter()
+            .map(|var| variable(var, "not-join"))
+            .collect::<Result<Vec<_>>>()?;
+        group.insert("join".into(), json!(vars));
+        rest = clauses;
+    }
+    let field = if join { "not-join" } else { "not" };
+    let mut patterns = Vec::new();
+    let mut comparisons = Vec::new();
+    for clause in rest {
+        match unmeta(clause) {
+            Clj::Vector(_) => patterns.push(pattern_in(clause)?),
+            Clj::List(_) if negation_kind(clause).is_some() => {
+                return Err(invalid(field, "negations do not nest"));
+            }
+            Clj::List(_) => comparisons.push(predicate_in(clause)?),
+            other => {
+                return Err(invalid(
+                    field,
+                    format!(
+                        "{field} clauses are [entity attr value] patterns or (op left right) comparisons, got {}",
+                        describe(other)
+                    ),
+                ));
+            }
+        }
+    }
+    group.insert("match".into(), json!(patterns));
+    group.insert("where".into(), json!(comparisons));
+    Ok(Json::Object(group))
+}
+
 /// A decoded query, its params, and the result columns in the order the
 /// caller's `:select` listed them (the library puts aggregates last).
 pub(crate) struct PodQuery {
@@ -602,24 +675,23 @@ pub(crate) fn query_in(query: &Clj, params: Option<&Clj>) -> Result<PodQuery> {
     if let Some(patterns) = fields.take("match") {
         let patterns = items(&patterns, "match")?
             .iter()
-            .map(|pattern| {
-                let [entity, attribute, value] =
-                    exactly::<3>(pattern, "match", "[entity attr value]")?;
-                Ok(json!([
-                    term_in(entity)?,
-                    name(attribute, "attr")?,
-                    term_in(value)?
-                ]))
-            })
+            .map(pattern_in)
             .collect::<Result<Vec<_>>>()?;
         inner.insert("match".into(), json!(patterns));
     }
     if let Some(predicates) = fields.take("where") {
-        let predicates = items(&predicates, "where")?
-            .iter()
-            .map(predicate_in)
-            .collect::<Result<Vec<_>>>()?;
-        inner.insert("where".into(), json!(predicates));
+        let mut comparisons = Vec::new();
+        let mut negations = Vec::new();
+        for clause in items(&predicates, "where")? {
+            match negation_kind(clause) {
+                Some(join) => negations.push(negation_in(clause, join)?),
+                None => comparisons.push(predicate_in(clause)?),
+            }
+        }
+        inner.insert("where".into(), json!(comparisons));
+        if !negations.is_empty() {
+            inner.insert("not".into(), json!(negations));
+        }
     }
     let mut order_of_columns = Vec::new();
     if let Some(select) = fields.take("select") {
@@ -1205,6 +1277,59 @@ mod tests {
             ])]),
         )]);
         assert!(tx_in(&temp_expect).is_err());
+    }
+
+    #[test]
+    fn negation_clauses_become_wire_groups() {
+        let list = Clj::List;
+        let outcome = |var: &str| vector(vec![sym("?run"), kw("run/outcome"), sym(var)]);
+        let query = |clause: Clj| {
+            map(vec![
+                (
+                    "match",
+                    vector(vec![vector(vec![sym("?run"), kw("run/status"), sym("?s")])]),
+                ),
+                ("where", vector(vec![clause])),
+                ("select", vector(vec![sym("?run")])),
+            ])
+        };
+        let decoded = query_in(
+            &query(list(vec![
+                sym("not"),
+                vector(vec![sym("?run"), kw("run/outcome"), string("failed")]),
+                list(vec![sym("not="), sym("?s"), string("done")]),
+            ])),
+            None,
+        )
+        .unwrap();
+        let group = &decoded.query.negations[0];
+        assert_eq!(group.join, None);
+        assert_eq!((group.patterns.len(), group.predicates.len()), (1, 1));
+        assert!(decoded.query.predicates.is_empty());
+        let decoded = query_in(
+            &query(list(vec![sym("not-join"), vector(vec![]), outcome("?o")])),
+            None,
+        )
+        .unwrap();
+        assert_eq!(decoded.query.negations[0].join, Some(Vec::new()));
+        for bad in [
+            list(vec![sym("not-join")]),
+            list(vec![
+                sym("not-join"),
+                list(vec![sym("?run")]),
+                outcome("?o"),
+            ]),
+            list(vec![
+                sym("not-join"),
+                vector(vec![kw("run")]),
+                outcome("?o"),
+            ]),
+            list(vec![sym("not"), list(vec![sym("not"), outcome("?o")])]),
+            list(vec![sym("not"), string("pattern")]),
+        ] {
+            let error = code(query_in(&query(bad.clone()), None).err().unwrap());
+            assert!(error.contains("InvalidRequest"), "{bad:?}: {error}");
+        }
     }
 
     #[test]

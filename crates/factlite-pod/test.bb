@@ -242,6 +242,36 @@
 (check "sum of a string fails" (= "TypeMismatch" (:code (failure #(f/q conn '{:match [[?r :agg/recipe ?x]] :select [(sum ?x)]})))))
 (check "unknown aggregate fails" (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?r :agg/cost ?x]] :select [(avg ?x)]})))))
 
+(let [[[b-run]] (:rows (f/q conn '{:match [[?run :agg/recipe "b"]] :select [?run]}))
+      [cheap] (sort-by :id (map first (:rows (f/q conn '{:match [[?run :agg/cost 1.5]] :select [?run]}))))]
+  ;; One "a" run succeeds and the "b" run fails; two "a" runs have no outcome.
+  (f/transact conn {:schema [{:name :agg/outcome :type :string :cardinality :one :unique :none}]
+                    :changes [[:assert cheap :agg/outcome "ok"] [:assert b-run :agg/outcome "failed"]]}))
+(check "not-join finds runs with no outcome"
+       (= [[2]] (:rows (f/q conn '{:match [[?run :agg/recipe ?r]]
+                                   :where [(not-join [?run] [?run :agg/outcome ?o])]
+                                   :select [(count ?run)]}))))
+(check "not excludes a constant match"
+       (= [[3]] (:rows (f/q conn '{:match [[?run :agg/recipe ?r]]
+                                   :where [(not [?run :agg/outcome "failed"])]
+                                   :select [(count ?run)]}))))
+(check "not with a comparison"
+       (= [[3]] (:rows (f/q conn '{:match [[?run :agg/recipe ?r]]
+                                   :where [(not (= ?r "b"))]
+                                   :select [(count ?run)]}))))
+(check "not variables must be bound outside"
+       (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?run :agg/recipe ?r]]
+                                                        :where [(not [?run :agg/outcome ?o])]
+                                                        :select [?run]})))))
+(check "negations do not nest"
+       (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?run :agg/recipe ?r]]
+                                                        :where [(not (not (= ?r "b")))]
+                                                        :select [?run]})))))
+(check "not-join takes a join vector"
+       (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?run :agg/recipe ?r]]
+                                                        :where [(not-join ?run [?run :agg/outcome ?o])]
+                                                        :select [?run]})))))
+
 (def reader (f/open path {:read-only true :busy-timeout-ms 500}))
 (check "read-only head follows writer" (= (f/head conn) (f/head reader)))
 (check "read-only history" (= "todo" (:task/status (f/pull reader task [:task/status] {:at (:after a)}))))

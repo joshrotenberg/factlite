@@ -1034,3 +1034,68 @@ fn structural_reads_and_verify_report_tampering_differently() {
         "Storage",
     );
 }
+
+#[test]
+fn query_negation_finds_absence_at_each_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("negation.sqlite");
+    success(binary().arg("init").arg(&path));
+    let a = transact(
+        &path,
+        &serde_json::from_str(include_str!("../../../examples/create.json")).unwrap(),
+    );
+    let b = transact(
+        &path,
+        &json!({"version":1,"new_entities":["loose"],"changes":[
+            {"op":"assert","entity":{"temp":"loose"},"attr":"task/title","value":{"string":"Unowned"}}
+        ]}),
+    );
+    let unowned = json!({"version":1,"query":{
+        "match":[[{"var":"task"},"task/title",{"var":"title"}]],
+        "not":[{"join":["task"],"match":[[{"var":"task"},"task/owner",{"var":"owner"}]]}],
+        "select":["title"]
+    }});
+    let at = |report: &Json| {
+        wire::decode_snapshot(&report["after"].to_string())
+            .unwrap()
+            .to_string()
+    };
+    let query = |q: &Json, snapshot: &str| {
+        success(
+            db(&path)
+                .args(["query", "--file", "-", "--at", snapshot])
+                .write_stdin(q.to_string()),
+        )
+    };
+    assert_eq!(
+        query(&unowned, &at(&a)),
+        json!({"version":1,"columns":["title"],"rows":[]})
+    );
+    assert_eq!(
+        query(&unowned, &at(&b))["rows"],
+        json!([[{"string":"Unowned"}]])
+    );
+    // A `not` variable bound only inside the group is rejected.
+    let mut unbound = unowned.clone();
+    unbound["query"]["not"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("join");
+    failure(
+        db(&path)
+            .args(["query", "--file", "-"])
+            .write_stdin(unbound.to_string()),
+        2,
+        "InvalidRequest",
+    );
+    // An attribute unknown at the view is an error, not trivially absent.
+    let mut unknown = unowned;
+    unknown["query"]["not"][0]["match"][0][1] = json!("task/reviewer");
+    failure(
+        db(&path)
+            .args(["query", "--file", "-"])
+            .write_stdin(unknown.to_string()),
+        2,
+        "UnknownAttribute",
+    );
+}

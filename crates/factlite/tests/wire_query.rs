@@ -1,7 +1,7 @@
 //! Strict query interchange and independently constructed Rust/JSON parity.
 use factlite::{
-    Aggregate, AggregateFn, Comparison, Direction, ErrorCode, Order, Params, Pattern, Predicate,
-    Query, QueryName, Term, Value, wire,
+    Aggregate, AggregateFn, Comparison, Direction, ErrorCode, Negation, Order, Params, Pattern,
+    Predicate, Query, QueryName, Term, Value, wire,
 };
 use proptest::prelude::*;
 use serde_json::json;
@@ -179,10 +179,17 @@ fn values() -> impl Strategy<Value = Value> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
     #[test]
-    fn query_terms_params_predicates_order_and_limits_roundtrip(value in values(), other in values(), limit in any::<Option<u64>>(), comparison in 0_usize..6, descending in any::<bool>(), aggregate in 0_usize..6, with in any::<bool>()) {
+    fn query_terms_params_predicates_order_and_limits_roundtrip(value in values(), other in values(), limit in any::<Option<u64>>(), comparison in 0_usize..6, descending in any::<bool>(), aggregate in 0_usize..6, with in any::<bool>(), negation in 0_usize..3) {
         let op = [Comparison::Eq,Comparison::Ne,Comparison::Lt,Comparison::Le,Comparison::Gt,Comparison::Ge][comparison];
-        let q = Query { inputs: [(name("input'雪"),value.value_type())].into(), patterns: vec![Pattern { entity: Term::Const(Value::Ref(ENTITY.parse().unwrap())),attribute:"x/value".parse().unwrap(),value:Term::Param(name("input'雪")) },Pattern { entity: Term::Var(name("entity")),attribute:"x/value".parse().unwrap(),value:Term::Var(name("v")) }], predicates: vec![Predicate { left:Term::Const(other),comparison:op,right:Term::Param(name("input'雪")) }], select: vec![name("v"),name("entity")],order:vec![Order { field:name("v"),direction:if descending {Direction::Desc} else {Direction::Asc} }],limit,
+        let q = Query { inputs: [(name("input'雪"),value.value_type())].into(), patterns: vec![Pattern { entity: Term::Const(Value::Ref(ENTITY.parse().unwrap())),attribute:"x/value".parse().unwrap(),value:Term::Param(name("input'雪")) },Pattern { entity: Term::Var(name("entity")),attribute:"x/value".parse().unwrap(),value:Term::Var(name("v")) }], predicates: vec![Predicate { left:Term::Const(other.clone()),comparison:op,right:Term::Param(name("input'雪")) }], select: vec![name("v"),name("entity")],order:vec![Order { field:name("v"),direction:if descending {Direction::Desc} else {Direction::Asc} }],limit,
             with: if with { vec![name("w"), name("w2")] } else { Vec::new() },
+            // None, `not` with a predicate only, or `not-join` with a pattern
+            // and a predicate on its local.
+            negations: [
+                Vec::new(),
+                vec![Negation { join: None, patterns: Vec::new(), predicates: vec![Predicate { left: Term::Var(name("v")), comparison: op, right: Term::Const(other.clone()) }] }],
+                vec![Negation { join: Some(vec![name("entity"), name("v")]), patterns: vec![Pattern { entity: Term::Var(name("entity")), attribute: "x/other".parse().unwrap(), value: Term::Var(name("local")) }], predicates: vec![Predicate { left: Term::Var(name("local")), comparison: op, right: Term::Param(name("input'雪")) }] }],
+            ][negation].clone(),
             aggregates: [None, Some(AggregateFn::Count), Some(AggregateFn::CountDistinct), Some(AggregateFn::Sum), Some(AggregateFn::Min), Some(AggregateFn::Max)][aggregate]
                 .map(|function| vec![Aggregate { function, var: name("v"), name: name("total") }, Aggregate { function, var: name("entity"), name: name("second") }])
                 .unwrap_or_default() };

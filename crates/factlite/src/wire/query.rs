@@ -4,8 +4,8 @@ use serde_json::{Map, Value as Json, json};
 
 use super::{Object, concrete_value, strict, text, value_json};
 use crate::{
-    Aggregate, AggregateFn, Comparison, Direction, Error, Order, Params, Pattern, Predicate, Query,
-    QueryName, QueryResult, Result, Term, ValueType,
+    Aggregate, AggregateFn, Comparison, Direction, Error, Negation, Order, Params, Pattern,
+    Predicate, Query, QueryName, QueryResult, Result, Term, ValueType,
 };
 
 fn term(value: Json) -> Result<Term> {
@@ -77,18 +77,8 @@ fn required_array(object: &mut Object, key: &str) -> Result<Vec<Json>> {
     }
 }
 
-/// Decode a version-one query/params envelope. Match and select are required;
-/// inputs/where/order/params default empty and limit defaults absent. Historical
-/// schema and variable-domain validation runs through Db::query/validate_query.
-pub fn decode_query(input: &str) -> Result<(Query, Params)> {
-    let mut envelope = Object::new(strict::parse(input)?, "query envelope")?;
-    envelope.version()?;
-    let mut object = Object::new(envelope.required("query")?, "query")?;
-    let inputs = fields(object.optional("inputs"), "inputs")?
-        .into_iter()
-        .map(|(name, value)| Ok((QueryName::new(name)?, ty(value)?)))
-        .collect::<Result<_>>()?;
-    let patterns = required_array(&mut object, "match")?
+fn decode_patterns(values: Vec<Json>) -> Result<Vec<Pattern>> {
+    values
         .into_iter()
         .map(|value| {
             let Json::Array(values) = value else {
@@ -106,9 +96,10 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
                 value: term(value)?,
             })
         })
-        .collect::<Result<_>>()?;
-    let predicates = object
-        .array("where")?
+        .collect()
+}
+fn decode_predicates(values: Vec<Json>) -> Result<Vec<Predicate>> {
+    values
         .into_iter()
         .map(|value| {
             let mut object = Object::new(value, "predicate")?;
@@ -120,6 +111,59 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
                 left,
                 comparison,
                 right,
+            })
+        })
+        .collect()
+}
+fn pattern_json(pattern: &Pattern) -> Json {
+    json!([
+        term_json(&pattern.entity),
+        pattern.attribute.as_str(),
+        term_json(&pattern.value)
+    ])
+}
+fn predicate_json(predicate: &Predicate) -> Json {
+    json!({"left":term_json(&predicate.left),"op":comparison_json(predicate.comparison),"right":term_json(&predicate.right)})
+}
+
+/// Decode a version-one query/params envelope. Match and select are required;
+/// inputs/where/order/params default empty and limit defaults absent. Historical
+/// schema and variable-domain validation runs through Db::query/validate_query.
+pub fn decode_query(input: &str) -> Result<(Query, Params)> {
+    let mut envelope = Object::new(strict::parse(input)?, "query envelope")?;
+    envelope.version()?;
+    let mut object = Object::new(envelope.required("query")?, "query")?;
+    let inputs = fields(object.optional("inputs"), "inputs")?
+        .into_iter()
+        .map(|(name, value)| Ok((QueryName::new(name)?, ty(value)?)))
+        .collect::<Result<_>>()?;
+    let patterns = decode_patterns(required_array(&mut object, "match")?)?;
+    let predicates = decode_predicates(object.array("where")?)?;
+    let negations = object
+        .array("not")?
+        .into_iter()
+        .map(|value| {
+            let mut group = Object::new(value, "not")?;
+            let join = group
+                .optional("join")
+                .map(|value| match value {
+                    Json::Array(names) => names
+                        .into_iter()
+                        .map(|name| QueryName::new(text(name, "join")?))
+                        .collect::<Result<Vec<_>>>(),
+                    _ => Err(Error::invalid(
+                        "join",
+                        "expected an array of variable names",
+                    )),
+                })
+                .transpose()?;
+            let patterns = decode_patterns(group.array("match")?)?;
+            let predicates = decode_predicates(group.array("where")?)?;
+            group.finish()?;
+            Ok(Negation {
+                join,
+                patterns,
+                predicates,
             })
         })
         .collect::<Result<_>>()?;
@@ -189,6 +233,7 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
             inputs,
             patterns,
             predicates,
+            negations,
             select,
             order,
             limit,
@@ -204,13 +249,32 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
 pub fn encode_query(query: &Query, params: &Params) -> String {
     let mut inner = json!({
         "inputs":query.inputs.iter().map(|(name,ty)| (name.as_str().to_owned(),ty_json(*ty))).collect::<Map<_,_>>(),
-        "match":query.patterns.iter().map(|pattern| json!([term_json(&pattern.entity),pattern.attribute.as_str(),term_json(&pattern.value)])).collect::<Vec<_>>(),
-        "where":query.predicates.iter().map(|predicate| json!({"left":term_json(&predicate.left),"op":comparison_json(predicate.comparison),"right":term_json(&predicate.right)})).collect::<Vec<_>>(),
+        "match":query.patterns.iter().map(pattern_json).collect::<Vec<_>>(),
+        "where":query.predicates.iter().map(predicate_json).collect::<Vec<_>>(),
         "select":query.select.iter().map(QueryName::as_str).collect::<Vec<_>>(),
         "order":query.order.iter().map(|order| json!({"field":order.field.as_str(),"direction":match order.direction { Direction::Asc => "asc",Direction::Desc => "desc" }})).collect::<Vec<_>>()
     });
     if let Some(limit) = query.limit {
         inner["limit"] = json!(limit);
+    }
+    if !query.negations.is_empty() {
+        inner["not"] = json!(
+            query
+                .negations
+                .iter()
+                .map(|negation| {
+                    let mut group = json!({
+                        "match": negation.patterns.iter().map(pattern_json).collect::<Vec<_>>(),
+                        "where": negation.predicates.iter().map(predicate_json).collect::<Vec<_>>(),
+                    });
+                    if let Some(join) = &negation.join {
+                        group["join"] =
+                            json!(join.iter().map(QueryName::as_str).collect::<Vec<_>>());
+                    }
+                    group
+                })
+                .collect::<Vec<_>>()
+        );
     }
     if !query.with.is_empty() {
         inner["with"] = json!(query.with.iter().map(QueryName::as_str).collect::<Vec<_>>());
