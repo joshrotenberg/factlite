@@ -576,3 +576,56 @@ fn next_allocation_follows_the_greatest_identity() {
         store.commit(tx).unwrap();
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+    #[test]
+    fn interval_history_equals_log_history(
+        steps in proptest::collection::vec((0_usize..6, any::<bool>(), any::<u8>(), any::<u8>(), any::<bool>()), 0..14),
+    ) {
+        use crate::FactFilter;
+        let (_directory, path, head) = run(&steps, 2);
+        let store = Store::open(&path).unwrap();
+        let half = SnapshotId::new(head.store().clone(), head.lineage().clone(), Revision::new(head.revision().get() / 2));
+        for view in [head.clone(), half] {
+            let db = store.db_at(&view).unwrap();
+            let replayed = {
+                let connection = store.connection().unwrap();
+                log::replay(&connection, &view).unwrap()
+            };
+            let schema = replayed.catalog.schema_at(view.revision()).unwrap();
+            let attributes: Vec<AttrName> = schema.attributes().map(|d| d.name().clone()).collect();
+            let mut entities: Vec<EntityId> = replayed.catalog.entities.keys().cloned().collect();
+            entities.push(EntityId::allocated(view.store().clone(), 0xfffff).unwrap());
+            let mut filters = Vec::new();
+            for entity in &entities {
+                filters.push(FactFilter { entity: Some(entity.clone()), ..Default::default() });
+                // A pair that never has events.
+                filters.push(FactFilter { entity: Some(entity.clone()), attribute: attributes.first().cloned(), ..Default::default() });
+            }
+            for attribute in &attributes {
+                filters.push(FactFilter { attribute: Some(attribute.clone()), ..Default::default() });
+            }
+            // Pairs and values that were ever changed, including since-retracted values.
+            let mut seen = std::collections::HashSet::new();
+            for event in db.history(FactFilter::default(), Revision::ZERO).unwrap() {
+                let pair = (event.fact.entity.clone(), event.fact.attribute.clone());
+                if seen.insert(pair.clone()) {
+                    filters.push(FactFilter { entity: Some(pair.0), attribute: Some(pair.1), ..Default::default() });
+                    filters.push(FactFilter { attribute: Some(event.fact.attribute), value: Some(event.fact.value), ..Default::default() });
+                }
+            }
+            let r = view.revision().get();
+            for after in [0, r / 2, r] {
+                let after = Revision::new(after);
+                for filter in &filters {
+                    prop_assert_eq!(
+                        db.history_from_index(filter.clone(), after).unwrap(),
+                        db.history_from_log(filter.clone(), after).unwrap(),
+                        "{:?} after {} at {}", filter, after, view
+                    );
+                }
+            }
+        }
+    }
+}

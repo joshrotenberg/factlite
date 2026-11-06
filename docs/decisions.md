@@ -574,3 +574,16 @@ scenario testing. See `testing.md` for the verification policy.
 - Transactions do not accept lookup refs. Resolving them at pre-head would add
   request terms to the canonical encoding and retry identity; that needs its
   own decision.
+
+## Indexed filtered history (11.3)
+
+- Reported by the clajent session: entity-filtered history took 37 ms when
+  other reads took about 1 ms, because history decoded every report in range.
+- When a history filter names an entity or attribute, events come from datom
+  intervals instead: an assertion at `asserted` and a retraction at
+  `retracted`, each within `(after, R]`, joined to that revision's fact events
+  for the original ordinal, ordered by revision and ordinal. No format change:
+  the entity primary key, the attribute/value index and the fact-event
+  primary key serve it.
+- Unfiltered and value-only history still read every report in range, which
+  is the reference path in tests.

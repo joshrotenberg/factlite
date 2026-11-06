@@ -341,6 +341,80 @@ fn fact_row(entity: String, attribute: String, tag: i64, bytes: &[u8]) -> Result
     })
 }
 
+/// Effective fact events in `(after, basis]` matching each supplied
+/// restriction, in revision/ordinal order. Every event is an interval
+/// endpoint: an assertion at `asserted` or a retraction at `retracted`. The
+/// join finds each endpoint's original ordinal within its revision's events.
+/// Intervals equal the retained events (verified at open), so this equals
+/// filtering every report in the range.
+pub(crate) fn history_matching(
+    connection: &Connection,
+    basis: &SnapshotId,
+    after: Revision,
+    entity: Option<&EntityId>,
+    attribute: Option<&AttrName>,
+    value: Option<&Value>,
+) -> Result<Vec<crate::FactEvent>> {
+    let mut bindings: Vec<rusqlite::types::Value> = vec![
+        revision_bytes(after).to_vec().into(),
+        revision_bytes(basis.revision()).to_vec().into(),
+    ];
+    let mut filters = String::new();
+    if let Some(entity) = entity {
+        bindings.push(entity.to_string().into());
+        filters.push_str(&format!(" AND d.entity=?{}", bindings.len()));
+    }
+    if let Some(attribute) = attribute {
+        bindings.push(attribute.as_str().to_owned().into());
+        filters.push_str(&format!(" AND d.attribute=?{}", bindings.len()));
+    }
+    if let Some(value) = value {
+        bindings.push(i64::from(codec::type_tag(value.value_type())).into());
+        filters.push_str(&format!(" AND d.type_tag=?{}", bindings.len()));
+        bindings.push(codec::encode_value(value).into());
+        filters.push_str(&format!(" AND d.value=?{}", bindings.len()));
+    }
+    let endpoint = |column: &str, operation: u8| {
+        format!(
+            "SELECT e.revision,e.ordinal,e.operation,d.entity,d.attribute,d.type_tag,d.value \
+             FROM datoms d JOIN fact_events e ON e.revision=d.{column} AND e.operation={operation} \
+             AND e.entity=d.entity AND e.attribute=d.attribute AND e.type_tag=d.type_tag AND e.value=d.value \
+             WHERE d.{column}>?1 AND d.{column}<=?2{filters}"
+        )
+    };
+    let sql = format!(
+        "{} UNION ALL {} ORDER BY 1,2",
+        endpoint("asserted", 1),
+        endpoint("retracted", 0)
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(rusqlite::params_from_iter(&bindings), |row| {
+        Ok((
+            row.get::<_, Vec<u8>>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, Vec<u8>>(6)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (revision, ordinal, operation, entity, attribute, tag, bytes) = row?;
+        Ok(crate::FactEvent {
+            revision: decode_revision(&revision)?,
+            ordinal: u64::try_from(ordinal).map_err(|_| corrupt("invalid event ordinal"))?,
+            operation: match operation {
+                0 => Operation::Retract,
+                1 => Operation::Assert,
+                _ => return Err(corrupt("invalid persisted operation")),
+            },
+            fact: fact_row(entity, attribute, tag, &bytes)?,
+        })
+    })
+    .collect()
+}
+
 /// The state a commit of `tx` at `head` can observe, and nothing else: the
 /// whole schema, the identities `tx` names, the next allocation, every visible
 /// value of each entity/attribute pair `tx` changes or expects, and every

@@ -247,6 +247,6 @@ design and need a separate decision; they are not in this step.
   connection. Pod `open` accepts `:read-only` and `:busy-timeout-ms`.
 - [x] **11.2 Lookup refs for reads.** Resolve an entity by a unique attribute's
   value at a view's revision, and accept `[attr value]` in pod read positions.
-- [ ] **11.3 Indexed filtered history.** Answer entity- or attribute-filtered
+- [x] **11.3 Indexed filtered history.** Answer entity- or attribute-filtered
   history from datom intervals and per-revision events instead of decoding
   every retained report, with parity against the log path.
