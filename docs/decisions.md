@@ -523,3 +523,21 @@ scenario testing. See `testing.md` for the verification policy.
 - Results are unchanged in value and order: facts and pulled values are still
   sorted in Rust by canonical order, and queries keep the former SQL for
   distinct, order and limit.
+
+## Commits load only touched state (9.5)
+
+- `index::model_for_request` builds the commit model from: all definitions at
+  head; the identities the request names (change entities, reference values,
+  expectation entities and values) with their creation revisions; the next
+  allocation; every visible value of each entity/attribute pair the request
+  changes or expects; and every visible owner of each unique value it asserts.
+- Evaluation reads nothing else. It checks membership only for named
+  identities, reads values only for touched pairs and cardinality-one
+  replacements (both loaded), tests fact membership only for touched facts,
+  and counts owners only for asserted unique values. So the result equals
+  full-state evaluation; a differential property checks this, including errors.
+- The next allocation is read as the greatest entity text. One store's
+  identities share a prefix and a fixed-width lowercase hex allocation, so text
+  order is allocation order. A test compares it with the full catalog's value.
+- Open, reads and replay are unchanged. Open still replays and validates the
+  whole log, so its cost stays linear in revisions plus live state.

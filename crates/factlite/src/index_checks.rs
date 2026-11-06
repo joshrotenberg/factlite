@@ -449,3 +449,94 @@ proptest! {
         }
     }
 }
+
+/// Commit evaluation on the request-touched state equals evaluation on the
+/// full state at head, for successes and every error, and the store commits
+/// exactly what the full evaluation predicts.
+fn touched_trace(steps: &[crate::model::reference::tests::Step]) {
+    use crate::model::reference::tests::{ATTRS, build, definition, same_error};
+    let directory = tempfile::tempdir().unwrap();
+    let store = Store::open(directory.path().join("touched.sqlite")).unwrap();
+    store
+        .commit(Tx {
+            schema: (0..ATTRS.len()).map(definition).collect(),
+            new_entities: (0..3)
+                .map(|n| TempId::new(format!("k{n}")).unwrap())
+                .collect(),
+            ..Tx::default()
+        })
+        .unwrap();
+    for (index, step) in steps.iter().enumerate() {
+        let (full, partial, tx) = {
+            let connection = store.connection().unwrap();
+            let head = crate::store::read_head(&connection).unwrap();
+            let full = index::model_at(&connection, &head).unwrap();
+            let known: Vec<_> = full.catalog.entities.keys().cloned().collect();
+            let tx = build(&full, &known, step);
+            let partial = index::model_for_request(&connection, &head, &tx).unwrap();
+            (full, partial, tx)
+        };
+        let expected = full.evaluate_owned(&tx);
+        let actual = partial.evaluate_owned(&tx);
+        let committed = store.commit(tx.clone());
+        match (expected, actual, committed) {
+            (Ok((_, expected)), Ok((_, actual)), Ok(committed)) => {
+                assert_eq!(actual, expected, "step {index}: {tx:?}");
+                assert_eq!(committed, expected, "step {index}: {tx:?}");
+            }
+            (Err(expected), Err(actual), Err(committed)) => {
+                assert!(
+                    same_error(&actual, &expected),
+                    "step {index}: {actual:?} vs {expected:?}"
+                );
+                assert!(
+                    same_error(&committed, &expected),
+                    "step {index}: {committed:?} vs {expected:?}"
+                );
+            }
+            (expected, actual, committed) => panic!(
+                "step {index} diverged: full {:?}, touched {:?}, commit {:?} for {tx:?}",
+                expected.map(|(_, report)| report),
+                actual.map(|(_, report)| report),
+                committed
+            ),
+        }
+    }
+    // The committed history still replays and verifies.
+    drop(store);
+    Store::open(directory.path().join("touched.sqlite")).unwrap();
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+    #[test]
+    fn touched_commit_state_evaluates_like_full_state(
+        steps in proptest::collection::vec(crate::model::reference::tests::step(), 1..14),
+    ) {
+        touched_trace(&steps);
+    }
+}
+
+#[test]
+fn next_allocation_follows_the_greatest_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = Store::open(directory.path().join("alloc.sqlite")).unwrap();
+    for count in [0, 1, 17, 3] {
+        let tx = Tx {
+            new_entities: (0..count)
+                .map(|n| TempId::new(format!("n{n}")).unwrap())
+                .collect(),
+            ..Tx::default()
+        };
+        let connection = store.connection().unwrap();
+        let head = crate::store::read_head(&connection).unwrap();
+        let full = index::model_at(&connection, &head).unwrap();
+        let partial = index::model_for_request(&connection, &head, &tx).unwrap();
+        assert_eq!(
+            partial.catalog.next_allocation(),
+            full.catalog.next_allocation()
+        );
+        drop(connection);
+        store.commit(tx).unwrap();
+    }
+}

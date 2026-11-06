@@ -143,3 +143,9 @@ foreign entity. The typed query property now commits retractions and new
 values and links after view A, and requires A's results to be unchanged. The
 forced-writer test covers every table each read touches. Format-2 upgrade and
 a missing datom index are tested on writable and read-only opens.
+
+Commit evaluation on the request-touched state is compared with evaluation on
+the full state at head, and with the store's actual commit, in 1,024 random
+request sequences from the transition generator: identical reports on success,
+identical code/context/message on failure. Each trace reopens the store at the
+end. A deterministic test compares the next allocation with the full catalog's.

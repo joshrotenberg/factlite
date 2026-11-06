@@ -379,7 +379,7 @@ fn effective_changes_reference(before: &HashSet<Fact>, after: &HashSet<Fact>) ->
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::tests::{attr, def, empty};
     use super::*;
     use crate::{Cardinality, TempId, Uniqueness, ValueType};
@@ -387,7 +387,7 @@ mod tests {
 
     // Attributes: cardinality one, many, unique one, a reference, and a
     // unique reference, so every incremental check has a path to exercise.
-    const ATTRS: [(&str, ValueType, Cardinality, Uniqueness); 5] = [
+    pub(crate) const ATTRS: [(&str, ValueType, Cardinality, Uniqueness); 5] = [
         ("x/one", ValueType::I64, Cardinality::One, Uniqueness::None),
         (
             "x/many",
@@ -410,7 +410,7 @@ mod tests {
         ),
     ];
 
-    fn definition(index: usize) -> crate::AttributeDefinition {
+    pub(crate) fn definition(index: usize) -> crate::AttributeDefinition {
         let (name, ty, cardinality, uniqueness) = ATTRS[index];
         def(name, ty, cardinality, uniqueness)
     }
@@ -420,7 +420,7 @@ mod tests {
     /// slot 7 is a fabricated, never-allocated identity.
     type Change = (bool, u8, usize, u8);
     /// (changes, expectations, new labels, declare schema, stale head fence).
-    type Step = (Vec<Change>, Vec<(u8, usize, Vec<u8>)>, u8, u8, bool);
+    pub(crate) type Step = (Vec<Change>, Vec<(u8, usize, Vec<u8>)>, u8, u8, bool);
 
     fn entity(model: &Model, known: &[EntityId], slot: u8) -> Option<EntityTerm> {
         match slot {
@@ -454,7 +454,7 @@ mod tests {
         }
     }
 
-    fn build(model: &Model, known: &[EntityId], step: &Step) -> Tx {
+    pub(crate) fn build(model: &Model, known: &[EntityId], step: &Step) -> Tx {
         let (changes, expectations, labels, schema, stale) = step;
         let mut tx = Tx::default();
         for index in 0..ATTRS.len() {
@@ -524,7 +524,7 @@ mod tests {
         crate::index::same_state(a, b)
     }
 
-    fn same_error(a: &crate::Error, b: &crate::Error) -> bool {
+    pub(crate) fn same_error(a: &crate::Error, b: &crate::Error) -> bool {
         a.code() == b.code()
             && format!("{:?}", a.context()) == format!("{:?}", b.context())
             && a.to_string() == b.to_string()
@@ -611,7 +611,7 @@ mod tests {
         }
     }
 
-    fn step() -> impl Strategy<Value = Step> {
+    pub(crate) fn step() -> impl Strategy<Value = Step> {
         (
             proptest::collection::vec((any::<bool>(), 0_u8..8, 0_usize..5, any::<u8>()), 0..6),
             proptest::collection::vec(
