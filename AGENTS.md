@@ -22,6 +22,8 @@ CLI. Start with one library crate and one CLI crate. Add dependencies when an
 implemented item requires them. Use semantic fixtures and property tests for
 the core; avoid placeholder tests or tests that merely repeat implementation.
 
-Do not add a server, NIF, generic backend, or other deferred scope. Preserve
+Do not add a server, NIF, generic backend, or other deferred scope. The user
+authorized one Babashka pod crate (`factlite-pod`) on 2026-11-05; keep it a thin
+adapter over the library and the strict wire contract, like the CLI. Preserve
 typed equality, final-state batch validation, historical schema visibility, and
 the distinction between a new no-change commit and an idempotent replay.

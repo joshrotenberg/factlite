@@ -1,0 +1,25 @@
+[package]
+name = "factlite-pod"
+description = "Babashka pod for the Factlite library"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pod-factlite"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+factlite = { path = "../factlite" }
+babashka-pod = "0.1.1"
+serde_json = "1"
+base64 = "0.22"
+
+[dev-dependencies]
+proptest = "1.9"
+tempfile = "3"
+
+[lints]
+workspace = true

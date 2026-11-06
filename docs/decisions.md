@@ -415,3 +415,37 @@ scenario testing. See `testing.md` for the verification policy.
 - Queries still materialize a TEMP relation from the loaded state. Answering
   facts, pull and query with revision-bounded SQL directly over intervals is
   item 9.2.
+
+## Babashka pod (10.1)
+
+- Authorized by the user on 2026-11-05 for the clajent agent kit. The crate is
+  `factlite-pod` with binary `pod-factlite` and namespace
+  `pod.joshrotenberg.factlite`. It is built on the published `babashka-pod`
+  0.1.1 crate rather than a path dependency on a sibling checkout, so the
+  lockfile pins it.
+- Use transit+json and `function_transit` handlers. Transit keeps keywords,
+  symbols, byte arrays and the long/double distinction, which the mapping
+  depends on. The pod runtime turns handler errors and panics into error
+  replies and keeps serving.
+- Inputs are translated into version-1 wire JSON and decoded by
+  `wire::decode_tx`, `decode_query`, `decode_snapshot` and `decode_value`. The
+  pod adds no second validator. A pod request and the equivalent CLI JSON decode
+  to equal `Tx` values with identical canonical bytes, so they share retry
+  identity. Outputs are built from library result types directly.
+- Value mapping is one Clojure type per Factlite type: boolean, long, finite
+  double, string, byte array, and `{:id ...}` for references (`{:temp ...}` in
+  changes). Everything else in a value position is `InvalidRequest`. Keywords
+  are not accepted as string values, so no value changes type on a round trip.
+- The Clojure shapes are idiomatic, not a key-for-key copy of the wire: kebab-case
+  keys, `[op entity attr value]` changes, `[entity attr values]` expectations,
+  `?var`/`$input` query symbols, `(op left right)` predicates, and flat pulled
+  entities (`{:id ...}` plus attributes, which always have a namespace). Envelope
+  `version` fields are dropped from outputs; snapshots keep theirs.
+- Reads accept `:at` as a full snapshot map or a revision number. A number is
+  resolved against the connection's store and lineage, then validated by
+  `Store::db_at` like any token.
+- Errors carry `{:code :message :context :commit-outcome}` taken from
+  `wire::encode_error`, with context values converted by their fixed keys.
+  Pod argument errors use the same shape with code `InvalidRequest`.
+- Not exposed: read-only opens, backups and raw wire JSON. Registry publication
+  and release packaging are not part of this item.

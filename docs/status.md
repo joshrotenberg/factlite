@@ -5,9 +5,10 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 147 tests, including forty-three 1,024-case properties, plus the
-asserted Rust workflow. Remote publication (8.2) and direct indexed reads (9.2)
-are open. Reviews are self-reviews; remote CI and independent review have not
+gate passed 158 tests, including forty-four 1,024-case properties, plus the
+asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
+into the strict wire requests. Remote publication (8.2) and direct indexed reads
+(9.2) are open. Reviews are self-reviews; remote CI and independent review have not
 run.
 
 ## 0.1 Inspect and initialize — done
@@ -513,6 +514,30 @@ run.
   over intervals. Open-time cost (full replay per open) is a separate decision.
   Options include an explicit verify command, or verified checkpoints that bound
   replay at open.
+
+## 10.1 Babashka pod: done
+
+- **Done:** Added `factlite-pod` (binary `pod-factlite`, namespace
+  `pod.joshrotenberg.factlite`) on `babashka-pod` 0.1.1. It has open/close,
+  head, transact, schema, pull, facts, history, transactions and q, with `:at`
+  snapshots or revisions. All 158 tests passed, including forty-four 1,024-case
+  properties and 59 babashka checks on both transports; full checks passed.
+  The README example ran with the documented output.
+  Review: `reviews/0033-babashka-pod.md`.
+- **Decisions:** Clojure data is translated into version-1 wire JSON, so the
+  library's strict decoders validate it. There is one Clojure type per value
+  type and no coercion. Errors are ex-info with stable code, context and commit
+  outcome. Pod and CLI requests share canonical retry identity. See
+  `decisions.md` and `crates/factlite-pod/README.md`.
+- **Concurrency:** Four pod processes (8 x 60 in a manual heavier run) committed
+  to one file with no lost, merged or duplicated writes. Conditional increments
+  serialized with 183 rereads and retries in the heavy run.
+- **Size:** Release `pod-factlite` on macOS arm64 is 3.4 MB stripped and 1.60 MB
+  zipped.
+- **Blockers:** None locally. No remote or CI has run the babashka tests; they
+  skip without `bb` unless `REQUIRE_BB` is set.
+- **What's next:** Registry packaging/release once a remote exists. Read-only
+  opens through the pod if a consumer needs them. Item 9.2.
 
 ## Environment notes
 

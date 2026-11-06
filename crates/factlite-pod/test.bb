@@ -1,0 +1,185 @@
+;; Exercises pod-factlite end to end. Loads the binary named by FACTLITE_POD
+;; and writes into FACTLITE_DIR. Prints one line per check; exits 1 on failure.
+(require '[babashka.pods :as pods])
+
+(def transport (if (= "socket" (first *command-line-args*)) :socket :stdio))
+(pods/load-pod [(System/getenv "FACTLITE_POD")] {:transport transport})
+(require '[pod.joshrotenberg.factlite :as f])
+(println "transport:" transport)
+
+(def failures (atom 0))
+(defmacro check [label expr]
+  `(let [result# (try ~expr
+                      (catch Exception e#
+                        (println "exception in" ~label (ex-message e#) (pr-str (ex-data e#)))
+                        false))]
+     (if result#
+       (println "ok" ~label)
+       (do (swap! failures inc) (println "FAIL" ~label)))))
+
+(defn failure
+  "The ex-data of the exception f throws, or nil."
+  [f]
+  (try (f) nil (catch clojure.lang.ExceptionInfo e (assoc (ex-data e) ::message (ex-message e)))))
+
+(def path (str (System/getenv "FACTLITE_DIR") "/test-" (name transport) ".sqlite"))
+(def conn (f/open path))
+(check "handle" (= "factlite.store" (:handle conn)))
+(check "zero head" (= 0 (:revision (f/head conn))))
+
+(def create
+  {:idempotency-key "create"
+   :schema [{:name :person/name :type :string :cardinality :one :unique :none}
+            {:name :person/email :type :string :cardinality :one :unique :unique-one}
+            {:name :task/title :type :string :cardinality :one :unique :none}
+            {:name :task/status :type :string :cardinality :one :unique :none}
+            {:name :task/priority :type :i64 :cardinality :one :unique :none}
+            {:name :task/owner :type :ref :cardinality :one :unique :none}
+            {:name :task/tags :type :string :cardinality :many :unique :none}]
+   :new-entities [:person "task"]
+   :changes [[:assert {:temp :person} :person/name "Ada"]
+             [:assert {:temp "task"} :task/title "Design Factlite"]
+             [:assert {:temp "task"} :task/status "todo"]
+             [:assert {:temp "task"} :task/priority 3]
+             [:assert {:temp "task"} :task/owner {:temp "person"}]
+             [:assert {:temp "task"} :task/tags "b"]
+             [:assert {:temp "task"} :task/tags "a"]]
+   :metadata {:source "test.bb"}})
+
+(def a (f/transact conn create))
+(def task (get-in a [:tempids :task]))
+(def ada (get-in a [:tempids :person]))
+(check "report" (and (= 0 (:revision (:before a)))
+                     (= 1 (:revision (:after a)))
+                     (= #{task ada} (set (:created-entities a)))
+                     (= 7 (count (:schema-added a)))
+                     (= 7 (count (:effective-delta a)))
+                     (= {:source "test.bb"} (:metadata a))))
+(check "pull" (= {:id (:id task) :task/status "todo" :task/owner ada :task/tags ["a" "b"]}
+                 (f/pull conn task [:task/status :task/owner :task/tags])))
+(check "pull unknown entity" (nil? (f/pull conn {:id (str (subs (:id task) 0 36) "00000000000000ff")} [])))
+
+(def start {:idempotency-key "start"
+            :expect [[task :task/status ["todo"]]]
+            :changes [[:assert task :task/status "doing"]]})
+(def b (f/transact conn start))
+(check "conditional delta" (= [[:retract task :task/status "todo"] [:assert task :task/status "doing"]]
+                              (:effective-delta b)))
+(check "pull at A by snapshot" (= "todo" (:task/status (f/pull conn task [:task/status] {:at (:after a)}))))
+(check "pull at A by revision" (= "todo" (:task/status (f/pull conn task [:task/status] {:at 1}))))
+(check "retry returns original report" (= b (f/transact conn start)))
+(check "idempotency conflict" (= "IdempotencyConflict"
+                                 (:code (failure #(f/transact conn (assoc start :metadata {:changed true}))))))
+
+(let [data (failure #(f/transact conn (dissoc start :idempotency-key)))]
+  (check "precondition failed as data"
+         (and (= "PreconditionFailed" (:code data))
+              (= task (get-in data [:context :entity]))
+              (= :task/status (get-in data [:context :attr]))
+              (= ["todo"] (get-in data [:context :expected]))
+              (= ["doing"] (get-in data [:context :actual]))
+              (= "RolledBack" (:commit-outcome data))
+              (string? (::message data)))))
+(let [data (failure #(f/transact conn {:expected-head (:after a)}))]
+  (check "head mismatch as data" (and (= "HeadMismatch" (:code data))
+                                      (= (:after a) (get-in data [:context :expected]))
+                                      (= (:after b) (get-in data [:context :actual])))))
+(check "unique violation" (= "UniqueViolation"
+                             (:code (failure #(f/transact conn {:changes [[:assert ada :person/email "a@x"]
+                                                                          [:assert task :person/email "a@x"]]})))))
+(check "no-change commit advances revision"
+       (let [r (f/transact conn {:changes [[:assert task :task/status "doing"]]})]
+         (and (= 3 (:revision (:after r))) (= [] (:effective-delta r)))))
+
+(def query '{:inputs {:wanted :string}
+             :match [[?task :task/status $wanted]
+                     [?task :task/title ?title]
+                     [?task :task/owner ?person]
+                     [?person :person/name ?name]]
+             :select [?task ?title ?name]
+             :order [[?title :asc] [?task :asc]]
+             :limit 20})
+(check "query at head" (= {:columns [:task :title :name] :rows [[task "Design Factlite" "Ada"]]}
+                          (f/q conn query {:wanted "doing"})))
+(check "query at A" (= [] (:rows (f/q conn query {:wanted "doing"} {:at (:after a)}))))
+(check "query predicate" (= [[3]] (:rows (f/q conn '{:match [[?t :task/priority ?p]]
+                                                     :where [(< ?p 5) (not= ?p 4)]
+                                                     :select [?p]}))))
+(check "query missing input" (= "InvalidRequest" (:code (failure #(f/q conn query)))))
+
+(check "history" (= [[1 :assert "todo"] [2 :retract "todo"] [2 :assert "doing"]]
+                    (map (juxt :revision :op :value) (f/history conn {:entity task :attr :task/status}))))
+(check "history at A" (= [[1 :assert "todo"]]
+                         (map (juxt :revision :op :value)
+                              (f/history conn {:entity task :attr :task/status} {:at (:after a)}))))
+(check "history after" (= [2 2] (map :revision (f/history conn {:attr :task/status} {:after 1}))))
+(check "transactions" (= [1 2 3] (map (comp :revision :after) (f/transactions conn))))
+(check "transactions keep metadata" (= {:source "test.bb"} (:metadata (first (f/transactions conn)))))
+(check "facts filter" (= [[task :task/status "doing"]] (f/facts conn {:entity task :attr :task/status})))
+(check "facts value filter" (= [[task :task/tags "a"]] (f/facts conn {:attr :task/tags :value "a"})))
+(check "schema at zero" (= [] (f/schema conn {:at 0})))
+(check "schema" (= {:name :person/email :type :string :cardinality :one :unique :unique-one}
+                   (first (filter #(= :person/email (:name %)) (f/schema conn)))))
+
+;; Every value type maps to one Clojure type and back.
+(def typed (f/transact conn {:schema [{:name :t/bool :type :bool :cardinality :many :unique :none}
+                                      {:name :t/long :type :i64 :cardinality :many :unique :none}
+                                      {:name :t/double :type :f64 :cardinality :many :unique :none}
+                                      {:name :t/string :type :string :cardinality :many :unique :none}
+                                      {:name :t/bytes :type :bytes :cardinality :many :unique :none}
+                                      {:name :t/ref :type :ref :cardinality :many :unique :none}]
+                             :new-entities [:x]
+                             :changes [[:assert {:temp :x} :t/bool true]
+                                       [:assert {:temp :x} :t/bool false]
+                                       [:assert {:temp :x} :t/long Long/MAX_VALUE]
+                                       [:assert {:temp :x} :t/long Long/MIN_VALUE]
+                                       [:assert {:temp :x} :t/long 0]
+                                       [:assert {:temp :x} :t/double 1.0]
+                                       [:assert {:temp :x} :t/double -0.0]
+                                       [:assert {:temp :x} :t/double 0.1]
+                                       [:assert {:temp :x} :t/double 1e300]
+                                       [:assert {:temp :x} :t/string "雪\u0000x"]
+                                       [:assert {:temp :x} :t/string ""]
+                                       [:assert {:temp :x} :t/bytes (byte-array [0 1 -1])]
+                                       [:assert {:temp :x} :t/ref task]
+                                       [:assert {:temp :x} :t/ref {:temp :x}]]}))
+(def x (get-in typed [:tempids :x]))
+(def pulled (f/pull conn x [:t/bool :t/long :t/double :t/string :t/bytes :t/ref]))
+(check "bool" (= [false true] (:t/bool pulled)))
+(check "long range" (= [Long/MIN_VALUE 0 Long/MAX_VALUE] (:t/long pulled)))
+(check "longs stay longs" (every? #(instance? Long %) (:t/long pulled)))
+(check "doubles stay doubles" (and (= [0.0 0.1 1.0 1e300] (:t/double pulled))
+                                   (every? #(instance? Double %) (:t/double pulled))))
+(check "negative zero normalized" (= 0 (Double/compare 0.0 (first (:t/double pulled)))))
+(check "strings exact" (= ["" "雪\u0000x"] (:t/string pulled)))
+(check "bytes" (= [[0 1 -1]] (map vec (:t/bytes pulled))))
+(check "refs" (= #{task x} (set (:t/ref pulled))))
+(check "double filter matches double" (= [[x :t/double 1.0]] (f/facts conn {:attr :t/double :value 1.0})))
+(check "type mismatch" (= "TypeMismatch" (:code (failure #(f/facts conn {:attr :t/double :value 1})))))
+
+(doseq [[label value] [["keyword" :done] ["nil" nil] ["BigInt" 1N] ["ratio" 1/3] ["BigDecimal" 1.5M]
+                       ["NaN" Double/NaN] ["infinity" ##Inf] ["vector" ["a"]] ["set" #{"a"}]
+                       ["char" \a] ["uuid" (random-uuid)]]]
+  (check (str "rejects " label)
+         (let [data (failure #(f/transact conn {:changes [[:assert task :task/status value]]}))]
+           (and (= "InvalidRequest" (:code data)) (some? (:context data))))))
+(check "unknown transaction key" (= "InvalidRequest" (:code (failure #(f/transact conn {:chnges []})))))
+(check "string keys rejected" (= "InvalidRequest" (:code (failure #(f/transact conn {"changes" []})))))
+(check "unknown attribute" (= "UnknownAttribute"
+                              (:code (failure #(f/pull conn task [:task/nope])))))
+(check "future revision" (= "InvalidSnapshot" (:code (failure #(f/pull conn task [] {:at 99})))))
+(check "foreign snapshot" (= "InvalidSnapshot"
+                             (:code (failure #(f/schema conn {:at (assoc (:after a) :store "s1.00000000000000000000000000000001")})))))
+(check "bad arity" (= "InvalidRequest" (:code (failure #(f/head conn conn)))))
+(check "unknown opts key" (= "InvalidRequest" (:code (failure #(f/schema conn {:as-of 1})))))
+
+(f/close conn)
+(check "closed connection" (re-find #"closed" (::message (failure #(f/head conn)))))
+(def reopened (f/open path))
+(check "reopen keeps history" (= "todo" (:task/status (f/pull reopened task [:task/status] {:at (:after a)}))))
+(check "reopen retry" (= b (f/transact reopened start)))
+(check "doc" (some? (:doc (meta #'f/transact))))
+
+(println "failures:" @failures)
+(println "done")
+(System/exit (if (zero? @failures) 0 1))

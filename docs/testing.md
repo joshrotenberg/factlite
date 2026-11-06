@@ -103,3 +103,15 @@ compares indexed state at each basis. Deterministic tests cover separate
 intervals for a reasserted fact, format-1 upgrade and its rollback on failure,
 six interval tampering forms on writable and read-only open, and two interval
 write faults in the rollback suite.
+
+The pod's translation layer has unit tests for each value type in both
+directions, rejection of every unsupported Clojure type, strict transaction,
+query and snapshot maps, error data, and a 1,024-case value round-trip property.
+A parity test checks that a pod request and the equivalent CLI JSON decode to
+equal requests with identical canonical bytes. `crates/factlite-pod/test.bb`
+runs 59 checks under real babashka over stdio and socket transports. The
+contention test runs four pod processes, one on the socket transport, against
+one file: keyed creations land exactly once, conditional increments serialize,
+and the final revision count is exact. Set `FACTLITE_POD_WORKERS` and
+`FACTLITE_POD_ITERATIONS` for a heavier run. These tests skip when `bb` is not
+on PATH unless `REQUIRE_BB` is set.
