@@ -94,6 +94,8 @@ None of these needs a design decision; each could be done directly.
   defaults, which were adequate for every measured query.
 - CLI read commands open the file per process and so replay the whole log
   every time. They would benefit from 3.
+- No check verifies that documentation links resolve. A link checker in
+  `scripts/check.sh` would catch dead links like one found in review of item 9.
 
 ## 9. Documentation: done
 
@@ -107,9 +109,9 @@ current state.
 - **Why:** One process-boundary protocol for every language. A long-lived
   process opens a store once, and the same dispatch can back an MCP server.
   The library stays the core.
-- **Design:** [`design/json-rpc.md`](design/json-rpc.md). It lives in this
-  workspace as `crates/factlite-rpc`: a dispatch library and a stdio server
-  binary over the strict wire contract.
+- **Design:** [`design/json-rpc.md`](design/json-rpc.md). It would live in this
+  workspace as `crates/factlite-rpc`, a dispatch library and a stdio server
+  binary over the strict wire contract. No such crate exists yet.
 - **When to build:** only after items 3 (open-time integrity) and 4 (lookup
   refs in transactions) are decided. A ready consumer (Elixir, or agents
   through MCP) raises the priority but does not skip that condition. Building

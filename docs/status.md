@@ -3,21 +3,33 @@
 ## Current state
 
 Updated 2026-11-06. This section is the summary. The entries below are the full
-per-item log, oldest first, and are kept as written.
+per-item log, oldest first, and are kept as written, so older entries describe
+the state at their time. Where they disagree with this section, this section is
+current.
 
 - **Implemented:** plan steps 0 to 11, all checked in `plan.md`: the v1
   contract, plus the temporal datom index and indexed reads and commits (9.1 to
   9.5), the babashka pod (10.1), and consumer requests (11.1 to 11.5).
-  Storage format 4. Roadmap item 8 (CLI busy timeout, babashka in CI) is done.
-- **Tests:** 184 pass locally, including forty-nine 1,024-case properties and
-  the pod's babashka tests. CI on GitHub runs the same gate on Linux.
-- **Reviews:** entries 0001 to 0043 are self-reviews. Since 0044, reviews also
-  include independent Claude and Codex subagent reviews through kit.
+  Storage format 4.
+- **Roadmap:**
+  - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
+    and per-process CLI opens remain open.
+  - Item 9 (this summary) is done.
+- **Tests:** 184 pass locally with babashka installed and `REQUIRE_BB=1`,
+  including forty-nine 1,024-case properties and the pod's three babashka
+  tests; without babashka those three skip. CI on GitHub runs the same gate on
+  Linux with babashka.
+- **Reviews:** entries 0001 to 0043 in `reviews/` are self-reviews. Since 0044,
+  each review also records independent Claude and Codex subagent reviews, run
+  with the kit subagent tooling, alongside a self-review.
 - **Hosting:** private repository `github.com/joshrotenberg/factlite`. Licensed
   MIT OR Apache-2.0. Crates are unpublished.
-- **Waiting on the user:** decision briefs for roadmap items 3 (bounded open
-  time, PR #5), 4 (lookup refs in transactions, PR #7), 5 (query language,
-  PR #8) and 6 (history excision, PR #9).
+- **Waiting on the user:** decision briefs, each in an open draft pull request
+  and not yet on `main`:
+  - roadmap item 3, bounded open time (PR #5);
+  - item 4, lookup refs in transactions (PR #7);
+  - item 5, query language (PR #8);
+  - item 6, history excision (PR #9).
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
 
@@ -721,6 +733,16 @@ per-item log, oldest first, and are kept as written.
   wait on the item 3 decision.
 - **What's next:** item 9 (documentation) needs a decision brief; items 3, 4, 5
   and 6 await decisions in PRs #5, #7, #8 and #9.
+
+## Roadmap 9: current-state documentation: done
+
+- **Done:** a current-state section at the top of this file, and a rewritten
+  README overview and `handoff.md`. Review: `reviews/0047-current-state-docs.md`.
+- **Decisions:** this log stays as written, as `AGENTS.md` requires; the
+  summary replaces only the drifting opening paragraph.
+- **Blockers:** none.
+- **What's next:** every remaining roadmap item is done, deferred, or waiting
+  on a decision brief (PRs #5, #7, #8, #9).
 
 ## Environment notes
 

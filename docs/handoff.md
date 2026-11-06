@@ -2,7 +2,8 @@
 
 How to pick this project up from scratch. Read `AGENTS.md`, `Factlite-Design.md`,
 `docs/plan.md` and the current-state section of `docs/status.md` first. Open
-choices are in `docs/roadmap.md` and `docs/decision-briefs/`.
+choices are in `docs/roadmap.md`. Decision briefs awaiting the user are in
+their open draft pull requests, listed in `docs/status.md`.
 
 ## Get and verify the source
 
@@ -12,8 +13,8 @@ cd factlite
 git fsck --full
 ```
 
-The repository is private, so the clone needs access to it. All item branches
-are on the remote as well as `main`.
+The repository is private, so the clone needs access to it. Item branches are
+kept on the remote alongside `main`.
 
 Install Rust with rustup; `rust-toolchain.toml` pins 1.99.0. Install babashka
 to run the pod's babashka tests, which otherwise skip. CI installs 1.13.229.

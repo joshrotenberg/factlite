@@ -16,19 +16,23 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
   - exact conditional updates, and fencing on an expected head;
   - exact idempotent retries.
 - **Reads:** `Store::db()` and `db_at()` return views pinned to a revision,
-  which stay stable across reopen and backups. Schema, facts, pull, lookups by
-  unique value, history, transaction enumeration and joined queries (with
-  aggregates) all run as revision-bounded SQL over a derived datom interval
-  index.
+  which stay stable across reopen and backups. Facts, pull, lookups by unique
+  value, entity- or attribute-filtered history and joined queries run as
+  revision-bounded SQL over a derived datom interval index. Schema reads
+  schema events. Transaction enumeration and unfiltered history read the
+  retained reports. Aggregates are computed in Rust over the distinct tuples
+  that SQL returns, and very large queries fall back to the reference
+  evaluator.
 - **Commits:** each commit loads only the state its request can touch.
 - **Integrity:** every open replays and validates the retained log
   incrementally and checks the index against it. The log stays authoritative.
 - **Interfaces:** the Rust library is the core. A CLI and a babashka pod
   (`crates/factlite-pod`) are thin adapters over the same strict, versioned JSON
   wire contract. A JSON-RPC interface is designed but deferred.
-- **Operations:** WAL with FULL synchronization, a configurable busy timeout,
-  opens that never block writers, SQLite-safe standalone backups, and verified
-  crash recovery.
+- **Operations:** WAL with FULL synchronization and a configurable busy
+  timeout. Opening an existing current-format store validates it without
+  blocking writers; initialization and format upgrades take the write lock.
+  SQLite-safe standalone backups and crash recovery are tested.
 
 - [Design](Factlite-Design.md): the original handoff, preserved unchanged.
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
@@ -42,7 +46,6 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 - [Rust guide](docs/rust.md): an executable application workflow and API choices.
-- [Decision briefs](docs/decision-briefs/): open choices awaiting the user.
 - [Handoff](docs/handoff.md): clone, verify and resume work.
 
 Recommended v1 decisions in the design are the working contract; departures
