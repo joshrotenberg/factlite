@@ -15,7 +15,7 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 184 pass locally with babashka installed and `REQUIRE_BB=1`,
+- **Tests:** 186 pass locally with babashka installed and `REQUIRE_BB=1`,
   including forty-nine 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. CI on GitHub runs the same gate on
   Linux with babashka.
@@ -743,6 +743,17 @@ current.
 - **Blockers:** none.
 - **What's next:** every remaining roadmap item is done, deferred, or waiting
   on a decision brief (PRs #5, #7, #8, #9).
+
+## Roadmap 8: documentation link check: done
+
+- **Done:** an integration test that every relative Markdown link and image
+  resolves, parsed with pulldown-cmark. 186 tests pass with `REQUIRE_BB=1`.
+  Review: `reviews/0048-doc-link-check.md`.
+- **Decisions:** a test-only dependency on pulldown-cmark rather than
+  hand-written parsing, after both reviews found the hand-written parser unsafe.
+- **What's next:** roadmap item 8 still lists `ANALYZE` (no measured need) and
+  per-process CLI opens (waiting on item 3). Everything else is done, deferred
+  or waiting on decision briefs #5, #7, #8 and #9.
 
 ## Environment notes
 
