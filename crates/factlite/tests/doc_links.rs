@@ -1,9 +1,20 @@
-//! Every relative link in the repository's Markdown files resolves to an
-//! existing file or directory. External links (with a URL scheme) and
-//! same-page anchors are not checked, and neither are anchor targets. Fenced
-//! code blocks and inline code spans are skipped.
+//! Every relative link and image in the repository's Markdown resolves to an
+//! existing file or directory inside the repository, with exact case.
+//!
+//! Links are parsed with pulldown-cmark, so code blocks, code spans, reference
+//! links and angle-bracket destinations follow CommonMark. Not checked:
+//! - `http`, `https` and `mailto` URLs;
+//! - same-page anchors and anchor targets;
+//! - raw HTML links.
+//!
+//! A target starting with `/` is resolved from the repository root, as GitHub
+//! does. A query string, an anchor, and a `:line` or `:line-line` suffix are
+//! removed before checking. Directories named `target`, hidden directories (such
+//! as `.git` and `.github`) and symbolic links are not walked.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+use pulldown_cmark::{Event, Parser, Tag};
 
 fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -12,107 +23,204 @@ fn repository_root() -> PathBuf {
         .unwrap()
 }
 
+/// Markdown files under `dir`, sorted, without following symbolic links.
 fn markdown_files(dir: &Path, found: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        let name = path.file_name().unwrap().to_string_lossy();
-        if path.is_dir() {
-            if !name.starts_with('.') && name != "target" {
-                markdown_files(&path, found);
-            }
-        } else if name.ends_with(".md") {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let kind = std::fs::symlink_metadata(&path).unwrap().file_type();
+        if kind.is_dir() && !name.starts_with('.') && name != "target" {
+            markdown_files(&path, found);
+        } else if kind.is_file() && name.to_ascii_lowercase().ends_with(".md") {
             found.push(path);
         }
     }
 }
 
-/// Text outside fenced code blocks and inline code spans.
-fn prose(text: &str) -> String {
-    let mut out = String::new();
-    let mut fenced = false;
-    for line in text.lines() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
-        }
-        let mut in_code = false;
-        for c in line.chars() {
-            if c == '`' {
-                in_code = !in_code;
-            } else if !in_code {
-                out.push(c);
+/// Link and image destinations in `text`, in document order.
+fn destinations(text: &str) -> Vec<String> {
+    Parser::new(text)
+        .filter_map(|event| match event {
+            Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
+                Some(dest_url.into_string())
             }
-        }
-        out.push('\n');
-    }
-    out
-}
-
-/// Targets of inline links `[text](target)`, without titles.
-fn link_targets(text: &str) -> Vec<String> {
-    let mut targets = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("](") {
-        rest = &rest[start + 2..];
-        let end = rest.find(')').unwrap_or(rest.len());
-        let target = rest[..end].split_whitespace().next().unwrap_or("");
-        if !target.is_empty() {
-            targets.push(target.to_owned());
-        }
-        rest = &rest[end..];
-    }
-    targets
+            _ => None,
+        })
+        .collect()
 }
 
 fn is_external(target: &str) -> bool {
     target.starts_with('#')
-        || target.split_once(':').is_some_and(|(scheme, _)| {
-            !scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphabetic())
-        })
+        || ["http://", "https://", "mailto:"]
+            .iter()
+            .any(|scheme| target.starts_with(scheme))
+}
+
+/// The path part of a local target: without query, anchor or `:line` suffix,
+/// percent-decoded.
+fn local_path(target: &str) -> Option<String> {
+    let path = target.split(['?', '#']).next().unwrap_or("");
+    let path = match path.rsplit_once(':') {
+        Some((head, line))
+            if !line.is_empty() && line.chars().all(|c| c.is_ascii_digit() || c == '-') =>
+        {
+            head
+        }
+        _ => path,
+    };
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+/// Resolves `path` from `dir` (or from `root` when absolute) without touching
+/// the filesystem, and fails if it leaves `root`.
+fn resolve(root: &Path, dir: &Path, path: &str) -> Option<PathBuf> {
+    let (mut resolved, relative) = match path.strip_prefix('/') {
+        Some(rest) => (root.to_path_buf(), rest),
+        None => (dir.to_path_buf(), path),
+    };
+    for component in Path::new(relative).components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::ParentDir => {
+                if !resolved.pop() || !resolved.starts_with(root) {
+                    return None;
+                }
+            }
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    resolved.starts_with(root).then_some(resolved)
+}
+
+/// Whether `path` exists with exactly this case in every component below
+/// `root`. Plain `exists` ignores case on macOS and Windows, where a link
+/// that would break on Linux and GitHub would still pass.
+fn exists_exactly(root: &Path, path: &Path) -> bool {
+    let mut current = root.to_path_buf();
+    for component in path.strip_prefix(root).unwrap().components() {
+        let Component::Normal(part) = component else {
+            return false;
+        };
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            return false;
+        };
+        if !entries
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_name() == part)
+        {
+            return false;
+        }
+        current.push(part);
+    }
+    true
+}
+
+/// Broken links under `root` as `file: target` lines, and how many local
+/// links were checked.
+fn check(root: &Path) -> (Vec<String>, usize) {
+    let mut files = Vec::new();
+    markdown_files(root, &mut files);
+    let mut broken = Vec::new();
+    let mut checked = 0;
+    for file in &files {
+        let name = file.strip_prefix(root).unwrap().display().to_string();
+        let Ok(text) = std::fs::read_to_string(file) else {
+            broken.push(format!("{name}: not UTF-8"));
+            continue;
+        };
+        for target in destinations(&text) {
+            if is_external(&target) {
+                continue;
+            }
+            checked += 1;
+            let ok = local_path(&target)
+                .filter(|path| !path.is_empty())
+                .and_then(|path| resolve(root, file.parent().unwrap(), &path))
+                .is_some_and(|path| exists_exactly(root, &path));
+            if !ok {
+                broken.push(format!("{name}: {target}"));
+            }
+        }
+    }
+    (broken, checked)
 }
 
 #[test]
 fn relative_markdown_links_resolve() {
-    let root = repository_root();
-    let mut files = Vec::new();
-    markdown_files(&root, &mut files);
-    assert!(
-        files.iter().any(|file| file.ends_with("README.md")),
-        "no Markdown found under {}",
-        root.display()
-    );
-    let mut broken = Vec::new();
-    for file in &files {
-        let text = std::fs::read_to_string(file).unwrap();
-        for target in link_targets(&prose(&text)) {
-            if is_external(&target) {
-                continue;
-            }
-            let path = target.split('#').next().unwrap();
-            // A trailing ":line" suffix names a line in a source file.
-            let path = path
-                .rsplit_once(':')
-                .filter(|(_, line)| !line.is_empty() && line.chars().all(|c| c.is_ascii_digit()))
-                .map_or(path, |(path, _)| path);
-            if !file.parent().unwrap().join(path).exists() {
-                broken.push(format!(
-                    "{}: {target}",
-                    file.strip_prefix(&root).unwrap().display()
-                ));
-            }
-        }
-    }
+    let (broken, checked) = check(&repository_root());
     assert!(broken.is_empty(), "broken links:\n{}", broken.join("\n"));
+    // Guard against the checker silently finding nothing: the repository has
+    // well over 50 local links.
+    assert!(checked >= 50, "only {checked} local links were checked");
 }
 
 #[test]
-fn link_extraction_skips_code_and_external_targets() {
-    let text = "a [x](docs/a.md) `[y](nope.md)` [z](https://e.com) [w](#top)\n```\n[v](gone.md)\n```\n[u](b.md#part \"title\")";
-    let targets = link_targets(&prose(text));
-    assert_eq!(targets, ["docs/a.md", "https://e.com", "#top", "b.md#part"]);
-    let checked: Vec<_> = targets.iter().filter(|t| !is_external(t)).collect();
-    assert_eq!(checked, ["docs/a.md", "b.md#part"]);
+fn checker_follows_commonmark_and_repository_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("docs/a b")).unwrap();
+    std::fs::create_dir_all(root.join("target")).unwrap();
+    for file in ["README.md", "docs/a(b).md", "docs/a b/c.md", "src.rs"] {
+        std::fs::write(root.join(file), "").unwrap();
+    }
+    std::fs::write(root.join("target/ignored.md"), "[x](missing.md)").unwrap();
+    std::fs::write(
+        root.join("docs/guide.md"),
+        r#"
+[ok](../README.md) [paren](a(b).md) [angle](<a b/c.md>) [encoded](a%20b/c.md)
+[anchor](../README.md#part) [line](../src.rs:42) [range](../src.rs:3-9)
+[root](/README.md) [query](../README.md?plain=1) ![img](../README.md)
+[web](https://example.com/missing) [self](#top) [ref][r]
+
+[r]: ../README.md
+
+`[span](missing-span.md)` ``[double `tick`](missing-double.md)``
+
+```
+[fenced](missing-fenced.md)
+```
+
+~~~
+[tilde](missing-tilde.md)
+~~~
+
+    [indented](missing-indented.md)
+
+[broken](nope.md) [case](../readme.md) [outside](../../escape.md) [badref][b]
+[empty](?only=query)
+
+[b]: missing-ref.md
+"#,
+    )
+    .unwrap();
+    let (broken, checked) = check(&root);
+    assert_eq!(
+        broken,
+        [
+            "docs/guide.md: nope.md",
+            "docs/guide.md: ../readme.md",
+            "docs/guide.md: ../../escape.md",
+            "docs/guide.md: missing-ref.md",
+            "docs/guide.md: ?only=query",
+        ],
+    );
+    assert_eq!(checked, 16);
 }

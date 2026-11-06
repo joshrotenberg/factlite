@@ -168,7 +168,13 @@ sets `REQUIRE_BB`, so the pod's babashka tests fail rather than skip if `bb` is
 missing. A CLI scenario holds a write lock and checks that `--busy-timeout-ms`
 bounds the wait, that reads are unaffected, and that invalid values exit 2.
 
-`crates/factlite/tests/doc_links.rs` checks that every relative link in the
-repository's Markdown files (outside `target` and hidden directories, and
-outside code blocks and spans) resolves to an existing path. External URLs,
-same-page anchors and anchor targets are not checked.
+`crates/factlite/tests/doc_links.rs` checks that every relative link and image in
+the repository's Markdown resolves, with exact case, to a path inside the
+repository.
+- **Parsing:** links are parsed with pulldown-cmark (a test-only dependency),
+  so code blocks, code spans, reference links and angle-bracket destinations
+  follow CommonMark.
+- **Not checked:** external URLs, same-page anchors, anchor targets and raw
+  HTML links.
+- **Fixtures:** a fixture test covers every rule, and the main test requires at
+  least 50 checked links so the checker cannot go blind unnoticed.
