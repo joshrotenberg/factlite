@@ -306,6 +306,7 @@ pub(crate) const VISIBLE: &str = "asserted<=?1 AND (retracted IS NULL OR retract
 pub(crate) fn facts_matching(
     connection: &Connection,
     basis: &SnapshotId,
+    types: &StoredTypes,
     entity: Option<&EntityId>,
     attribute: Option<&AttrName>,
     value: Option<&Value>,
@@ -327,7 +328,6 @@ pub(crate) fn facts_matching(
         bindings.push(codec::encode_value(value).into());
         sql.push_str(&format!(" AND value=?{}", bindings.len()));
     }
-    let types = types(&definitions_at(connection, basis)?);
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(rusqlite::params_from_iter(&bindings), |row| {
         Ok((
@@ -339,13 +339,30 @@ pub(crate) fn facts_matching(
     })?;
     rows.map(|row| {
         let (entity, attribute, tag, bytes) = row?;
-        fact_row(&types, entity, attribute, tag, &bytes)
+        fact_row(types, entity, attribute, tag, &bytes)
     })
     .collect()
 }
 
-/// Stored type tag of each attribute visible at a basis.
-fn types(schema: &Definitions) -> BTreeMap<String, u8> {
+/// Stored type tag of each attribute visible at a basis, loaded once per
+/// operation.
+pub(crate) type StoredTypes = BTreeMap<String, u8>;
+
+pub(crate) fn stored_types(connection: &Connection, basis: &SnapshotId) -> Result<StoredTypes> {
+    Ok(types(&definitions_at(connection, basis)?))
+}
+
+/// Fails unless `fact` has an attribute visible in `types`, with that type.
+pub(crate) fn check_fact_type(types: &StoredTypes, fact: &Fact) -> Result<()> {
+    if types.get(fact.attribute.as_str()) != Some(&codec::type_tag(fact.value.value_type())) {
+        return Err(corrupt(
+            "stored fact type or attribute differs from the visible schema",
+        ));
+    }
+    Ok(())
+}
+
+fn types(schema: &Definitions) -> StoredTypes {
     schema
         .iter()
         .map(|(name, (definition, _))| {
@@ -362,7 +379,7 @@ fn types(schema: &Definitions) -> BTreeMap<String, u8> {
 /// guarantees this; checking here keeps structurally opened views from passing
 /// a mistyped value to code that relies on schema types.
 fn fact_row(
-    types: &BTreeMap<String, u8>,
+    types: &StoredTypes,
     entity: String,
     attribute: String,
     tag: i64,
@@ -511,11 +528,13 @@ pub(crate) fn model_for_request(
             entities.insert(id, created);
         }
     }
+    let stored = types(&schema);
     let mut facts = HashSet::new();
     for (entity, attribute) in &pairs {
         facts.extend(facts_matching(
             connection,
             head,
+            &stored,
             Some(entity),
             Some(attribute),
             None,
@@ -525,6 +544,7 @@ pub(crate) fn model_for_request(
         facts.extend(facts_matching(
             connection,
             head,
+            &stored,
             None,
             Some(attribute),
             Some(value),

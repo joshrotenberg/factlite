@@ -15,7 +15,7 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 186 pass locally with babashka installed and `REQUIRE_BB=1`,
+- **Tests:** 197 pass locally with babashka installed and `REQUIRE_BB=1`,
   including forty-nine 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. CI on GitHub runs the same gate on
   Linux with babashka.
@@ -26,7 +26,7 @@ current.
   MIT OR Apache-2.0. Crates are unpublished.
 - **Decided, next to build:** plan step 12, from the four briefs in
   `decision-briefs/` decided on 2026-11-06:
-  - 12.1: read-only structural open and verify;
+  - 12.1: read-only structural open and verify (done);
   - 12.2: query negation;
   - 12.3: transaction lookup refs;
   - 12.4: permanence and encryption guidance.
@@ -754,6 +754,18 @@ current.
 - **What's next:** roadmap item 8 still lists `ANALYZE` (no measured need) and
   per-process CLI opens (waiting on item 3). Everything else is done, deferred
   or waiting on decision briefs #5, #7, #8 and #9.
+
+## 12.1 Read-only structural open and verify: done
+
+- **Done:** `Validation::Structural` for read-only opens, `Store::verify` and
+  `Db::verify`, CLI `--validation` and `verify`, and pod `:validation` and
+  `verify`. Reads are hardened against corrupted rows. 197 tests pass with
+  `REQUIRE_BB=1`. Review: `reviews/0049-structural-open-verify.md`.
+- **Measured:** a structural CLI read of the 120,000-fact store takes 3.2 ms,
+  against 774 ms with full validation.
+- **Validation:** local only. GitHub Actions is unavailable (account out of
+  minutes), so the user directed that the local gate stands in for CI.
+- **What's next:** 12.2, query negation.
 
 ## Environment notes
 

@@ -1017,4 +1017,20 @@ fn structural_reads_and_verify_report_tampering_differently() {
         2,
         "InvalidRequest",
     );
+    failure(
+        db(&path).args([
+            "schema",
+            "--validation",
+            "full",
+            "--validation",
+            "structural",
+        ]),
+        2,
+        "InvalidRequest",
+    );
+    failure(
+        db(&dir.path().join("missing.sqlite")).arg("verify"),
+        5,
+        "Storage",
+    );
 }

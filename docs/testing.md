@@ -178,3 +178,17 @@ repository.
   HTML links.
 - **Fixtures:** a fixture test covers every rule, and the main test requires at
   least 50 checked links so the checker cannot go blind unnoticed.
+
+`tests/structural_open.rs` covers plan item 12.1:
+- a 1,024-case property in which structural and full reads agree at every
+  revision;
+- tampering that fails a full open but passes a structural one and is caught
+  by `verify`;
+- mistyped rows through facts, the SQL query path and the reference evaluator,
+  which error or never match and never panic;
+- report corruption and interior gaps, which make report reads fail;
+- duplicated one-valued rows, which fail `pull`;
+- structural rejection of wrong formats, extra tables, missing indexes and head
+  mismatches;
+- refused writable structural opens that create no file;
+- `verify` on pinned views and after tampering.

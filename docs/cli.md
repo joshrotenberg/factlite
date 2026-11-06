@@ -125,3 +125,16 @@ milliseconds no greater than 2147483647. Read commands use read-only
 connections; under WAL a reader does not wait for a writer's lock, but opening
 can still wait briefly, for example while another process switches a new file
 to WAL.
+
+## Validation and verify
+
+Read commands accept `--validation full|structural` (default `full`). A
+structural open checks the format markers, the table and index sets, and that
+the head matches the latest transaction, without replaying the log. That takes
+a few milliseconds instead of time proportional to history. Corruption is then
+found only by `verify`; until then reads can fail with `Storage` or return
+answers from the stored index.
+
+`factlite --db PATH verify` fully validates the latest committed state and
+prints the verified snapshot. It exits 5 on corruption or a missing file.
+

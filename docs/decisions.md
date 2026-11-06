@@ -685,3 +685,28 @@ them.
   on demand.
 - **History:** immutable. Documentation of permanence and application-level
   encryption; a lineage rewrite only if needed; no in-place excision.
+
+## Read-only structural open and verify (12.1)
+
+- `Validation::Full` stays the default. `Validation::Structural` checks format
+  markers, the table and index sets, and that the head row matches the latest
+  transaction. `Store::open_with` refuses it before opening or creating the
+  file, because commits trust the stored index.
+- `Store::verify` and `Db::verify` run full validation in one read transaction
+  and return the validated head. Errors keep their codes. Verify holds the
+  handle's connection while it runs.
+- Reads no longer assume full validation ran:
+  - decoded facts, from intervals or reports, must match the visible schema's
+    attributes and types;
+  - compiled queries match on the stored type tag, so a mistyped row never
+    matches and is never reinterpreted;
+  - a snapshot must name a retained revision;
+  - report reads require contiguous history;
+  - `pull` fails on several visible values for a one-valued attribute.
+
+  On a corrupted file, a structural view returns `Storage` errors or answers
+  from the stored index, never a panic. Wrong answers are possible until
+  verify runs.
+- CLI: `--validation full|structural` on read commands, and `verify`, which
+  opens structurally and then validates fully, so it validates once. Pod:
+  `:validation` on `open`, and `verify`.

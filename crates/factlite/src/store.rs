@@ -333,7 +333,10 @@ impl Store {
     }
 
     /// Fully validates the latest committed state, as a full open does, in one
-    /// short read transaction, and returns the head it validated. Errors keep
+    /// read transaction, and returns the head it validated. It holds this
+    /// handle's connection for as long as validation takes, so clones of this
+    /// `Store` and views opened from it wait; other processes and handles do
+    /// not. Errors keep
     /// their codes: `Storage` names the failed check, `UnsupportedFormat` a
     /// changed format marker, and `Busy` a lock that outlasted the timeout.
     pub fn verify(&self) -> Result<SnapshotId> {

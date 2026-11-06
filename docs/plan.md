@@ -266,7 +266,7 @@ design and need a separate decision; they are not in this step.
 
 Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
 
-- [ ] **12.1 Read-only structural open and explicit verify** (roadmap 3).
+- [x] **12.1 Read-only structural open and explicit verify** (roadmap 3).
   `StoreOptions` gains `validation: Full | Structural`, defaulting to `Full`.
   `Structural` is accepted only for read-only opens; writable opens with it
   fail `InvalidRequest`. A structural open checks:
@@ -275,8 +275,8 @@ Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
   - the head row against the latest transaction.
 
   Add `Store::verify` and `Db::verify`, which run full validation in one read
-  transaction and return the verified head or a `Storage` error naming the
-  failed check. The CLI gains `--validation structural` on read commands and
+  transaction and return the verified head; errors keep their codes (`Storage`
+  naming the failed check, `UnsupportedFormat`, `Busy`). The CLI gains `--validation structural` on read commands and
   a `verify` command; the pod gains `:validation` on read-only `open` and a
   `verify` var. Tests:
   - structural reads equal full reads;

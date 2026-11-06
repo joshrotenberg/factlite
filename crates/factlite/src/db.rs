@@ -184,9 +184,11 @@ impl Db {
     pub fn facts(&self, filter: FactFilter) -> Result<Vec<Fact>> {
         self.read_basis(|transaction| {
             filter.validate(&crate::index::schema_at(transaction, &self.snapshot)?)?;
+            let types = crate::index::stored_types(transaction, &self.snapshot)?;
             let mut facts = crate::index::facts_matching(
                 transaction,
                 &self.snapshot,
+                &types,
                 filter.entity.as_ref(),
                 filter.attribute.as_ref(),
                 filter.value.as_ref(),
@@ -208,11 +210,13 @@ impl Db {
             if !crate::index::known_at(transaction, &self.snapshot, id)? {
                 return Ok(None);
             }
+            let types = crate::index::stored_types(transaction, &self.snapshot)?;
             let mut attributes = BTreeMap::new();
             for name in attrs {
                 let mut values: Vec<_> = crate::index::facts_matching(
                     transaction,
                     &self.snapshot,
+                    &types,
                     Some(id),
                     Some(name),
                     None,
@@ -226,6 +230,13 @@ impl Db {
                 }
                 let definition = require_attribute(&schema, name)?;
                 let value = match definition.cardinality() {
+                    // Several values for a one-valued attribute are only
+                    // possible in a corrupted file.
+                    Cardinality::One if values.len() > 1 => {
+                        return Err(crate::store::corrupt(
+                            "a cardinality-one attribute has several visible values",
+                        ));
+                    }
                     Cardinality::One => PulledValue::One(values.remove(0)),
                     Cardinality::Many => PulledValue::Many(values),
                 };
@@ -265,9 +276,11 @@ impl Db {
                     "lookup value has the wrong type for its attribute",
                 ));
             }
+            let types = crate::index::stored_types(transaction, &self.snapshot)?;
             let mut owners = crate::index::facts_matching(
                 transaction,
                 &self.snapshot,
+                &types,
                 None,
                 Some(attribute),
                 Some(value),
@@ -317,11 +330,13 @@ impl Db {
         self.validate_after(after)?;
         self.read_basis(|transaction| {
             filter.validate(&crate::index::schema_at(transaction, &self.snapshot)?)?;
+            let types = crate::index::stored_types(transaction, &self.snapshot)?;
             let mut events = Vec::new();
             for report in crate::log::reports_between(transaction, after, self.snapshot.revision())?
             {
                 let revision = report.after.revision();
                 for (ordinal, delta) in report.effective_delta.into_iter().enumerate() {
+                    crate::index::check_fact_type(&types, &delta.fact)?;
                     if filter.matches(&delta.fact) {
                         events.push(FactEvent {
                             revision,
@@ -340,12 +355,18 @@ impl Db {
     pub fn transactions(&self, after: Revision) -> Result<Vec<TxRecord>> {
         self.validate_after(after)?;
         self.read_basis(|transaction| {
-            Ok(
-                crate::log::reports_between(transaction, after, self.snapshot.revision())?
-                    .into_iter()
-                    .map(|report| TxRecord { report })
-                    .collect(),
-            )
+            let types = crate::index::stored_types(transaction, &self.snapshot)?;
+            let reports =
+                crate::log::reports_between(transaction, after, self.snapshot.revision())?;
+            for report in &reports {
+                for delta in &report.effective_delta {
+                    crate::index::check_fact_type(&types, &delta.fact)?;
+                }
+            }
+            Ok(reports
+                .into_iter()
+                .map(|report| TxRecord { report })
+                .collect())
         })
     }
 

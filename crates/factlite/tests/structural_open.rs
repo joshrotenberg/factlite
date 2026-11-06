@@ -251,3 +251,69 @@ fn verify_reports_the_latest_head_and_catches_tampering_after_open() {
         ErrorCode::UnsupportedFormat
     );
 }
+
+#[test]
+fn compiled_queries_never_reinterpret_mistyped_rows() {
+    let (_dir, path, _) = store_with(&[(0, 1, false), (1, 2, false)]);
+    // Same width as an i64, so decoding as the schema type would succeed.
+    tamper(&path, "UPDATE datoms SET type_tag=7 WHERE type_tag=1");
+    let db = Db::open_read_only_with(&path, &structural()).unwrap();
+    // Two patterns take the SQL path: the mistyped rows do not match at all.
+    assert!(db.query(&query(), &Params::new()).unwrap().rows.is_empty());
+}
+
+#[test]
+fn structural_reads_of_reports_and_gaps_fail_instead_of_omitting() {
+    let (_dir, path, _) = store_with(&[(0, 1, false), (1, 2, false)]);
+    tamper(
+        &path,
+        "UPDATE transactions SET report=X'00' WHERE revision=X'0000000000000002'",
+    );
+    let db = Db::open_read_only_with(&path, &structural()).unwrap();
+    assert_eq!(
+        db.transactions(Revision::ZERO).unwrap_err().code(),
+        ErrorCode::Storage
+    );
+    assert_eq!(
+        db.history(FactFilter::default(), Revision::ZERO)
+            .unwrap_err()
+            .code(),
+        ErrorCode::Storage
+    );
+    let (_dir, path, head) = store_with(&[(0, 1, false), (1, 2, false)]);
+    tamper(
+        &path,
+        "DELETE FROM fact_events WHERE revision=X'0000000000000002'",
+    );
+    tamper(
+        &path,
+        "DELETE FROM transactions WHERE revision=X'0000000000000002'",
+    );
+    let db = Db::open_read_only_with(&path, &structural()).unwrap();
+    assert_eq!(db.snapshot(), &head);
+    assert_eq!(
+        db.transactions(Revision::ZERO).unwrap_err().code(),
+        ErrorCode::Storage
+    );
+    assert_eq!(
+        db.history(FactFilter::default(), Revision::ZERO)
+            .unwrap_err()
+            .code(),
+        ErrorCode::Storage
+    );
+}
+
+#[test]
+fn duplicated_one_valued_rows_fail_pull() {
+    let (_dir, path, _) = store_with(&[(0, 1, false)]);
+    tamper(
+        &path,
+        "INSERT INTO datoms SELECT entity,attribute,type_tag,X'8000000000000063',asserted,NULL FROM datoms WHERE type_tag=1",
+    );
+    let db = Db::open_read_only_with(&path, &structural()).unwrap();
+    let id = db.facts(FactFilter::default()).unwrap()[0].entity.clone();
+    assert_eq!(
+        db.pull(&id, &["x/n".parse().unwrap()]).unwrap_err().code(),
+        ErrorCode::Storage
+    );
+}

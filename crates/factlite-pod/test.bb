@@ -254,8 +254,10 @@
 (check "verify on a structural connection" (= (f/head conn) (f/verify fast)))
 (check "verify on a writable connection" (= (f/head conn) (f/verify conn)))
 (f/close fast)
-(check "structural writable open refused"
-       (= "InvalidRequest" (:code (failure #(f/open path {:validation :structural})))))
+(let [fresh (str path ".structural")]
+  (check "structural writable open refused without creating a file"
+         (and (= "InvalidRequest" (:code (failure #(f/open fresh {:validation :structural}))))
+              (not (.exists (java.io.File. fresh))))))
 (check "unknown validation refused"
        (= "InvalidRequest" (:code (failure #(f/open path {:read-only true :validation :fast})))))
 (let [instant (f/open path {:busy-timeout-ms 0})]
