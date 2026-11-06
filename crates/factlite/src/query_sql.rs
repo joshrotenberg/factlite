@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use rusqlite::{Transaction, params_from_iter, types::Value as SqlValue};
 
 use crate::{
-    Comparison, Db, Direction, Params, Query, QueryName, QueryResult, Result, Schema, SnapshotId,
-    Term, Value, ValueType, codec,
+    Comparison, Db, Direction, Params, Predicate, Query, QueryName, QueryResult, Result, Schema,
+    SnapshotId, Term, Value, ValueType, codec,
 };
 
 struct Compiled {
@@ -64,6 +64,56 @@ impl Compiler<'_> {
                 self.bind(SqlValue::Blob(codec::encode_value(&value)))
             }
         }
+    }
+    /// Adds one pattern's conditions on `alias`, restricted to rows of the
+    /// attribute's type visible at the basis (?1).
+    fn pattern(
+        &mut self,
+        pattern: &crate::Pattern,
+        alias: &str,
+        schema: &Schema,
+        conditions: &mut Vec<String>,
+    ) {
+        let attribute = self.bind(SqlValue::Text(pattern.attribute.as_str().to_owned()));
+        conditions.push(format!("{alias}.attribute = {attribute}"));
+        // The stored tag must be the attribute's type, so a mistyped row (only
+        // possible in a corrupted file) never matches and is never
+        // reinterpreted as the schema type when decoded.
+        let tag = self.bind(SqlValue::Integer(i64::from(codec::type_tag(
+            schema
+                .get(&pattern.attribute)
+                .expect("validated attribute")
+                .value_type(),
+        ))));
+        conditions.push(format!("{alias}.type_tag = {tag}"));
+        conditions.push(format!(
+            "{alias}.asserted <= ?1 AND ({alias}.retracted IS NULL OR {alias}.retracted > ?1)"
+        ));
+        self.position(&pattern.entity, alias, Position::Entity, conditions);
+        self.position(&pattern.value, alias, Position::Value, conditions);
+    }
+    /// One comparison, given the types of its two sides.
+    fn predicate(&mut self, predicate: &Predicate, types: (ValueType, ValueType)) -> String {
+        // BLOB equality alone is not typed equality: e.g. empty string != empty bytes.
+        if types.0 != types.1 {
+            return if predicate.comparison == Comparison::Ne {
+                "1"
+            } else {
+                "0"
+            }
+            .into();
+        }
+        let left = self.term(&predicate.left);
+        let right = self.term(&predicate.right);
+        let op = match predicate.comparison {
+            Comparison::Eq => "=",
+            Comparison::Ne => "!=",
+            Comparison::Lt => "<",
+            Comparison::Le => "<=",
+            Comparison::Gt => ">",
+            Comparison::Ge => ">=",
+        };
+        format!("{left} {op} {right}")
     }
     fn position(
         &mut self,
@@ -129,53 +179,50 @@ fn compile(
     for (index, pattern) in query.patterns.iter().enumerate() {
         let alias = format!("f{index}");
         from.push(format!("main.datoms AS {alias}"));
-        let attribute = compiler.bind(SqlValue::Text(pattern.attribute.as_str().to_owned()));
-        conditions.push(format!("{alias}.attribute = {attribute}"));
-        // The stored tag must be the attribute's type, so a mistyped row (only
-        // possible in a corrupted file) never matches and is never
-        // reinterpreted as the schema type when decoded.
-        let tag = compiler.bind(SqlValue::Integer(i64::from(codec::type_tag(
-            schema
-                .get(&pattern.attribute)
-                .expect("validated attribute")
-                .value_type(),
-        ))));
-        conditions.push(format!("{alias}.type_tag = {tag}"));
-        conditions.push(format!(
-            "{alias}.asserted <= ?1 AND ({alias}.retracted IS NULL OR {alias}.retracted > ?1)"
-        ));
-        compiler.position(&pattern.entity, &alias, Position::Entity, &mut conditions);
-        compiler.position(&pattern.value, &alias, Position::Value, &mut conditions);
+        compiler.pattern(pattern, &alias, schema, &mut conditions);
     }
-    let term_type = |term: &Term| match term {
+    let term_type = |types: &BTreeMap<QueryName, ValueType>, term: &Term| match term {
         Term::Var(name) => types[name],
         Term::Const(value) => value.value_type(),
         Term::Param(name) => query.inputs[name],
     };
     for predicate in &query.predicates {
-        // BLOB equality alone is not typed equality: e.g. empty string != empty bytes.
-        if term_type(&predicate.left) != term_type(&predicate.right) {
-            conditions.push(
-                if predicate.comparison == Comparison::Ne {
-                    "1"
-                } else {
-                    "0"
-                }
-                .into(),
-            );
-        } else {
-            let left = compiler.term(&predicate.left);
-            let right = compiler.term(&predicate.right);
-            let op = match predicate.comparison {
-                Comparison::Eq => "=",
-                Comparison::Ne => "!=",
-                Comparison::Lt => "<",
-                Comparison::Le => "<=",
-                Comparison::Gt => ">",
-                Comparison::Ge => ">=",
-            };
-            conditions.push(format!("{left} {op} {right}"));
+        let types = (
+            term_type(&types, &predicate.left),
+            term_type(&types, &predicate.right),
+        );
+        conditions.push(compiler.predicate(predicate, types));
+    }
+    // Each group is a correlated NOT EXISTS. Join variables (all outer
+    // variables for `not`) refer to the outer aliases; locals bind to the
+    // group's own aliases, which carry the same visibility conditions.
+    for (group, negation) in query.negations.iter().enumerate() {
+        let scope = query.negation_scope(negation, schema, &types)?;
+        let outer = compiler.variables.clone();
+        if let Some(join) = &negation.join {
+            compiler.variables.retain(|name, _| join.contains(name));
         }
+        let mut inner_from = Vec::new();
+        let mut inner = Vec::new();
+        for (index, pattern) in negation.patterns.iter().enumerate() {
+            let alias = format!("n{group}_{index}");
+            inner_from.push(format!("main.datoms AS {alias}"));
+            compiler.pattern(pattern, &alias, schema, &mut inner);
+        }
+        for predicate in &negation.predicates {
+            let types = (
+                term_type(&scope, &predicate.left),
+                term_type(&scope, &predicate.right),
+            );
+            inner.push(compiler.predicate(predicate, types));
+        }
+        compiler.variables = outer;
+        let mut subquery = "SELECT 1".to_owned();
+        if !inner_from.is_empty() {
+            subquery.push_str(&format!(" FROM {}", inner_from.join(", ")));
+        }
+        subquery.push_str(&format!(" WHERE {}", inner.join(" AND ")));
+        conditions.push(format!("NOT EXISTS ({subquery})"));
     }
     let selected: Vec<_> = query
         .select
@@ -248,8 +295,10 @@ pub(crate) fn evaluate(
     query.validate(schema, params)?;
     // Avoid imposing SQLite's build-specific join/expression/column limits on
     // otherwise valid ASTs. The reference path remains a semantic fallback.
-    if query.patterns.len() > 32
-        || query.predicates.len() > 128
+    let group_patterns: usize = query.negations.iter().map(|n| n.patterns.len()).sum();
+    let group_predicates: usize = query.negations.iter().map(|n| n.predicates.len()).sum();
+    if query.patterns.len() + group_patterns > 32
+        || query.predicates.len() + group_predicates > 128
         || query.select.len() > 256
         || query.order.len() > 256
     {
@@ -544,6 +593,128 @@ mod tests {
             vec![vec![Value::I64(1)]]
         );
     }
+    fn negation(
+        join: Option<&[&str]>,
+        patterns: Vec<Pattern>,
+        predicates: Vec<Predicate>,
+    ) -> crate::Negation {
+        crate::Negation {
+            join: join.map(|names| names.iter().map(|n| name(n)).collect()),
+            patterns,
+            predicates,
+        }
+    }
+    fn compare(left: Term, comparison: Comparison, right: Term) -> Predicate {
+        Predicate {
+            left,
+            comparison,
+            right,
+        }
+    }
+    /// Queries over `x/link` (ref), `x/value` (i64) and `x/flag` (bool) that
+    /// exercise every negation form, checked by parity at one view.
+    fn negation_queries(limit: u64) -> Vec<Query> {
+        let base = Query {
+            inputs: [(name("cut"), ValueType::I64)].into(),
+            patterns: vec![pattern(var("e"), "x/link", var("p"))],
+            select: vec![name("e"), name("p")],
+            order: vec![order("e", Direction::Asc), order("p", Direction::Asc)],
+            limit: Some(limit),
+            ..Query::default()
+        };
+        let flagged = |e: &str| pattern(var(e), "x/flag", Term::Const(Value::Bool(true)));
+        let valued = |e: &str, v: &str| pattern(var(e), "x/value", var(v));
+        vec![
+            // `not` with all variables bound outside.
+            Query {
+                negations: vec![negation(None, vec![flagged("p")], vec![])],
+                ..base.clone()
+            },
+            // `not-join`: absence of any value, and of a value above the cut.
+            Query {
+                negations: vec![negation(Some(&["p"]), vec![valued("p", "o")], vec![])],
+                ..base.clone()
+            },
+            Query {
+                negations: vec![negation(
+                    Some(&["p"]),
+                    vec![valued("p", "o")],
+                    vec![compare(var("o"), Comparison::Gt, Term::Param(name("cut")))],
+                )],
+                ..base.clone()
+            },
+            // A local joined across two group patterns, and two conjunctive groups.
+            Query {
+                negations: vec![
+                    negation(
+                        Some(&["e"]),
+                        vec![pattern(var("e"), "x/link", var("q")), flagged("q")],
+                        vec![],
+                    ),
+                    negation(
+                        None,
+                        vec![],
+                        vec![compare(var("e"), Comparison::Eq, var("p"))],
+                    ),
+                ],
+                ..base.clone()
+            },
+            // Predicate-only `not` over an outer value, mixed types fold.
+            Query {
+                patterns: vec![pattern(var("e"), "x/link", var("p")), valued("p", "v")],
+                negations: vec![
+                    negation(
+                        None,
+                        vec![],
+                        vec![compare(var("v"), Comparison::Le, Term::Param(name("cut")))],
+                    ),
+                    negation(
+                        None,
+                        vec![],
+                        vec![compare(
+                            Term::Const(Value::String(String::new())),
+                            Comparison::Eq,
+                            Term::Const(Value::Bytes(Vec::new())),
+                        )],
+                    ),
+                ],
+                select: vec![name("e"), name("v")],
+                order: vec![order("e", Direction::Asc), order("v", Direction::Asc)],
+                ..base.clone()
+            },
+            // Variables bound at value positions outside used at entity
+            // positions inside, and the reverse: no link back from p to e.
+            Query {
+                negations: vec![negation(
+                    None,
+                    vec![pattern(var("p"), "x/link", var("e"))],
+                    vec![],
+                )],
+                ..base.clone()
+            },
+            // Uncorrelated absence with no positive patterns and an empty join.
+            Query {
+                patterns: vec![],
+                negations: vec![negation(Some(&[]), vec![flagged("x")], vec![])],
+                select: vec![],
+                order: vec![],
+                ..base.clone()
+            },
+            // Aggregated: links per entity to peers that have no value.
+            Query {
+                select: vec![name("e")],
+                with: vec![name("p")],
+                aggregates: vec![crate::Aggregate {
+                    function: crate::AggregateFn::Count,
+                    var: name("p"),
+                    name: name("n"),
+                }],
+                order: vec![order("e", Direction::Asc)],
+                negations: vec![negation(Some(&["p"]), vec![valued("p", "o")], vec![])],
+                ..base.clone()
+            },
+        ]
+    }
     // A value of the same type, reasserted later on another entity.
     fn wanted_again(values: &[Value]) -> Value {
         values.last().cloned().expect("at least the wanted value")
@@ -592,6 +763,51 @@ mod tests {
             drop((store,db_a));let reopened = Store::open(&path).unwrap();
             prop_assert_eq!(parity(&reopened.db_at(&a.after).unwrap(),&q,&params),expected);
             prop_assert_eq!(parity_or_error(&reopened.db_at(&a.after).unwrap(),&grouped,&params),grouped_expected);
+        }
+        #[test]
+        fn negation_matches_reference_at_the_view_revision(
+            links in proptest::collection::vec((0_usize..4, 0_usize..4), 0..8),
+            values in proptest::collection::vec((0_usize..4, 0_i64..4), 0..6),
+            flags in proptest::collection::vec(0_usize..4, 0..3),
+            later in proptest::collection::vec((0_usize..3, 0_usize..4, 0_i64..4), 0..6),
+            cut in 0_i64..4, limit in 1_u64..8,
+        ) {
+            let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("not.sqlite"); let store = Store::open(&path).unwrap();
+            let mut tx = Tx::builder().define_attribute(definition("x/link", ValueType::Ref)).define_attribute(definition("x/value", ValueType::I64)).define_attribute(definition("x/flag", ValueType::Bool));
+            for i in 0..4 { tx = tx.new_entity(TempId::new(i.to_string()).unwrap()); }
+            let ids = store.commit(tx.build().unwrap()).unwrap().created_entities;
+            let mut tx = Tx::builder();
+            for (a, b) in &links { tx = tx.assert(ids[*a].clone(), "x/link".parse().unwrap(), ValueTerm::Value(Value::Ref(ids[*b].clone()))); }
+            for (e, v) in &values { tx = tx.assert(ids[*e].clone(), "x/value".parse().unwrap(), Value::I64(*v)); }
+            for e in &flags { tx = tx.assert(ids[*e].clone(), "x/flag".parse().unwrap(), Value::Bool(true)); }
+            let a = store.commit(tx.build().unwrap()).unwrap();
+            let db_a = store.db().unwrap();
+            let params: Params = [(name("cut"), Value::I64(cut))].into();
+            let queries = negation_queries(limit);
+            let expected: Vec<_> = queries.iter().map(|q| parity(&db_a, q, &params)).collect();
+            // Later commits retract facts A saw and assert facts it must not see.
+            let mut tx = Tx::builder();
+            for (kind, e, v) in &later {
+                tx = match kind {
+                    0 => tx.assert(ids[*e].clone(), "x/value".parse().unwrap(), Value::I64(*v)),
+                    1 => tx.assert(ids[*e].clone(), "x/flag".parse().unwrap(), Value::Bool(true)),
+                    _ => tx.assert(ids[*e].clone(), "x/link".parse().unwrap(), ValueTerm::Value(Value::Ref(ids[usize::try_from(*v).unwrap()].clone()))),
+                };
+            }
+            store.commit(tx.build().unwrap()).unwrap();
+            let mut tx = Tx::builder();
+            for (e, v) in values.iter().take(2).collect::<std::collections::BTreeSet<_>>() { tx = tx.retract(ids[*e].clone(), "x/value".parse().unwrap(), Value::I64(*v)); }
+            for e in flags.iter().take(1) { tx = tx.retract(ids[*e].clone(), "x/flag".parse().unwrap(), Value::Bool(true)); }
+            store.commit(tx.build().unwrap()).unwrap();
+            for (q, expected) in queries.iter().zip(&expected) {
+                prop_assert_eq!(&parity(&db_a, q, &params), expected);
+                prop_assert_eq!(&parity(&store.db().unwrap(), q, &params).columns, &expected.columns);
+            }
+            drop((store, db_a));
+            let reopened = Store::open(&path).unwrap();
+            for (q, expected) in queries.iter().zip(&expected) {
+                prop_assert_eq!(&parity(&reopened.db_at(&a.after).unwrap(), q, &params), expected);
+            }
         }
     }
 }

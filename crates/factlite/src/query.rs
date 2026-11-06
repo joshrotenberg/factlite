@@ -122,14 +122,34 @@ pub struct Aggregate {
     pub name: QueryName,
 }
 
+/// A negated group: a binding survives only if no extension of its join
+/// variables satisfies every pattern and predicate in the group at the view's
+/// revision. Groups do not nest.
+///
+/// With `join` absent (`not`), every variable in the group must be bound by the
+/// query's positive patterns. With `join` present (`not-join`), the named
+/// variables must be bound by the positive patterns; every other variable in
+/// the group is local to it, must be bound by a pattern in the group, and must
+/// not share a name with a variable bound outside.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Negation {
+    /// `None` for `not`; the join variables for `not-join`.
+    pub join: Option<Vec<QueryName>>,
+    /// Fact patterns that must all match for the group to hold.
+    pub patterns: Vec<Pattern>,
+    /// Comparisons over the group's variables, constants and parameters.
+    pub predicates: Vec<Predicate>,
+}
+
 /// Concrete input values, validated against Query's declared input types.
 pub type Params = BTreeMap<QueryName, Value>;
 
 /// Conjunctive match/filter/project/distinct/order/limit query.
-/// Execution, interchange, and SQL compilation follow this AST without extending
-/// it to optional, negative or recursive patterns.
+/// Execution, interchange, and SQL compilation follow this AST. Negation is
+/// limited to one level of `not` and `not-join` groups; there are no optional,
+/// disjunctive or recursive patterns.
 ///
-/// With aggregates, evaluation is: match and filter; project the selected
+/// With aggregates, evaluation is: match, filter and apply negations; project the selected
 /// variables, the `with` variables and each aggregate's variable; remove
 /// duplicate tuples; group by the selected variables; aggregate each group;
 /// then order and limit. Only distinct tuples are aggregated, so include a
@@ -144,6 +164,8 @@ pub struct Query {
     pub patterns: Vec<Pattern>,
     /// Comparisons over bound variables/constants/parameters.
     pub predicates: Vec<Predicate>,
+    /// Negated groups, applied with the predicates before projection.
+    pub negations: Vec<Negation>,
     /// Bound selected columns, without duplicate names.
     pub select: Vec<QueryName>,
     /// Optional ordering over selected fields and aggregate names only.
@@ -208,35 +230,7 @@ impl Query {
         }
         let mut variables = BTreeMap::new();
         for pattern in &self.patterns {
-            let definition = schema.get(&pattern.attribute).ok_or_else(|| {
-                Error::new(
-                    ErrorCode::UnknownAttribute,
-                    ErrorContext::Attribute {
-                        attribute: pattern.attribute.clone(),
-                    },
-                    "query attribute is not defined at this snapshot",
-                )
-            })?;
-            for (term, expected) in [
-                (&pattern.entity, ValueType::Ref),
-                (&pattern.value, definition.value_type()),
-            ] {
-                match term {
-                    Term::Var(name) => {
-                        if let Some(actual) = variables.insert(name.clone(), expected)
-                            && actual != expected
-                        {
-                            return Err(mismatch(expected, actual));
-                        }
-                    }
-                    _ => {
-                        let actual = self.term_type(term, &variables)?;
-                        if expected != actual {
-                            return Err(mismatch(expected, actual));
-                        }
-                    }
-                }
-            }
+            self.bind_pattern(pattern, schema, &mut variables, Scope::Open)?;
         }
         for predicate in &self.predicates {
             let left = self.term_type(&predicate.left, &variables)?;
@@ -244,6 +238,9 @@ impl Query {
             if !matches!(predicate.comparison, Comparison::Eq | Comparison::Ne) && left != right {
                 return Err(mismatch(left, right));
             }
+        }
+        for negation in &self.negations {
+            self.negation_scope(negation, schema, &variables)?;
         }
         let mut selected = BTreeSet::new();
         for name in &self.select {
@@ -315,6 +312,154 @@ impl Query {
         Ok(variables)
     }
 
+    /// Type-checks one pattern, binding new variables as `scope` allows.
+    fn bind_pattern(
+        &self,
+        pattern: &Pattern,
+        schema: &Schema,
+        variables: &mut BTreeMap<QueryName, ValueType>,
+        scope: Scope<'_>,
+    ) -> Result<()> {
+        let definition = schema.get(&pattern.attribute).ok_or_else(|| {
+            Error::new(
+                ErrorCode::UnknownAttribute,
+                ErrorContext::Attribute {
+                    attribute: pattern.attribute.clone(),
+                },
+                "query attribute is not defined at this snapshot",
+            )
+        })?;
+        for (term, expected) in [
+            (&pattern.entity, ValueType::Ref),
+            (&pattern.value, definition.value_type()),
+        ] {
+            match term {
+                Term::Var(name) => {
+                    if let Some(actual) = variables.get(name) {
+                        if *actual != expected {
+                            return Err(mismatch(expected, *actual));
+                        }
+                        continue;
+                    }
+                    match scope {
+                        Scope::Open => {}
+                        Scope::Closed => {
+                            return Err(Error::invalid(
+                                "not",
+                                format!(
+                                    "not variables must be bound outside the group: {}",
+                                    name.as_str()
+                                ),
+                            ));
+                        }
+                        Scope::Local(outer) => {
+                            if outer.contains_key(name) {
+                                return Err(Error::invalid(
+                                    "not-join",
+                                    format!(
+                                        "local variable shadows an outer variable: {}",
+                                        name.as_str()
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                    variables.insert(name.clone(), expected);
+                }
+                _ => {
+                    let actual = self.term_type(term, variables)?;
+                    if expected != actual {
+                        return Err(mismatch(expected, actual));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates a negated group against the outer variables and returns the
+    /// variables visible inside it, with their types: join (or all outer)
+    /// variables, then group locals.
+    pub(crate) fn negation_scope(
+        &self,
+        negation: &Negation,
+        schema: &Schema,
+        outer: &BTreeMap<QueryName, ValueType>,
+    ) -> Result<BTreeMap<QueryName, ValueType>> {
+        if negation.patterns.is_empty() && negation.predicates.is_empty() {
+            return Err(Error::invalid(
+                "not",
+                "a negated group needs at least one pattern or predicate",
+            ));
+        }
+        let (mut scope, rule) = match &negation.join {
+            None => (outer.clone(), Scope::Closed),
+            Some(join) => {
+                let mut scope = BTreeMap::new();
+                for name in join {
+                    let ty = *outer.get(name).ok_or_else(|| {
+                        Error::invalid(
+                            "not-join",
+                            format!(
+                                "join variables must be bound outside the group: {}",
+                                name.as_str()
+                            ),
+                        )
+                    })?;
+                    if scope.insert(name.clone(), ty).is_some() {
+                        return Err(Error::invalid("not-join", "duplicate join variable"));
+                    }
+                }
+                (scope, Scope::Local(outer))
+            }
+        };
+        for pattern in &negation.patterns {
+            self.bind_pattern(pattern, schema, &mut scope, rule)?;
+        }
+        for predicate in &negation.predicates {
+            let left = self.group_term_type(&predicate.left, &scope, outer, rule)?;
+            let right = self.group_term_type(&predicate.right, &scope, outer, rule)?;
+            if !matches!(predicate.comparison, Comparison::Eq | Comparison::Ne) && left != right {
+                return Err(mismatch(left, right));
+            }
+        }
+        Ok(scope)
+    }
+
+    fn group_term_type(
+        &self,
+        term: &Term,
+        scope: &BTreeMap<QueryName, ValueType>,
+        outer: &BTreeMap<QueryName, ValueType>,
+        rule: Scope<'_>,
+    ) -> Result<ValueType> {
+        if let Term::Var(name) = term
+            && !scope.contains_key(name)
+        {
+            return Err(match rule {
+                Scope::Local(_) if outer.contains_key(name) => Error::invalid(
+                    "not-join",
+                    format!("outer variable is not a join variable: {}", name.as_str()),
+                ),
+                Scope::Local(_) => Error::invalid(
+                    "not-join",
+                    format!(
+                        "local variable must be bound by a pattern in the group: {}",
+                        name.as_str()
+                    ),
+                ),
+                _ => Error::invalid(
+                    "not",
+                    format!(
+                        "not variables must be bound outside the group: {}",
+                        name.as_str()
+                    ),
+                ),
+            });
+        }
+        self.term_type(term, scope)
+    }
+
     fn term_type(
         &self,
         term: &Term,
@@ -330,6 +475,17 @@ impl Query {
             }),
         }
     }
+}
+
+/// Whether a pattern may bind variables not already in scope.
+#[derive(Clone, Copy)]
+enum Scope<'a> {
+    /// Positive patterns: any new variable is bound.
+    Open,
+    /// `not`: no new variables.
+    Closed,
+    /// `not-join`: new variables are local, and must not name an outer one.
+    Local(&'a BTreeMap<QueryName, ValueType>),
 }
 
 impl Db {

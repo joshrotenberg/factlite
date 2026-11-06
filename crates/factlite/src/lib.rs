@@ -65,8 +65,8 @@ pub use error::{CommitOutcome, Error, ErrorCode, ErrorContext, Result};
 pub use identity::{EntityId, LineageId, Revision, SnapshotId, StoreId, TempId};
 pub use model::{Fact, FactDelta, TxReport};
 pub use query::{
-    Aggregate, AggregateFn, Comparison, Direction, Order, Params, Pattern, Predicate, Query,
-    QueryName, QueryResult, Term,
+    Aggregate, AggregateFn, Comparison, Direction, Negation, Order, Params, Pattern, Predicate,
+    Query, QueryName, QueryResult, Term,
 };
 pub use schema::{AttrName, AttributeDefinition, Cardinality, Schema, Uniqueness};
 pub use store::{Store, StoreOptions, Validation};

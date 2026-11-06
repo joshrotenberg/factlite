@@ -62,6 +62,9 @@ Shared variables join entity positions with reference values. Projection is
 distinct; ordering refers to selected fields, and limits apply afterward.
 Supply a total order (the example uses title, then task ID) for predictable
 limited results. Every declared parameter must be supplied, even for limit zero.
+`Query::negations` holds `Negation` groups: `join: None` is `not`, and
+`join: Some(vars)` is `not-join` with group-local variables. A binding survives
+only if no group holds for it at the view's revision.
 
 `history(filter, after)` returns effective fact events in `(after, basis]`.
 `transactions(after)` includes full reports for no-change commits too. Attribute

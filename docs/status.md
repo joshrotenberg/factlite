@@ -15,10 +15,10 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 197 pass locally with babashka installed and `REQUIRE_BB=1`,
-  including forty-nine 1,024-case properties and the pod's three babashka
-  tests; without babashka those three skip. CI on GitHub runs the same gate on
-  Linux with babashka.
+- **Tests:** 208 pass locally with babashka installed and `REQUIRE_BB=1`,
+  including fifty 1,024-case properties and the pod's three babashka
+  tests; without babashka those three skip. GitHub Actions is unavailable for
+  this account this month, so the local gate stands in for CI.
 - **Reviews:** entries 0001 to 0043 in `reviews/` are self-reviews. Since 0044,
   each review also records independent Claude and Codex subagent reviews, run
   with the kit subagent tooling, alongside a self-review.
@@ -27,7 +27,7 @@ current.
 - **Decided, next to build:** plan step 12, from the four briefs in
   `decision-briefs/` decided on 2026-11-06:
   - 12.1: read-only structural open and verify (done);
-  - 12.2: query negation;
+  - 12.2: query negation (done);
   - 12.3: transaction lookup refs;
   - 12.4: permanence and encryption guidance.
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
@@ -766,6 +766,20 @@ current.
 - **Validation:** local only. GitHub Actions is unavailable (account out of
   minutes), so the user directed that the local gate stands in for CI.
 - **What's next:** 12.2, query negation.
+
+## 12.2 Query negation: done
+
+- **Done:** `not` and `not-join` in the library (`Negation`), the wire
+  (`query.not`), the pod (`(not ...)` and `(not-join [...] ...)` in `:where`)
+  and the CLI. SQL compiles each group to a correlated `NOT EXISTS`. 208 tests
+  pass with `REQUIRE_BB=1`. Review: `reviews/0050-query-negation.md`.
+- **Decisions:** lexical scopes, with shadowing in `not-join` rejected and
+  empty groups invalid; see `decisions.md`, "Query negation (12.2)".
+- **Validation:** local only; GitHub Actions is unavailable.
+- **Left open:** the predicate part of the SQL budget is not observed by a
+  test. `Factlite-Design.md` still lists negative patterns as out of scope; it
+  is kept as historical reference.
+- **What's next:** 12.3, transaction lookup refs (A1).
 
 ## Environment notes
 

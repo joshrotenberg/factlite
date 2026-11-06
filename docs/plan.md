@@ -284,7 +284,7 @@ Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
     and is caught by `verify`;
   - writable structural opens are refused;
   - timings are recorded.
-- [ ] **12.2 Query negation** (roadmap 5). Add `not` and `not-join` with
+- [x] **12.2 Query negation** (roadmap 5). Add `not` and `not-join` with
   lexically scoped variables:
   - `not` variables must be bound outside the group;
   - `not-join` locals must be bound inside the group and must not escape.

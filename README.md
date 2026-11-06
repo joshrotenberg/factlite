@@ -17,7 +17,8 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
   - exact idempotent retries.
 - **Reads:** `Store::db()` and `db_at()` return views pinned to a revision,
   which stay stable across reopen and backups. Facts, pull, lookups by unique
-  value, entity- or attribute-filtered history and joined queries run as
+  value, entity- or attribute-filtered history and joined queries (with `not`
+  and `not-join`) run as
   revision-bounded SQL over a derived datom interval index. Schema reads
   schema events. Transaction enumeration and unfiltered history read the
   retained reports. Aggregates are computed in Rust over the distinct tuples

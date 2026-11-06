@@ -686,6 +686,41 @@ them.
 - **History:** immutable. Documentation of permanence and application-level
   encryption; a lineage rewrite only if needed; no in-place excision.
 
+## Query negation (12.2)
+
+- `Query` gains `negations: Vec<Negation>`. A `Negation` has `join`
+  (`None` for `not`, `Some(vars)` for `not-join`), `patterns` and
+  `predicates`. Groups are one level deep.
+- A binding of the positive patterns that passes the outer predicates
+  survives only if no extension of its join variables (all outer variables for
+  `not`) satisfies every group pattern and predicate at the view's revision.
+  Negation runs before projection, distinct tuples and aggregation.
+- Scopes. Outer variables come from positive patterns only.
+  - `not`: every group variable must be an outer variable.
+  - `not-join`: join variables are distinct outer variables. Other group
+    variables are local, must be bound by a group pattern (not only a
+    predicate, and in any order), and must not share a name with an outer
+    variable. Rejecting shadowing tightens the brief's wording: a reused name
+    is more likely a mistake than an intended fresh variable.
+  - Sibling groups have separate scopes, so a local name may have different
+    types in each.
+  - An empty join list and unused join variables are valid. An empty group is
+    invalid, though well defined, because it would remove every row.
+  - Group attributes unknown at the view are `UnknownAttribute`. All of this
+    runs before data is read, including with limit 0.
+- SQL: each group is a correlated `NOT EXISTS (SELECT 1 [FROM ...] WHERE ...)`.
+  Group aliases carry the attribute, type-tag and visibility conditions of
+  outer patterns. Join variables reuse the outer binding forms, so entity
+  positions compare TEXT and value positions BLOB as before. Typed comparison
+  folding uses the group's own types. Group patterns and predicates count
+  toward the SQL budget for the reference fallback.
+- Wire: optional `query.not`, an array of `{"join"?, "match"?, "where"?}`.
+  Absent `join` is `not`; `"join":[]` is a `not-join` with no join variables.
+  Encoding omits `not` when there are no groups, so existing envelopes encode
+  unchanged.
+- Pod: `(not clause ...)` and `(not-join [?var ...] clause ...)` in `:where`,
+  with vector clauses as patterns and list clauses as comparisons.
+
 ## Read-only structural open and verify (12.1)
 
 - `Validation::Full` stays the default. `Validation::Structural` checks format

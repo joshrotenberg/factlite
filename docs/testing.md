@@ -163,6 +163,17 @@ accessors and cross-type distinctions. An upgrade test rebuilds a real format-3
 layout (type checks 0..=5), opens it, verifies parity at every revision, and
 commits keyword and inst facts.
 
+Since 12.2, a 1,024-case property checks SQL against the reference evaluator
+for every negation form at one view: `not`, `not-join` with a predicate on a
+local, a local joined across two group patterns, conjunctive groups,
+predicate-only groups with mixed-type folding, an empty join with no positive
+patterns, and an aggregate over negated tuples. It rechecks after later
+commits that retract facts the view saw and assert facts it must not see, and
+after reopen. Integration tests pin expected rows for absence at two
+revisions with a real reopen, every scope rule, the pattern-budget fallback
+(with a group SQLite could not join), and wire `join` absence against
+`"join":[]`. The predicate budget is not observed by a test.
+
 CI installs babashka 1.13.229 from its pinned release, verified by checksum, and
 sets `REQUIRE_BB`, so the pod's babashka tests fail rather than skip if `bb` is
 missing. A CLI scenario holds a write lock and checks that `--busy-timeout-ms`

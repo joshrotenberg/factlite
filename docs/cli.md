@@ -108,6 +108,19 @@ when equal values from different matches must each count. Count results are
 i64; sum keeps its i64 or f64 type, and overflow or a non-finite f64 total is
 an error. No matching tuples give no rows.
 
+Negation is optional `query.not`, an array of groups
+`{"join":["task"],"match":[...],"where":[...]}` whose `match` and `where`
+default empty. A row survives only if no group holds for it at the view's
+revision. Without `join` the group is `not`: every variable in it must be
+bound by the outer patterns. With `join` it is `not-join`: the listed
+variables must be bound outside, and every other variable is local to the
+group, must be bound by one of its patterns, must not reuse an outer
+variable's name, and is invisible outside. `"join":[]` correlates on nothing.
+Absence of any value is
+`{"join":["task"],"match":[[{"var":"task"},"task/owner",{"var":"owner"}]]}`.
+A group needs at least one pattern or predicate, groups do not nest, and an
+attribute unknown at the view is `UnknownAttribute`, not trivially absent.
+
 ## Backup
 
 `backup --to PATH` emits the full head token copied by SQLite and creates a

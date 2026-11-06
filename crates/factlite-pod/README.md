@@ -199,6 +199,28 @@ variables. Without `:with [?run]`, two runs with equal cost in one recipe would
 count once. `sum` takes i64 or f64 variables and fails rather than overflow. A
 query with no matches returns no rows, even `(count ?x)` alone.
 
+Negation goes in `:where` as `(not clause ...)` or
+`(not-join [?var ...] clause ...)`, where a vector clause is a pattern and a
+list clause is a comparison. A result survives only if no group holds for it
+at the read's revision.
+
+```clojure
+;; Runs with no outcome at all.
+(f/q conn '{:match [[?run :run/recipe ?recipe]]
+            :where [(not-join [?run] [?run :run/outcome ?o])]
+            :select [?run]})
+;; Runs whose outcome is not "failed", including runs with no outcome.
+(f/q conn '{:match [[?run :run/recipe ?recipe]]
+            :where [(not [?run :run/outcome "failed"])]
+            :select [?run]})
+```
+
+In `not`, every variable must be bound outside the group. In `not-join`, the
+listed variables must be bound outside; the others are local to the group,
+must be bound by one of its patterns, and must not reuse an outer name.
+Groups do not nest. An attribute unknown at the read's revision is an
+`UnknownAttribute` error.
+
 ## Errors
 
 Every failure is an `ex-info` whose message is the library's message. Library
