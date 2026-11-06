@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 181 tests, including forty-nine 1,024-case properties, plus the
+gate passed 183 tests, including forty-nine 1,024-case properties, plus the
 asserted Rust workflow. Items 9 to 11 add indexed reads and commits, a babashka pod, and consumer
 requests (lookups, aggregates, keyword and inst types). The repository is
 published to a private GitHub remote, where CI passed 181 tests on Linux.
@@ -688,6 +688,18 @@ Reviews are self-reviews; no independent review has run.
   delivered to the user. They are not stored in the repository.
 - **Decisions:** No license is selected; the repository is private.
 - **What's next:** See `roadmap.md`. Future items use draft pull requests.
+
+## Concurrent first-open fix: done
+
+- **Done:** `Store::open` retries the switch to WAL within its busy timeout
+  when several connections open a new file at once, and labels its SQLite
+  steps in errors. Found by CI on PR #5. Review:
+  `reviews/0045-concurrent-first-open.md`.
+- **Evidence:** before the fix, the stress test failed 7 of 10 runs; after it,
+  none. New deterministic tests cover a blocked switch timing out within budget
+  and succeeding after release. 183 tests pass.
+- **What's next:** roadmap item 4 (lookup refs in transactions) needs a
+  decision brief; item 3's brief (PR #5) awaits the user.
 
 ## Environment notes
 

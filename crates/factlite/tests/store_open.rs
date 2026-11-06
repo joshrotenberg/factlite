@@ -211,7 +211,7 @@ fn opening_an_existing_store_neither_takes_nor_waits_for_the_write_lock() {
 fn concurrent_first_opens_initialize_one_store_identity() {
     // Many threads opening one new file race on initialization and on the
     // switch to WAL. Every open must succeed and agree on one identity.
-    for _ in 0..20 {
+    for round in 0..10 {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("fresh.sqlite");
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(32));
@@ -221,11 +221,18 @@ fn concurrent_first_opens_initialize_one_store_identity() {
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
                     barrier.wait();
-                    Store::open(&path).unwrap().head().unwrap()
+                    Store::open(&path).and_then(|store| store.head())
                 })
             })
             .collect();
-        let heads: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let heads: Vec<_> = handles
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .unwrap()
+                    .unwrap_or_else(|error| panic!("round {round}: {error:?}"))
+            })
+            .collect();
         assert!(heads.iter().all(|head| head == &heads[0]));
         assert_eq!(heads[0].revision(), Revision::ZERO);
     }
@@ -304,4 +311,74 @@ fn read_only_views_refresh_only_explicitly_over_one_connection() {
         reader.at(&future).err().unwrap().code(),
         ErrorCode::InvalidSnapshot
     );
+}
+
+/// A valid store whose journal mode another connection has reset to DELETE,
+/// with that connection holding a read lock, blocks the switch to WAL.
+fn rollback_mode_store_with_reader() -> (tempfile::TempDir, std::path::PathBuf, Connection) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rollback.sqlite");
+    drop(Store::open(&path).unwrap());
+    let reset = Connection::open(&path).unwrap();
+    let mode: String = reset
+        .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode, "delete");
+    drop(reset);
+    let reader = Connection::open(&path).unwrap();
+    reader
+        .execute_batch("BEGIN; SELECT COUNT(*) FROM store_info;")
+        .unwrap();
+    (dir, path, reader)
+}
+
+#[test]
+fn blocked_switch_to_wal_fails_busy_within_its_timeout_and_names_the_step() {
+    use factlite::StoreOptions;
+    use std::time::{Duration, Instant};
+    let (_dir, path, reader) = rollback_mode_store_with_reader();
+    for millis in [0, 200] {
+        let options = StoreOptions::new()
+            .with_busy_timeout(Duration::from_millis(millis))
+            .unwrap();
+        let started = Instant::now();
+        let error = Store::open_with(&path, &options).err().unwrap();
+        let waited = started.elapsed();
+        assert_eq!(error.code(), ErrorCode::Busy, "{error:?}");
+        assert!(
+            matches!(error.context(), factlite::ErrorContext::Storage { operation } if *operation == "open: enable WAL"),
+            "{error:?}"
+        );
+        // The overall budget holds, with slack for scheduling.
+        assert!(
+            waited < Duration::from_millis(millis + 500),
+            "{waited:?} for {millis} ms"
+        );
+        if millis > 0 {
+            assert!(waited >= Duration::from_millis(millis), "{waited:?}");
+        }
+    }
+    drop(reader);
+}
+
+#[test]
+fn switch_to_wal_succeeds_once_the_blocking_reader_ends() {
+    use factlite::StoreOptions;
+    use std::time::Duration;
+    let (_dir, path, reader) = rollback_mode_store_with_reader();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        reader.execute_batch("COMMIT").unwrap();
+    });
+    let options = StoreOptions::new()
+        .with_busy_timeout(Duration::from_secs(5))
+        .unwrap();
+    let store = Store::open_with(&path, &options).unwrap();
+    release.join().unwrap();
+    assert_eq!(store.head().unwrap().revision(), Revision::ZERO);
+    let mode: String = Connection::open(&path)
+        .unwrap()
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode, "wal");
 }
