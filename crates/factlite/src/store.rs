@@ -11,7 +11,9 @@ use crate::{
 };
 
 const APPLICATION_ID: i32 = 0x464c4954;
-const FORMAT_VERSION: i32 = 2;
+const FORMAT_VERSION: i32 = 3;
+/// Format 2 lacks the attribute/value index; writable opens add it.
+const FORMAT_V2: i32 = 2;
 /// Format 1 lacks the derived datom index; writable opens upgrade it in place.
 const FORMAT_V1: i32 = 1;
 const TABLES_V1: [&str; 5] = [
@@ -179,13 +181,14 @@ impl Store {
                 validate_current(&transaction)?;
                 transaction.commit()?;
             }
-            FileKind::Empty | FileKind::FormatOne => {
+            FileKind::Empty | FileKind::FormatOne | FileKind::FormatTwo => {
                 transaction.rollback()?;
                 let transaction =
                     connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 match file_kind(&transaction)? {
                     FileKind::Empty => initialize(&transaction)?,
                     FileKind::FormatOne => upgrade_v1(&transaction)?,
+                    FileKind::FormatTwo => upgrade_v2(&transaction)?,
                     FileKind::Current => {}
                 }
                 validate_current(&transaction)?;
@@ -245,6 +248,7 @@ impl Store {
 enum FileKind {
     Empty,
     FormatOne,
+    FormatTwo,
     Current,
 }
 
@@ -263,6 +267,8 @@ fn file_kind(connection: &Connection) -> Result<FileKind> {
         Ok(FileKind::Empty)
     } else if application == APPLICATION_ID && version == FORMAT_V1 {
         Ok(FileKind::FormatOne)
+    } else if application == APPLICATION_ID && version == FORMAT_V2 {
+        Ok(FileKind::FormatTwo)
     } else if application == APPLICATION_ID && version == FORMAT_VERSION {
         Ok(FileKind::Current)
     } else {
@@ -297,7 +303,43 @@ fn validate_current(connection: &Connection) -> Result<()> {
     if table_names(connection)? != TABLES {
         return Err(corrupt("database tables do not match the supported format"));
     }
+    validate_indexes(connection)?;
     validate_head(connection)
+}
+
+fn validate_indexes(connection: &Connection) -> Result<()> {
+    let names: Vec<String> = connection
+        .prepare("SELECT name FROM sqlite_schema WHERE type='index' AND tbl_name='datoms' AND name NOT GLOB 'sqlite_*' ORDER BY name")?
+        .query_map([], |row| row.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    if names != crate::index::INDEXES {
+        return Err(corrupt("datom indexes do not match the supported format"));
+    }
+    Ok(())
+}
+
+// Adds the attribute/value index to a format-2 file inside the open
+// transaction; the datom intervals themselves are unchanged and are verified
+// against the retained log by the validation that follows.
+fn upgrade_v2(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
+    if table_names(transaction)? != TABLES {
+        return Err(corrupt("database tables do not match the supported format"));
+    }
+    let format: i32 = transaction.query_row(
+        "SELECT format FROM store_info WHERE singleton=1",
+        [],
+        |row| row.get(0),
+    )?;
+    if format != FORMAT_V2 {
+        return Err(corrupt("stored format differs from file format marker"));
+    }
+    transaction.execute_batch(crate::index::AVET_DDL)?;
+    transaction.execute(
+        "UPDATE store_info SET format=?1 WHERE singleton=1",
+        [FORMAT_VERSION],
+    )?;
+    transaction.pragma_update(None, "user_version", FORMAT_VERSION)?;
+    Ok(())
 }
 
 // Adds and derives the datom index for a format-1 file inside the open
@@ -400,10 +442,7 @@ pub(crate) fn validate_existing(connection: &Connection) -> Result<()> {
             "file is not a supported Factlite database",
         ));
     }
-    if table_names(connection)? != TABLES {
-        return Err(corrupt("database tables do not match the supported format"));
-    }
-    validate_head(connection)
+    validate_current(connection)
 }
 
 fn validate_head(connection: &Connection) -> Result<()> {

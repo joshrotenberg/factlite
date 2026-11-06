@@ -208,3 +208,19 @@ opens the file went from about 7.5 s to 0.14 s.
 Commits and reads are still linear in live state, because they load the full
 state at head. At 10 revisions with 3,001 / 30,001 / 120,001 facts, no-op commit
 medians were 3.1 / 30.9 / 162.8 ms, and head-query medians 5.2 / 59.7 / 359.6 ms.
+
+## Direct indexed reads (9.2): 2026-11-05
+
+`main` at `fb2005c` against the 9.2 branch, ten revisions, seven samples.
+Raw outputs: [before](benchmarks/2026-11-05-macos-before-9.2.jsonl),
+[after](benchmarks/2026-11-05-macos-after-9.2.jsonl). Medians in milliseconds:
+
+| Facts | Query at captured head | Query at revision 1 | All facts at head | No-op commit |
+| ---: | ---: | ---: | ---: | ---: |
+| 3,001 | 5.173 → 0.120 | 5.366 → 0.184 | 2.76 → 1.58 | 3.09 → 2.82 |
+| 30,001 | 61.863 → 0.123 | 63.287 → 0.235 | 30.73 → 15.93 | 34.39 → 33.84 |
+| 120,001 | 394.625 → 0.131 | 395.457 → 0.374 | 147.46 → 65.88 | 172.68 → 168.98 |
+
+The selective joined query no longer depends on live state size. An
+unfiltered `facts` read still returns every visible fact. Commits are unchanged
+by this item.

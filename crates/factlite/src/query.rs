@@ -245,9 +245,9 @@ impl Db {
     /// Validate against this view's historical schema and exact typed inputs.
     /// No query execution is performed by this method.
     pub fn validate_query(&self, query: &Query, params: &Params) -> Result<()> {
-        self.read(|_, model| {
+        self.read_basis(|transaction| {
             query.validate(
-                &model.catalog.schema_at(self.snapshot().revision())?,
+                &crate::index::schema_at(transaction, self.snapshot())?,
                 params,
             )
         })

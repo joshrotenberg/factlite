@@ -498,3 +498,28 @@ scenario testing. See `testing.md` for the verification policy.
 - Not changed: open still replays the whole log, so open is linear in retained
   revisions. Commits and reads still load the complete state at head, so they
   are linear in live state (item 9.2).
+
+## Direct indexed reads and format 3 (9.2)
+
+- `schema`, `facts`, `pull`, `history`, `transactions`, `validate_query` and
+  `query` no longer load the state at R. Each read checks its basis inside its
+  SQL snapshot, then reads schema events bounded by R, entity events for
+  membership, and `datoms` rows visible at R
+  (`asserted <= R AND (retracted IS NULL OR retracted > R)`).
+- Queries compile to SQL over `main.datoms`, one alias per pattern, each bound
+  to the view's revision. No TEMP relation is created. Every variable has a
+  BLOB expression for value comparison, selection and decoding. A variable
+  first bound at an entity position also keeps the TEXT entity column, so later
+  entity positions join on `entity = <text>` and can use the primary key.
+  Entity constants bind canonical identity text. Attribute names bind as text.
+  Large ASTs beyond the SQL budget still use the reference evaluator, now
+  loading the state at R only for that case.
+- Format 3 adds `datoms_avet (attribute, value, entity, asserted, retracted)`.
+  An attribute fixes its value type, so the type tag is not part of it. Open
+  requires the exact datom index set. Writable opens upgrade format 2 by adding
+  the index, and format 1 by creating the table and both indexes, in the
+  upgrade transaction under the write lock. Read-only opens of formats 1 and 2
+  fail `UnsupportedFormat`.
+- Results are unchanged in value and order: facts and pulled values are still
+  sorted in Rust by canonical order, and queries keep the former SQL for
+  distinct, order and limit.

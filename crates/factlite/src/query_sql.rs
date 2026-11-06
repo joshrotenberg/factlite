@@ -1,11 +1,12 @@
-//! Bound SQL over a temporary relation built from the pinned state, never head.
-use std::collections::{BTreeMap, HashSet};
+//! Bound SQL over the revision-interval datom index, bounded to the pinned
+//! revision, never head.
+use std::collections::BTreeMap;
 
-use rusqlite::{Transaction, params, params_from_iter, types::Value as SqlValue};
+use rusqlite::{Transaction, params_from_iter, types::Value as SqlValue};
 
 use crate::{
-    AttrName, Comparison, Db, Direction, Fact, Params, Query, QueryName, QueryResult, Result,
-    Schema, Term, Value, ValueType, codec,
+    Comparison, Db, Direction, Params, Query, QueryName, QueryResult, Result, Schema, SnapshotId,
+    Term, Value, ValueType, codec,
 };
 
 struct Compiled {
@@ -13,9 +14,34 @@ struct Compiled {
     bindings: Vec<SqlValue>,
     columns: Vec<ValueType>,
 }
+
+/// SQL for a bound variable. Every variable has a BLOB form, matching value
+/// columns and decoding. A variable first bound at an entity position also
+/// keeps the TEXT entity column, so later entity positions join on it without
+/// a cast and can use the primary key.
+#[derive(Clone)]
+struct Binding {
+    blob: String,
+    text: Option<String>,
+}
+
+impl Binding {
+    fn text(&self) -> String {
+        self.text
+            .clone()
+            .unwrap_or_else(|| format!("CAST({} AS TEXT)", self.blob))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Position {
+    Entity,
+    Value,
+}
+
 struct Compiler<'a> {
     params: &'a Params,
-    variables: BTreeMap<QueryName, String>,
+    variables: BTreeMap<QueryName, Binding>,
     bindings: Vec<SqlValue>,
 }
 impl Compiler<'_> {
@@ -23,47 +49,93 @@ impl Compiler<'_> {
         self.bindings.push(value);
         format!("?{}", self.bindings.len())
     }
+    fn constant(&self, term: &Term) -> Option<Value> {
+        match term {
+            Term::Var(_) => None,
+            Term::Const(value) => Some(value.clone()),
+            Term::Param(name) => Some(self.params[name].clone()),
+        }
+    }
     fn term(&mut self, term: &Term) -> String {
         match term {
-            Term::Var(name) => self.variables[name].clone(),
-            Term::Const(value) => self.bind(SqlValue::Blob(codec::encode_value(value))),
-            Term::Param(name) => self.bind(SqlValue::Blob(codec::encode_value(&self.params[name]))),
+            Term::Var(name) => self.variables[name].blob.clone(),
+            other => {
+                let value = self.constant(other).expect("constant term");
+                self.bind(SqlValue::Blob(codec::encode_value(&value)))
+            }
         }
     }
-    fn position(&mut self, term: &Term, expression: String, conditions: &mut Vec<String>) {
-        if let Term::Var(name) = term
-            && !self.variables.contains_key(name)
-        {
-            self.variables.insert(name.clone(), expression);
+    fn position(
+        &mut self,
+        term: &Term,
+        alias: &str,
+        position: Position,
+        conditions: &mut Vec<String>,
+    ) {
+        let column = match position {
+            Position::Entity => format!("{alias}.entity"),
+            Position::Value => format!("{alias}.value"),
+        };
+        if let Term::Var(name) = term {
+            match self.variables.get(name).cloned() {
+                None => {
+                    let binding = match position {
+                        Position::Entity => Binding {
+                            blob: format!("CAST({column} AS BLOB)"),
+                            text: Some(column),
+                        },
+                        Position::Value => Binding {
+                            blob: column,
+                            text: None,
+                        },
+                    };
+                    self.variables.insert(name.clone(), binding);
+                }
+                Some(binding) => conditions.push(match position {
+                    Position::Entity => format!("{column} = {}", binding.text()),
+                    Position::Value => format!("{column} = {}", binding.blob),
+                }),
+            }
             return;
         }
-        conditions.push(format!("{expression} = {}", self.term(term)));
+        let value = self.constant(term).expect("constant term");
+        let bound = match (position, &value) {
+            // Entity columns hold canonical identity text.
+            (Position::Entity, Value::Ref(id)) => self.bind(SqlValue::Text(id.to_string())),
+            _ => self.bind(SqlValue::Blob(codec::encode_value(&value))),
+        };
+        conditions.push(format!("{column} = {bound}"));
     }
 }
-fn attribute_ids(schema: &Schema) -> BTreeMap<AttrName, i64> {
-    schema
-        .attributes()
-        .enumerate()
-        .map(|(index, definition)| (definition.name().clone(), index as i64))
-        .collect()
-}
-fn compile(query: &Query, params: &Params, schema: &Schema) -> Result<Compiled> {
+
+/// Compiles the query against `main.datoms`, each pattern restricted to rows
+/// visible at `basis` (the SQL bound to ?1).
+fn compile(
+    query: &Query,
+    params: &Params,
+    schema: &Schema,
+    basis: &SnapshotId,
+) -> Result<Compiled> {
     let types = query.types(schema, params)?;
-    let attrs = attribute_ids(schema);
     let mut compiler = Compiler {
         params,
         variables: BTreeMap::new(),
-        bindings: Vec::new(),
+        bindings: vec![SqlValue::Blob(
+            crate::store::revision_bytes(basis.revision()).to_vec(),
+        )],
     };
     let mut conditions = Vec::new();
     let mut from = Vec::new();
     for (index, pattern) in query.patterns.iter().enumerate() {
         let alias = format!("f{index}");
-        from.push(format!("temp.factlite_query_facts AS {alias}"));
-        let attribute = compiler.bind(SqlValue::Integer(attrs[&pattern.attribute]));
+        from.push(format!("main.datoms AS {alias}"));
+        let attribute = compiler.bind(SqlValue::Text(pattern.attribute.as_str().to_owned()));
         conditions.push(format!("{alias}.attribute = {attribute}"));
-        compiler.position(&pattern.entity, format!("{alias}.entity"), &mut conditions);
-        compiler.position(&pattern.value, format!("{alias}.value"), &mut conditions);
+        conditions.push(format!(
+            "{alias}.asserted <= ?1 AND ({alias}.retracted IS NULL OR {alias}.retracted > ?1)"
+        ));
+        compiler.position(&pattern.entity, &alias, Position::Entity, &mut conditions);
+        compiler.position(&pattern.value, &alias, Position::Value, &mut conditions);
     }
     let term_type = |term: &Term| match term {
         Term::Var(name) => types[name],
@@ -98,7 +170,7 @@ fn compile(query: &Query, params: &Params, schema: &Schema) -> Result<Compiled> 
     let selected: Vec<_> = query
         .select
         .iter()
-        .map(|name| compiler.variables[name].clone())
+        .map(|name| compiler.variables[name].blob.clone())
         .collect();
     let mut sql = format!(
         "SELECT DISTINCT {}",
@@ -142,6 +214,10 @@ fn compile(query: &Query, params: &Params, schema: &Schema) -> Result<Compiled> 
         let bound = compiler.bind(SqlValue::Integer(i64::try_from(limit).unwrap_or(-1)));
         sql.push_str(&format!(" LIMIT {bound}"));
     }
+    // A query with no patterns never references ?1; keep it bound anyway.
+    if from.is_empty() {
+        sql = format!("SELECT * FROM ({sql}) WHERE ?1 IS NOT NULL");
+    }
     Ok(Compiled {
         sql,
         bindings: compiler.bindings,
@@ -149,12 +225,15 @@ fn compile(query: &Query, params: &Params, schema: &Schema) -> Result<Compiled> 
     })
 }
 
+/// Runs the compiled query in the caller's SQL snapshot. Large ASTs beyond the
+/// conservative SQL budget load the state at `basis` for the reference
+/// evaluator instead.
 pub(crate) fn evaluate(
     transaction: &Transaction<'_>,
     query: &Query,
     params: &Params,
     schema: &Schema,
-    facts: &HashSet<Fact>,
+    basis: &SnapshotId,
 ) -> Result<QueryResult> {
     query.validate(schema, params)?;
     // Avoid imposing SQLite's build-specific join/expression/column limits on
@@ -164,46 +243,30 @@ pub(crate) fn evaluate(
         || query.select.len() > 256
         || query.order.len() > 256
     {
-        return crate::query_eval::evaluate(query, params, schema, facts);
+        let model = crate::index::model_at(transaction, basis)?;
+        return crate::query_eval::evaluate(query, params, schema, model.facts());
     }
-    let compiled = compile(query, params, schema)?;
+    let compiled = compile(query, params, schema, basis)?;
     if query.limit == Some(0) {
         return Ok(QueryResult {
             columns: query.select.clone(),
             rows: Vec::new(),
         });
     }
-    transaction.execute_batch("CREATE TEMP TABLE factlite_query_facts(attribute INTEGER NOT NULL, entity BLOB NOT NULL, value BLOB NOT NULL, PRIMARY KEY(attribute,entity,value)) WITHOUT ROWID;")?;
-    let attrs = attribute_ids(schema);
-    {
-        let mut insert = transaction.prepare(
-            "INSERT INTO temp.factlite_query_facts(attribute,entity,value) VALUES (?1,?2,?3)",
-        )?;
-        for fact in facts {
-            insert.execute(params![
-                attrs[&fact.attribute],
-                codec::encode_value(&Value::Ref(fact.entity.clone())),
-                codec::encode_value(&fact.value)
-            ])?;
-        }
-    }
     let mut output = Vec::new();
-    {
-        let mut statement = transaction.prepare(&compiled.sql)?;
-        let mut rows = statement.query(params_from_iter(&compiled.bindings))?;
-        while let Some(row) = rows.next()? {
-            let values = compiled
-                .columns
-                .iter()
-                .enumerate()
-                .map(|(index, ty)| {
-                    codec::decode_value(codec::type_tag(*ty), &row.get::<_, Vec<u8>>(index)?)
-                })
-                .collect::<Result<_>>()?;
-            output.push(values);
-        }
+    let mut statement = transaction.prepare(&compiled.sql)?;
+    let mut rows = statement.query(params_from_iter(&compiled.bindings))?;
+    while let Some(row) = rows.next()? {
+        let values = compiled
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| {
+                codec::decode_value(codec::type_tag(*ty), &row.get::<_, Vec<u8>>(index)?)
+            })
+            .collect::<Result<_>>()?;
+        output.push(values);
     }
-    transaction.execute_batch("DROP TABLE temp.factlite_query_facts")?;
     Ok(QueryResult {
         columns: query.select.clone(),
         rows: output,
@@ -215,14 +278,9 @@ impl Db {
     /// result is owned. Supply a total ordering for predictable limited results.
     /// Large ASTs beyond the conservative SQL budget use the reference evaluator.
     pub fn query(&self, query: &Query, params: &Params) -> Result<QueryResult> {
-        self.read(|transaction, model| {
-            evaluate(
-                transaction,
-                query,
-                params,
-                &model.catalog.schema_at(self.snapshot().revision())?,
-                model.facts(),
-            )
+        self.read_basis(|transaction| {
+            let schema = crate::index::schema_at(transaction, self.snapshot())?;
+            evaluate(transaction, query, params, &schema, self.snapshot())
         })
     }
 }
@@ -235,6 +293,7 @@ mod tests {
         ValueTerm,
     };
     use proptest::prelude::*;
+    use std::collections::HashSet;
 
     fn name(s: &str) -> QueryName {
         QueryName::new(s).unwrap()
@@ -262,7 +321,7 @@ mod tests {
     fn parity(db: &Db, q: &Query, params: &Params) -> QueryResult {
         db.read(|transaction, model| {
             let schema = model.catalog.schema_at(db.snapshot().revision())?;
-            let actual = evaluate(transaction, q, params, &schema, model.facts())?;
+            let actual = evaluate(transaction, q, params, &schema, db.snapshot())?;
             let expected = crate::query_eval::evaluate(q, params, &schema, model.facts())?;
             assert_eq!(actual.columns, expected.columns);
             if q.order.is_empty() && q.limit.is_none() {
@@ -278,7 +337,7 @@ mod tests {
                 [],
                 |row| row.get(0),
             )?;
-            assert_eq!(count, 0, "temporary relation cleaned up");
+            assert_eq!(count, 0, "queries create no temporary relation");
             Ok(actual)
         })
         .unwrap()
@@ -319,13 +378,15 @@ mod tests {
             limit: Some(u64::MAX),
             ..Query::default()
         };
-        let compiled = compile(&q, &Params::new(), &store.db().unwrap().schema().unwrap()).unwrap();
+        let db = store.db().unwrap();
+        let compiled = compile(&q, &Params::new(), &db.schema().unwrap(), db.snapshot()).unwrap();
         assert_eq!(
             compiled.sql,
-            "SELECT DISTINCT f0.value FROM temp.factlite_query_facts AS f0 WHERE f0.attribute = ?1 AND f0.entity = ?2 AND f0.value = ?3 ORDER BY 1 ASC LIMIT ?4"
+            "SELECT DISTINCT f0.value FROM main.datoms AS f0 WHERE f0.attribute = ?2 AND f0.asserted <= ?1 AND (f0.retracted IS NULL OR f0.retracted > ?1) AND f0.entity = ?3 AND f0.value = ?4 ORDER BY 1 ASC LIMIT ?5"
         );
-        assert!(matches!(compiled.bindings[0], SqlValue::Integer(0)));
-        assert!(matches!(compiled.bindings[3], SqlValue::Integer(-1)));
+        assert!(matches!(&compiled.bindings[1], SqlValue::Text(name) if name == attr));
+        assert!(matches!(&compiled.bindings[2], SqlValue::Text(id) if id.starts_with("e1.")));
+        assert!(matches!(compiled.bindings[4], SqlValue::Integer(-1)));
         assert_eq!(
             parity(&store.db().unwrap(), &q, &Params::new()).rows.len(),
             1
@@ -380,7 +441,7 @@ mod tests {
         assert_eq!(store.head().unwrap(), report.after);
     }
     #[test]
-    fn temp_failure_rolls_back_and_leaves_connection_and_historical_queries_usable() {
+    fn read_failure_leaves_connection_and_historical_queries_usable() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path().join("failure.sqlite")).unwrap();
         store
@@ -408,8 +469,9 @@ mod tests {
             .connection()
             .unwrap()
             .authorizer(Some(|context: AuthContext<'_>| match context.action {
-                AuthAction::Insert {
-                    table_name: "factlite_query_facts",
+                AuthAction::Read {
+                    table_name: "datoms",
+                    ..
                 } => Authorization::Deny,
                 _ => Authorization::Allow,
             }))
@@ -432,6 +494,10 @@ mod tests {
             parity(&db, &q, &Params::new()).rows,
             vec![vec![Value::I64(1)]]
         );
+    }
+    // A value of the same type, reasserted later on another entity.
+    fn wanted_again(values: &[Value]) -> Value {
+        values.last().cloned().expect("at least the wanted value")
     }
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(1024))]
@@ -457,7 +523,9 @@ mod tests {
             let direction = if descending {Direction::Desc} else {Direction::Asc};
             let q = Query { inputs:[(name("wanted"),domain)].into(),patterns:vec![pattern(var("e"),"x/link",var("peer")),pattern(var("peer"),"x/value",var("v"))],predicates:vec![Predicate {left:var("v"),comparison:[Comparison::Eq,Comparison::Ne,Comparison::Lt,Comparison::Le,Comparison::Gt,Comparison::Ge][op],right:Term::Param(name("wanted"))}],select:vec![name("v"),name("e"),name("peer")],order:vec![order("v",direction),order("e",direction),order("peer",direction)],limit:Some(limit) };
             let params = [(name("wanted"),wanted)].into(); let expected = parity(&db_a,&q,&params);
-            store.commit(Tx::builder().define_attribute(definition("later/value",ValueType::Bool)).assert(ids[0].clone(),"x/value".parse().unwrap(),values[0].clone()).build().unwrap()).unwrap();
+            // Later commits retract and add values and links; A must not see them.
+            store.commit(Tx::builder().define_attribute(definition("later/value",ValueType::Bool)).retract(ids[0].clone(),"x/value".parse().unwrap(),values[0].clone()).assert(ids[1].clone(),"x/link".parse().unwrap(),ValueTerm::Value(Value::Ref(ids[2].clone()))).build().unwrap()).unwrap();
+            store.commit(Tx::builder().assert(ids[2].clone(),"x/value".parse().unwrap(),wanted_again(&values)).assert(ids[0].clone(),"x/value".parse().unwrap(),values[0].clone()).build().unwrap()).unwrap();
             prop_assert_eq!(parity(&db_a,&q,&params),expected.clone());
             drop((store,db_a));let reopened = Store::open(&path).unwrap();
             prop_assert_eq!(parity(&reopened.db_at(&a.after).unwrap(),&q,&params),expected);

@@ -4,7 +4,7 @@ use rusqlite::{Transaction, TransactionBehavior};
 
 use crate::{
     AttrName, Cardinality, EntityId, Error, ErrorCode, ErrorContext, Fact, Operation, Result,
-    Revision, Schema, SnapshotId, Store, TxReport, Value, model::Model,
+    Revision, Schema, SnapshotId, Store, TxReport, Value,
 };
 
 /// Exact optional restrictions, combined conjunctively. Missing fields match all.
@@ -148,20 +148,21 @@ impl Db {
 
     /// Returns definitions visible at this view's revision, as owned data.
     pub fn schema(&self) -> Result<Schema> {
-        self.read(|_, model| model.catalog.schema_at(self.snapshot.revision()))
+        self.read_basis(|transaction| crate::index::schema_at(transaction, &self.snapshot))
     }
 
     /// Effective facts at this basis, in entity/attribute/typed-value order.
     /// Unknown or foreign entity restrictions match no facts.
     pub fn facts(&self, filter: FactFilter) -> Result<Vec<Fact>> {
-        self.read(|_, model| {
-            filter.validate(&model.catalog.schema_at(self.snapshot.revision())?)?;
-            let mut facts: Vec<_> = model
-                .facts()
-                .iter()
-                .filter(|fact| filter.matches(fact))
-                .cloned()
-                .collect();
+        self.read_basis(|transaction| {
+            filter.validate(&crate::index::schema_at(transaction, &self.snapshot)?)?;
+            let mut facts = crate::index::facts_matching(
+                transaction,
+                &self.snapshot,
+                filter.entity.as_ref(),
+                filter.attribute.as_ref(),
+                filter.value.as_ref(),
+            )?;
             facts.sort_by(Fact::canonical_cmp);
             Ok(facts)
         })
@@ -171,22 +172,26 @@ impl Db {
     /// Unknown/not-yet-allocated/foreign entities return None. All requested
     /// attributes must exist in the pinned schema, even for an unknown entity.
     pub fn pull(&self, id: &EntityId, attrs: &[AttrName]) -> Result<Option<Entity>> {
-        self.read(|_, model| {
-            let schema = model.catalog.schema_at(self.snapshot.revision())?;
+        self.read_basis(|transaction| {
+            let schema = crate::index::schema_at(transaction, &self.snapshot)?;
             for name in attrs {
                 require_attribute(&schema, name)?;
             }
-            if !model.catalog.known_at(id, self.snapshot.revision())? {
+            if !crate::index::known_at(transaction, &self.snapshot, id)? {
                 return Ok(None);
             }
             let mut attributes = BTreeMap::new();
             for name in attrs {
-                let mut values: Vec<_> = model
-                    .facts()
-                    .iter()
-                    .filter(|fact| &fact.entity == id && &fact.attribute == name)
-                    .map(|fact| fact.value.clone())
-                    .collect();
+                let mut values: Vec<_> = crate::index::facts_matching(
+                    transaction,
+                    &self.snapshot,
+                    Some(id),
+                    Some(name),
+                    None,
+                )?
+                .into_iter()
+                .map(|fact| fact.value)
+                .collect();
                 values.sort_by(Value::canonical_cmp);
                 if values.is_empty() {
                     continue;
@@ -208,8 +213,8 @@ impl Db {
     /// Effective events in (after, basis], in revision/ordinal order.
     pub fn history(&self, filter: FactFilter, after: Revision) -> Result<Vec<FactEvent>> {
         self.validate_after(after)?;
-        self.read(|transaction, model| {
-            filter.validate(&model.catalog.schema_at(self.snapshot.revision())?)?;
+        self.read_basis(|transaction| {
+            filter.validate(&crate::index::schema_at(transaction, &self.snapshot)?)?;
             let mut events = Vec::new();
             for report in crate::log::reports_between(transaction, after, self.snapshot.revision())?
             {
@@ -232,7 +237,7 @@ impl Db {
     /// All commits in (after, basis], including no-change commits and metadata.
     pub fn transactions(&self, after: Revision) -> Result<Vec<TxRecord>> {
         self.validate_after(after)?;
-        self.read(|transaction, _| {
+        self.read_basis(|transaction| {
             Ok(
                 crate::log::reports_between(transaction, after, self.snapshot.revision())?
                     .into_iter()
@@ -253,9 +258,25 @@ impl Db {
     }
 
     // One operation, one SQLite snapshot. No result may borrow a row/cursor.
+    // Reads check their basis and then query revision-bounded rows directly.
+    pub(crate) fn read_basis<T>(
+        &self,
+        operation: impl FnOnce(&Transaction<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let mut connection = self.store.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        crate::index::check_basis(&transaction, &self.snapshot)?;
+        let result = operation(&transaction)?;
+        transaction.commit()?;
+        Ok(result)
+    }
+
+    // Loads the complete state at this basis; for tests and the reference
+    // query fallback only.
+    #[cfg(test)]
     pub(crate) fn read<T>(
         &self,
-        operation: impl FnOnce(&Transaction<'_>, &Model) -> Result<T>,
+        operation: impl FnOnce(&Transaction<'_>, &crate::model::Model) -> Result<T>,
     ) -> Result<T> {
         let mut connection = self.store.connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;

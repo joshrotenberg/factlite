@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, HashSet};
 use rusqlite::Connection;
 
 use crate::{
-    Error, ErrorCode, ErrorContext, Fact, Operation, Result, SnapshotId, TxReport,
+    AttrName, AttributeDefinition, EntityId, Error, ErrorCode, ErrorContext, Fact, Operation,
+    Result, Revision, Schema, SnapshotId, TxReport, Value,
     catalog::Catalog,
     codec,
     model::Model,
@@ -28,7 +29,18 @@ CREATE TABLE datoms (
   CHECK(retracted IS NULL OR (typeof(retracted)='blob' AND length(retracted)=8 AND retracted>asserted)),
  PRIMARY KEY(entity,attribute,type_tag,value,asserted)
 ) WITHOUT ROWID;
-CREATE UNIQUE INDEX datoms_open ON datoms(entity,attribute,type_tag,value) WHERE retracted IS NULL;";
+CREATE UNIQUE INDEX datoms_open ON datoms(entity,attribute,type_tag,value) WHERE retracted IS NULL;
+CREATE INDEX datoms_avet ON datoms(attribute,value,entity,asserted,retracted);";
+
+/// Format 3 adds the attribute/value index, which serves revision-bounded
+/// reads by attribute or by attribute and value without the primary key's
+/// entity prefix. An attribute fixes its value type, so the type tag is
+/// not part of it.
+pub(crate) const AVET_DDL: &str =
+    "CREATE INDEX datoms_avet ON datoms(attribute,value,entity,asserted,retracted);";
+
+/// Indexes on `datoms` that open requires, in name order.
+pub(crate) const INDEXES: [&str; 2] = ["datoms_avet", "datoms_open"];
 
 /// Stored interval row in primary-key order. SQLite's BINARY text collation and
 /// BLOB comparison are bytewise, matching Rust's `String`/`Vec<u8>` ordering.
@@ -154,32 +166,9 @@ pub(crate) fn rebuild(connection: &Connection) -> Result<()> {
 /// and intervals, without replaying transactions. Callers run it inside the
 /// operation's single SQLite read or write transaction.
 pub(crate) fn model_at(connection: &Connection, basis: &SnapshotId) -> Result<Model> {
-    let head = read_head(connection)?;
-    if head.store() != basis.store()
-        || head.lineage() != basis.lineage()
-        || basis.revision() > head.revision()
-    {
-        return Err(Error::new(
-            ErrorCode::InvalidSnapshot,
-            ErrorContext::InvalidInput { field: "snapshot" },
-            "snapshot identity or revision is unavailable",
-        ));
-    }
+    check_basis(connection, basis)?;
     let bound = revision_bytes(basis.revision());
-    let mut schema = BTreeMap::new();
-    for row in connection
-        .prepare("SELECT revision,definition FROM schema_events WHERE revision<=?1")?
-        .query_map([bound.as_slice()], |row| {
-            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-        })?
-    {
-        let (revision, bytes) = row?;
-        let definition = codec::decode_definition(&bytes)?;
-        schema.insert(
-            definition.name().clone(),
-            (definition, decode_revision(&revision)?),
-        );
-    }
+    let schema = definitions_at(connection, basis)?;
     let mut entities = BTreeMap::new();
     for row in connection
         .prepare("SELECT revision,entity FROM entity_events WHERE revision<=?1")?
@@ -221,6 +210,135 @@ pub(crate) fn model_at(connection: &Connection, basis: &SnapshotId) -> Result<Mo
         Catalog::retained(basis.clone(), schema, entities),
         facts,
     ))
+}
+
+/// Fails unless `basis` names this store and lineage at a retained revision.
+/// Every read checks this inside its own SQL snapshot before reading.
+pub(crate) fn check_basis(connection: &Connection, basis: &SnapshotId) -> Result<()> {
+    let head = read_head(connection)?;
+    if head.store() != basis.store()
+        || head.lineage() != basis.lineage()
+        || basis.revision() > head.revision()
+    {
+        return Err(Error::new(
+            ErrorCode::InvalidSnapshot,
+            ErrorContext::InvalidInput { field: "snapshot" },
+            "snapshot identity or revision is unavailable",
+        ));
+    }
+    Ok(())
+}
+
+type Definitions = BTreeMap<AttrName, (AttributeDefinition, Revision)>;
+
+fn definitions_at(connection: &Connection, basis: &SnapshotId) -> Result<Definitions> {
+    let mut schema = BTreeMap::new();
+    for row in connection
+        .prepare("SELECT revision,definition FROM schema_events WHERE revision<=?1")?
+        .query_map([revision_bytes(basis.revision()).as_slice()], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })?
+    {
+        let (revision, bytes) = row?;
+        let definition = codec::decode_definition(&bytes)?;
+        schema.insert(
+            definition.name().clone(),
+            (definition, decode_revision(&revision)?),
+        );
+    }
+    Ok(schema)
+}
+
+/// Definitions visible at `basis`, from schema events alone.
+pub(crate) fn schema_at(connection: &Connection, basis: &SnapshotId) -> Result<Schema> {
+    Ok(Schema {
+        definitions: definitions_at(connection, basis)?
+            .into_iter()
+            .map(|(name, (definition, _))| (name, definition))
+            .collect(),
+    })
+}
+
+/// The creation revision of an allocated identity of this store, if any.
+pub(crate) fn created(connection: &Connection, entity: &EntityId) -> Result<Option<Revision>> {
+    use rusqlite::OptionalExtension;
+    connection
+        .query_row(
+            "SELECT revision FROM entity_events WHERE entity=?1",
+            [entity.to_string()],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()?
+        .map(|bytes| decode_revision(&bytes))
+        .transpose()
+}
+
+/// Whether `entity` is allocated in this store at `basis`.
+pub(crate) fn known_at(
+    connection: &Connection,
+    basis: &SnapshotId,
+    entity: &EntityId,
+) -> Result<bool> {
+    Ok(entity.store() == basis.store()
+        && created(connection, entity)?.is_some_and(|created| created <= basis.revision()))
+}
+
+/// Visible at R: asserted at or before R and not retracted at or before R.
+pub(crate) const VISIBLE: &str = "asserted<=?1 AND (retracted IS NULL OR retracted>?1)";
+
+/// Facts visible at `basis` matching each supplied restriction, unordered.
+/// Uses the primary key for an entity, the attribute/value index otherwise.
+pub(crate) fn facts_matching(
+    connection: &Connection,
+    basis: &SnapshotId,
+    entity: Option<&EntityId>,
+    attribute: Option<&AttrName>,
+    value: Option<&Value>,
+) -> Result<Vec<Fact>> {
+    let mut sql = format!("SELECT entity,attribute,type_tag,value FROM datoms WHERE {VISIBLE}");
+    let mut bindings: Vec<rusqlite::types::Value> =
+        vec![revision_bytes(basis.revision()).to_vec().into()];
+    if let Some(entity) = entity {
+        bindings.push(entity.to_string().into());
+        sql.push_str(&format!(" AND entity=?{}", bindings.len()));
+    }
+    if let Some(attribute) = attribute {
+        bindings.push(attribute.as_str().to_owned().into());
+        sql.push_str(&format!(" AND attribute=?{}", bindings.len()));
+    }
+    if let Some(value) = value {
+        bindings.push(i64::from(codec::type_tag(value.value_type())).into());
+        sql.push_str(&format!(" AND type_tag=?{}", bindings.len()));
+        bindings.push(codec::encode_value(value).into());
+        sql.push_str(&format!(" AND value=?{}", bindings.len()));
+    }
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(rusqlite::params_from_iter(&bindings), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, Vec<u8>>(3)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (entity, attribute, tag, bytes) = row?;
+        fact_row(entity, attribute, tag, &bytes)
+    })
+    .collect()
+}
+
+fn fact_row(entity: String, attribute: String, tag: i64, bytes: &[u8]) -> Result<Fact> {
+    let tag = u8::try_from(tag).map_err(|_| corrupt("invalid stored type tag"))?;
+    Ok(Fact {
+        entity: entity
+            .parse()
+            .map_err(|err: Error| corrupt(err.to_string()))?,
+        attribute: attribute
+            .parse()
+            .map_err(|err: Error| corrupt(err.to_string()))?,
+        value: codec::decode_value(tag, bytes)?,
+    })
 }
 
 /// Open-time cross-check: the indexed state at head equals full replay.
