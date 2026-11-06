@@ -1,6 +1,7 @@
 # Decision brief: lookup refs in transactions (roadmap item 4)
 
-Status: decided 2026-11-06 (see Decision). Not yet implemented.
+Status: decided 2026-11-06 (see Decision). Option A1 is implemented (plan
+item 12.3); expectation lookups are not.
 
 ## The question
 

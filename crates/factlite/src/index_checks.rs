@@ -463,18 +463,10 @@ proptest! {
 /// full state at head, for successes and every error, and the store commits
 /// exactly what the full evaluation predicts.
 fn touched_trace(steps: &[crate::model::reference::tests::Step]) {
-    use crate::model::reference::tests::{ATTRS, build, definition, same_error};
+    use crate::model::reference::tests::{build, same_error, seed};
     let directory = tempfile::tempdir().unwrap();
     let store = Store::open(directory.path().join("touched.sqlite")).unwrap();
-    store
-        .commit(Tx {
-            schema: (0..ATTRS.len()).map(definition).collect(),
-            new_entities: (0..3)
-                .map(|n| TempId::new(format!("k{n}")).unwrap())
-                .collect(),
-            ..Tx::default()
-        })
-        .unwrap();
+    store.commit(seed()).unwrap();
     for (index, step) in steps.iter().enumerate() {
         let (full, partial, tx) = {
             let connection = store.connection().unwrap();

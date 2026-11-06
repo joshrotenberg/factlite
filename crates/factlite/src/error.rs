@@ -105,6 +105,13 @@ pub enum ErrorContext {
         /// Rejected entity identity.
         entity: EntityId,
     },
+    /// A transaction lookup ref that matched no entity.
+    Lookup {
+        /// The `unique_one` attribute.
+        attribute: AttrName,
+        /// The looked-up value.
+        value: Value,
+    },
     /// The invalid input field.
     InvalidInput {
         /// Field identifying the input boundary.

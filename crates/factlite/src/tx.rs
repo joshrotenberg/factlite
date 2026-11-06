@@ -9,6 +9,10 @@ pub enum EntityTerm {
     Id(EntityId),
     /// Declared transaction-local entity.
     Temp(TempId),
+    /// The entity that owns this value of a `unique_one` attribute at the
+    /// pre-transaction state. It never creates an entity, and it cannot see
+    /// values the same request asserts or transfers.
+    Lookup(AttrName, Value),
 }
 impl From<EntityId> for EntityTerm {
     fn from(id: EntityId) -> Self {
@@ -28,6 +32,10 @@ pub enum ValueTerm {
     Value(Value),
     /// Reference to a declared temporary entity.
     TempRef(TempId),
+    /// Reference to the entity that owns this value of a `unique_one`
+    /// attribute at the pre-transaction state, resolved as
+    /// [`EntityTerm::Lookup`].
+    LookupRef(AttrName, Value),
 }
 impl From<Value> for ValueTerm {
     fn from(value: Value) -> Self {

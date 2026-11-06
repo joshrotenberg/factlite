@@ -152,13 +152,24 @@ pub fn encode_snapshot(snapshot: &SnapshotId) -> String {
 
 fn parse_entity(value: Json) -> Result<EntityTerm> {
     let mut object = Object::new(value, "entity")?;
-    let entity = match (object.optional("id"), object.optional("temp")) {
-        (Some(value), None) => EntityTerm::Id(text(value, "id")?.parse()?),
-        (None, Some(value)) => EntityTerm::Temp(crate::TempId::new(text(value, "temp")?)?),
+    let entity = match (
+        object.optional("id"),
+        object.optional("temp"),
+        object.optional("lookup"),
+    ) {
+        (Some(value), None, None) => EntityTerm::Id(text(value, "id")?.parse()?),
+        (None, Some(value), None) => EntityTerm::Temp(crate::TempId::new(text(value, "temp")?)?),
+        (None, None, Some(value)) => {
+            let mut lookup = Object::new(value, "lookup")?;
+            let attribute = text(lookup.required("attr")?, "attr")?.parse()?;
+            let value = concrete_value(lookup.required("value")?)?;
+            lookup.finish()?;
+            EntityTerm::Lookup(attribute, value)
+        }
         _ => {
             return Err(Error::invalid(
                 "entity",
-                "expected exactly one id or temp tag",
+                "expected exactly one id, temp or lookup tag",
             ));
         }
     };
@@ -169,7 +180,11 @@ fn entity_json(entity: &EntityTerm) -> Json {
     match entity {
         EntityTerm::Id(id) => json!({"id":id.to_string()}),
         EntityTerm::Temp(label) => json!({"temp":label.as_str()}),
+        EntityTerm::Lookup(attribute, value) => lookup_json(attribute, value),
     }
+}
+fn lookup_json(attribute: &crate::AttrName, value: &Value) -> Json {
+    json!({"lookup":{"attr":attribute.as_str(),"value":value_json(value)}})
 }
 
 fn parse_value(value: Json, allow_temp: bool) -> Result<ValueTerm> {
@@ -212,10 +227,13 @@ fn parse_value(value: Json, allow_temp: bool) -> Result<ValueTerm> {
         "ref" => match parse_entity(value)? {
             EntityTerm::Id(id) => Value::Ref(id),
             EntityTerm::Temp(label) if allow_temp => return Ok(ValueTerm::TempRef(label)),
-            EntityTerm::Temp(_) => {
+            EntityTerm::Lookup(attribute, value) if allow_temp => {
+                return Ok(ValueTerm::LookupRef(attribute, value));
+            }
+            EntityTerm::Temp(_) | EntityTerm::Lookup(..) => {
                 return Err(Error::invalid(
                     "ref",
-                    "temporary references are only allowed in changes",
+                    "temporary and lookup references are only allowed in changes",
                 ));
             }
         },
@@ -226,7 +244,9 @@ fn parse_value(value: Json, allow_temp: bool) -> Result<ValueTerm> {
 fn concrete_value(value: Json) -> Result<Value> {
     match parse_value(value, false)? {
         ValueTerm::Value(value) => Ok(value),
-        ValueTerm::TempRef(_) => unreachable!("temporary references rejected"),
+        ValueTerm::TempRef(_) | ValueTerm::LookupRef(..) => {
+            unreachable!("temporary and lookup references rejected")
+        }
     }
 }
 pub(crate) fn value_json(value: &Value) -> Json {
@@ -247,6 +267,7 @@ fn value_term_json(value: &ValueTerm) -> Json {
     match value {
         ValueTerm::Value(value) => value_json(value),
         ValueTerm::TempRef(label) => json!({"ref":{"temp":label.as_str()}}),
+        ValueTerm::LookupRef(attribute, value) => json!({"ref":lookup_json(attribute, value)}),
     }
 }
 /// Decode one concrete tagged value, including allocated references.

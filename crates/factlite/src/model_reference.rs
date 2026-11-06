@@ -239,6 +239,52 @@ impl Model {
         Ok(())
     }
 
+    /// Lookup resolution by scanning every pre-state fact, independent of the
+    /// production owners index.
+    fn lookup_reference(&self, attribute: &AttrName, value: &Value) -> Result<EntityId> {
+        let schema = self.catalog.schema_at(self.catalog.snapshot.revision())?;
+        let definition = schema.get(attribute).ok_or_else(|| {
+            Error::new(
+                ErrorCode::UnknownAttribute,
+                ErrorContext::Attribute {
+                    attribute: attribute.clone(),
+                },
+                "lookup attribute is unknown at pre-head",
+            )
+        })?;
+        if definition.uniqueness() != crate::Uniqueness::UniqueOne {
+            return Err(Error::invalid(
+                "lookup",
+                "lookup attribute must be unique_one",
+            ));
+        }
+        if definition.value_type() != value.value_type() {
+            return Err(Error::new(
+                ErrorCode::TypeMismatch,
+                ErrorContext::TypeMismatch {
+                    expected: definition.value_type(),
+                    actual: value.value_type(),
+                },
+                "lookup value has the wrong attribute type",
+            ));
+        }
+        self.facts()
+            .iter()
+            .filter(|fact| &fact.attribute == attribute && &fact.value == value)
+            .map(|fact| fact.entity.clone())
+            .min()
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::UnknownEntity,
+                    ErrorContext::Lookup {
+                        attribute: attribute.clone(),
+                        value: value.clone(),
+                    },
+                    "lookup matched no entity at pre-head",
+                )
+            })
+    }
+
     // Batch normalization is private; evaluate adds preconditions and final
     // uniqueness before storage can expose a report.
     pub fn normalize_reference(&self, tx: &Tx) -> Result<NormalizedBatch> {
@@ -257,6 +303,7 @@ impl Model {
                     .get(label)
                     .cloned()
                     .ok_or_else(|| Error::invalid("tempid", "undeclared temporary entity"))?,
+                EntityTerm::Lookup(attribute, value) => self.lookup_reference(attribute, value)?,
             };
             let value = match &change.value {
                 ValueTerm::Value(value) => {
@@ -269,6 +316,9 @@ impl Model {
                     Value::Ref(catalog_delta.tempids.get(label).cloned().ok_or_else(|| {
                         Error::invalid("tempid", "undeclared temporary reference")
                     })?)
+                }
+                ValueTerm::LookupRef(attribute, value) => {
+                    Value::Ref(self.lookup_reference(attribute, value)?)
                 }
             };
             let definition = schema.get(&change.attribute).ok_or_else(|| {
@@ -410,6 +460,33 @@ pub(crate) mod tests {
         ),
     ];
 
+    /// Every attribute, entities k0 to k2, and owned unique values so that
+    /// generated lookups usually resolve: k0, k1 and k2 own `x/unique` 0, 1
+    /// and 2, and k1 owns `x/owner` naming k0.
+    pub(crate) fn seed() -> Tx {
+        let label = |n: usize| TempId::new(format!("k{n}")).unwrap();
+        let mut changes: Vec<_> = (0..3)
+            .map(|n| crate::Change {
+                operation: Operation::Assert,
+                entity: EntityTerm::Temp(label(n)),
+                attribute: attr("x/unique"),
+                value: ValueTerm::Value(Value::I64(n as i64)),
+            })
+            .collect();
+        changes.push(crate::Change {
+            operation: Operation::Assert,
+            entity: EntityTerm::Temp(label(1)),
+            attribute: attr("x/owner"),
+            value: ValueTerm::TempRef(label(0)),
+        });
+        Tx {
+            schema: (0..ATTRS.len()).map(definition).collect(),
+            new_entities: (0..3).map(label).collect(),
+            changes,
+            ..Tx::default()
+        }
+    }
+
     pub(crate) fn definition(index: usize) -> crate::AttributeDefinition {
         let (name, ty, cardinality, uniqueness) = ATTRS[index];
         def(name, ty, cardinality, uniqueness)
@@ -417,7 +494,10 @@ pub(crate) mod tests {
 
     /// One generated change: (assert?, entity slot, attribute, value slot).
     /// Entity and value slots past the known entities name temporary labels;
-    /// slot 7 is a fabricated, never-allocated identity.
+    /// slot 7 is a fabricated, never-allocated identity. Slots 8 to 11 are
+    /// lookups of `x/unique` values 0 to 3, slot 12 a lookup on the
+    /// non-unique `x/one`, and slot 13 a lookup of `x/owner` naming the first
+    /// known entity.
     type Change = (bool, u8, usize, u8);
     /// (changes, expectations, new labels, declare schema, stale head fence).
     pub(crate) type Step = (Vec<Change>, Vec<(u8, usize, Vec<u8>)>, u8, u8, bool);
@@ -433,6 +513,17 @@ pub(crate) mod tests {
             slot if slot < 6 => Some(EntityTerm::Temp(
                 TempId::new(format!("t{}", slot % 2)).unwrap(),
             )),
+            8..=11 => Some(EntityTerm::Lookup(
+                attr("x/unique"),
+                Value::I64(i64::from(slot - 8)),
+            )),
+            12 => Some(EntityTerm::Lookup(attr("x/one"), Value::I64(0))),
+            13 => Some(EntityTerm::Lookup(
+                attr("x/owner"),
+                Value::Ref(known.first().cloned().unwrap_or_else(|| {
+                    EntityId::allocated(model.catalog.snapshot.store().clone(), 0xffd).unwrap()
+                })),
+            )),
             _ => None,
         }
     }
@@ -445,9 +536,10 @@ pub(crate) mod tests {
         if ATTRS[attribute].1 == ValueType::I64 {
             return ValueTerm::Value(Value::I64(i64::from(slot % 4)));
         }
-        match entity(model, known, slot % 8) {
+        match entity(model, known, slot % 14) {
             Some(EntityTerm::Id(id)) => ValueTerm::Value(Value::Ref(id)),
             Some(EntityTerm::Temp(label)) => ValueTerm::TempRef(label),
+            Some(EntityTerm::Lookup(attribute, value)) => ValueTerm::LookupRef(attribute, value),
             None => ValueTerm::Value(Value::Ref(known.first().cloned().unwrap_or_else(|| {
                 EntityId::allocated(model.catalog.snapshot.store().clone(), 0xffe).unwrap()
             }))),
@@ -498,7 +590,7 @@ pub(crate) mod tests {
                 .iter()
                 .filter_map(|slot| match value(model, known, *attribute, *slot) {
                     ValueTerm::Value(value) => Some(value),
-                    ValueTerm::TempRef(_) => None,
+                    ValueTerm::TempRef(_) | ValueTerm::LookupRef(..) => None,
                 })
                 .collect();
             tx.expectations.push(crate::Expectation {
@@ -560,14 +652,7 @@ pub(crate) mod tests {
     fn run(steps: &[Step], seed_schema: bool) {
         let mut model = empty();
         if seed_schema {
-            let tx = Tx {
-                schema: (0..ATTRS.len()).map(definition).collect(),
-                new_entities: (0..3)
-                    .map(|n| TempId::new(format!("k{n}")).unwrap())
-                    .collect(),
-                ..Tx::default()
-            };
-            model = model.evaluate_reference(&tx).unwrap().0;
+            model = model.evaluate_reference(&seed()).unwrap().0;
         }
         for (index, step) in steps.iter().enumerate() {
             let known: Vec<_> = model.catalog.entities.keys().cloned().collect();
@@ -613,7 +698,7 @@ pub(crate) mod tests {
 
     pub(crate) fn step() -> impl Strategy<Value = Step> {
         (
-            proptest::collection::vec((any::<bool>(), 0_u8..8, 0_usize..5, any::<u8>()), 0..6),
+            proptest::collection::vec((any::<bool>(), 0_u8..14, 0_usize..5, any::<u8>()), 0..6),
             proptest::collection::vec(
                 (
                     0_u8..8,

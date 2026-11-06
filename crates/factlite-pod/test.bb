@@ -211,8 +211,20 @@
                                                                   :attr :person/email}))))
 (check "lookup on non-unique attribute" (= "InvalidRequest" (:code (failure #(f/lookup conn [:person/name "Ada"])))))
 (check "lookup with wrong type" (= "TypeMismatch" (:code (failure #(f/lookup conn [:person/email 1])))))
-(check "lookup refs are not transaction entities"
-       (= "InvalidRequest" (:code (failure #(f/transact conn {:changes [[:assert [:person/email "ada@example.com"] :person/name "A"]]})))))
+(let [tagged (f/transact conn {:changes [[:assert [:person/email "ada@example.com"] :task/tags "via-lookup"]
+                                         [:assert task :task/owner [:person/email "ada@example.com"]]]})]
+  (check "transact through lookup refs"
+         ;; The owner was already ada, so only the tag changes.
+         (= [[:assert ada :task/tags "via-lookup"]] (:effective-delta tagged))))
+(f/transact conn {:changes [[:retract [:person/email "ada@example.com"] :task/tags "via-lookup"]]})
+(check "unmatched transaction lookup names the lookup"
+       (= {:code "UnknownEntity" :context {:lookup {:attr :person/email :value "nobody@example.com"}}}
+          (select-keys (failure #(f/transact conn {:changes [[:assert [:person/email "nobody@example.com"] :person/name "N"]]}))
+                       [:code :context])))
+(check "transaction lookups need a unique attribute"
+       (= "InvalidRequest" (:code (failure #(f/transact conn {:changes [[:assert [:person/name "Ada"] :person/name "A"]]})))))
+(check "expectations take no lookups"
+       (= "InvalidRequest" (:code (failure #(f/transact conn {:expect [[[:person/email "ada@example.com"] :person/name ["Ada"]]]})))))
 
 (f/transact conn {:schema [{:name :agg/recipe :type :string :cardinality :one :unique :none}
                            {:name :agg/cost :type :f64 :cardinality :one :unique :none}]

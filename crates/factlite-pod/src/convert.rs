@@ -11,7 +11,7 @@
 //! | `F64` | double (finite) |
 //! | `String` | string |
 //! | `Bytes` | byte array |
-//! | `Ref` | `{:id "e1..."}` (`{:temp "label"}` in transaction changes) |
+//! | `Ref` | `{:id "e1..."}` (`{:temp "label"}` or a lookup `[attr value]` in transaction changes) |
 //! | `Keyword` | keyword |
 //! | `Inst` | `#inst` (milliseconds) |
 //!
@@ -100,6 +100,7 @@ fn context_out(context: &Json) -> Clj {
                         .and_then(Json::as_str)
                         .map_or(Clj::Nil, ref_id),
                     ("value", value) => wire_value_out(value),
+                    ("lookup", Json::Object(_)) => context_out(value),
                     ("owners", Json::Array(owners)) => Clj::Vector(
                         owners
                             .iter()
@@ -390,12 +391,38 @@ fn change_in(value: &Clj) -> Result<Json> {
         Clj::Keyword(op) if op == "assert" || op == "retract" => op.clone(),
         _ => return Err(invalid("op", "a change op is :assert or :retract")),
     };
+    let entity = match lookup_in(entity)? {
+        Some(lookup) => lookup,
+        None => entity_in(entity, "entity")?,
+    };
+    let value = match lookup_in(value)? {
+        Some(lookup) => json!({"ref": lookup}),
+        None => value_in(value, "value")?,
+    };
     Ok(json!({
         "op": op,
-        "entity": entity_in(entity, "entity")?,
+        "entity": entity,
         "attr": name(attribute, "attr")?,
-        "value": value_in(value, "value")?,
+        "value": value,
     }))
+}
+
+/// In a change's entity or value position, `[attr value]` (a vector or list,
+/// as in read lookups) names the entity that owns that unique value before
+/// the transaction. Other values are not lookups.
+fn lookup_in(value: &Clj) -> Result<Option<Json>> {
+    match unmeta(value) {
+        Clj::Vector(items) | Clj::List(items) => {
+            let [attribute, value] = items.as_slice() else {
+                return Err(invalid("lookup", "a lookup ref is [attr value]"));
+            };
+            Ok(Some(json!({"lookup": {
+                "attr": name(attribute, "attr")?,
+                "value": value_in(value, "value")?,
+            }})))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn expectation_in(value: &Clj) -> Result<Json> {
@@ -1277,6 +1304,54 @@ mod tests {
             ])]),
         )]);
         assert!(tx_in(&temp_expect).is_err());
+    }
+
+    #[test]
+    fn change_lookups_become_wire_lookup_terms() {
+        let lookup = |value: Clj| vector(vec![kw("run/key"), value]);
+        let change = |entity: Clj, value: Clj| {
+            map(vec![(
+                "changes",
+                vector(vec![vector(vec![
+                    kw("assert"),
+                    entity,
+                    kw("run/target"),
+                    value,
+                ])]),
+            )])
+        };
+        let tx = tx_in(&change(lookup(string("a")), lookup(string("b")))).unwrap();
+        let key = |text: &str| Value::String(text.into());
+        assert_eq!(
+            tx.changes()[0].entity,
+            factlite::EntityTerm::Lookup("run/key".parse().unwrap(), key("a"))
+        );
+        assert_eq!(
+            tx.changes()[0].value,
+            factlite::ValueTerm::LookupRef("run/key".parse().unwrap(), key("b"))
+        );
+        let id = map(vec![("id", string(ID))]);
+        for bad in [
+            change(vector(vec![kw("run/key")]), string("x")),
+            change(
+                vector(vec![kw("run/key"), string("a"), string("b")]),
+                string("x"),
+            ),
+            change(lookup(lookup(string("a"))), string("x")),
+            change(lookup(map(vec![("temp", string("t"))])), string("x")),
+            change(id.clone(), lookup(vector(vec![]))),
+            map(vec![(
+                "expect",
+                vector(vec![vector(vec![
+                    lookup(string("a")),
+                    kw("run/key"),
+                    vector(vec![]),
+                ])]),
+            )]),
+        ] {
+            let error = code(tx_in(&bad).unwrap_err());
+            assert!(error.contains("InvalidRequest"), "{bad:?}: {error}");
+        }
     }
 
     #[test]

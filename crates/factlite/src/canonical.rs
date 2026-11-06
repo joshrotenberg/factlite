@@ -82,6 +82,11 @@ impl Writer {
                 self.byte(1);
                 self.text(label.as_str());
             }
+            EntityTerm::Lookup(attribute, value) => {
+                self.byte(2);
+                self.text(attribute.as_str());
+                self.value(value);
+            }
         }
     }
     fn term(&mut self, term: &ValueTerm) {
@@ -93,6 +98,11 @@ impl Writer {
             ValueTerm::TempRef(label) => {
                 self.byte(1);
                 self.text(label.as_str());
+            }
+            ValueTerm::LookupRef(attribute, value) => {
+                self.byte(2);
+                self.text(attribute.as_str());
+                self.value(value);
             }
         }
     }
