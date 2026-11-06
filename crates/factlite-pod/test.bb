@@ -193,6 +193,34 @@
 (check "lookup refs are not transaction entities"
        (= "InvalidRequest" (:code (failure #(f/transact conn {:changes [[:assert [:person/email "ada@example.com"] :person/name "A"]]})))))
 
+(f/transact conn {:schema [{:name :agg/recipe :type :string :cardinality :one :unique :none}
+                           {:name :agg/cost :type :f64 :cardinality :one :unique :none}]
+                  :new-entities [:r1 :r2 :r3 :r4]
+                  :changes [[:assert {:temp :r1} :agg/recipe "a"] [:assert {:temp :r1} :agg/cost 1.5]
+                            [:assert {:temp :r2} :agg/recipe "a"] [:assert {:temp :r2} :agg/cost 1.5]
+                            [:assert {:temp :r3} :agg/recipe "a"] [:assert {:temp :r3} :agg/cost 2.0]
+                            [:assert {:temp :r4} :agg/recipe "b"] [:assert {:temp :r4} :agg/cost 4.0]]})
+(def per-recipe '{:match [[?run :agg/recipe ?recipe] [?run :agg/cost ?cost]]
+                  :select [?recipe (sum ?cost) (count ?run)]
+                  :with [?run]
+                  :order [[(sum ?cost) :desc]]})
+(check "aggregate columns in select order"
+       (= [:recipe :sum-cost :count-run] (:columns (f/q conn per-recipe))))
+(check "sum and count per group with :with"
+       (= [["a" 5.0 3] ["b" 4.0 1]] (:rows (f/q conn per-recipe))))
+(check "without :with equal tuples collapse"
+       (= #{["a" 3.5] ["b" 4.0]}
+          (set (:rows (f/q conn '{:match [[?run :agg/recipe ?recipe] [?run :agg/cost ?cost]]
+                                  :select [?recipe (sum ?cost)]})))))
+(check "global aggregates"
+       (= [[4 1.5 4.0 2]] (:rows (f/q conn '{:match [[?run :agg/cost ?cost] [?run :agg/recipe ?recipe]]
+                                             :select [(count ?run) (min ?cost) (max ?cost) (count-distinct ?recipe)]}))))
+(check "aggregate with no matches has no rows"
+       (= [] (:rows (f/q conn '{:match [[?run :agg/cost ?cost] [?run :task/status ?s]]
+                                :select [(count ?run)]}))))
+(check "sum of a string fails" (= "TypeMismatch" (:code (failure #(f/q conn '{:match [[?r :agg/recipe ?x]] :select [(sum ?x)]})))))
+(check "unknown aggregate fails" (= "InvalidRequest" (:code (failure #(f/q conn '{:match [[?r :agg/cost ?x]] :select [(avg ?x)]})))))
+
 (def reader (f/open path {:read-only true :busy-timeout-ms 500}))
 (check "read-only head follows writer" (= (f/head conn) (f/head reader)))
 (check "read-only history" (= "todo" (:task/status (f/pull reader task [:task/status] {:at (:after a)}))))

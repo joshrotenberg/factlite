@@ -247,6 +247,11 @@ design and need a separate decision; they are not in this step.
   connection. Pod `open` accepts `:read-only` and `:busy-timeout-ms`.
 - [x] **11.2 Lookup refs for reads.** Resolve an entity by a unique attribute's
   value at a view's revision, and accept `[attr value]` in pod read positions.
+- [x] **11.4 Aggregates.** Chosen by the user on 2026-11-05, extending the
+  original design's query scope. count, count-distinct, sum, min and max over
+  distinct projected tuples, grouped by the selected variables, with an
+  explicit `with` list. Shared exact arithmetic for SQL and reference paths;
+  wire, CLI and pod surfaces; independent-oracle and parity properties.
 - [x] **11.3 Indexed filtered history.** Answer entity- or attribute-filtered
   history from datom intervals and per-revision events instead of decoding
   every retained report, with parity against the log path.

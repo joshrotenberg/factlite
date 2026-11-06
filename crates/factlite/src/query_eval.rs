@@ -5,9 +5,7 @@ use std::{
     collections::{BTreeMap, HashSet},
 };
 
-use crate::{
-    Comparison, Direction, Fact, Params, Query, QueryName, QueryResult, Result, Schema, Term, Value,
-};
+use crate::{Comparison, Fact, Params, Query, QueryName, QueryResult, Result, Schema, Term, Value};
 
 type Binding = BTreeMap<QueryName, Value>;
 
@@ -50,7 +48,7 @@ pub(crate) fn evaluate(
 ) -> Result<QueryResult> {
     query.validate(schema, params)?;
     let empty = || QueryResult {
-        columns: query.select.clone(),
+        columns: crate::query_aggregate::result_columns(query),
         rows: Vec::new(),
     };
     if query.limit == Some(0) {
@@ -82,6 +80,12 @@ pub(crate) fn evaluate(
             return Ok(empty());
         }
     }
+    // Aggregates project their tuple columns; plain queries project selections.
+    let projected = if query.aggregates.is_empty() {
+        query.select.clone()
+    } else {
+        crate::query_aggregate::tuple_columns(query)
+    };
     let mut distinct = HashSet::new();
     for binding in bindings {
         let mut matches = true;
@@ -97,47 +101,18 @@ pub(crate) fn evaluate(
         }
         if matches {
             distinct.insert(
-                query
-                    .select
+                projected
                     .iter()
                     .map(|name| binding.get(name).expect("validated selection").clone())
                     .collect::<Vec<_>>(),
             );
         }
     }
-    let mut rows: Vec<_> = distinct.into_iter().collect();
-    let order: Vec<_> = query
-        .order
-        .iter()
-        .map(|order| {
-            (
-                query
-                    .select
-                    .iter()
-                    .position(|name| name == &order.field)
-                    .expect("validated selected order field"),
-                order.direction,
-            )
-        })
-        .collect();
-    rows.sort_by(|left, right| {
-        for (index, direction) in &order {
-            let ordering = left[*index]
-                .compare(&right[*index])
-                .expect("validated uniform column domain");
-            let ordering = match direction {
-                Direction::Asc => ordering,
-                Direction::Desc => ordering.reverse(),
-            };
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        Ordering::Equal
-    });
-    if let Some(limit) = query.limit {
-        rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    if !query.aggregates.is_empty() {
+        return crate::query_aggregate::finish(query, distinct.into_iter().collect());
     }
+    let mut rows: Vec<_> = distinct.into_iter().collect();
+    crate::query_aggregate::order_and_limit(query, &query.select, &mut rows);
     Ok(QueryResult {
         columns: query.select.clone(),
         rows,

@@ -94,12 +94,48 @@ pub struct Order {
     pub direction: Direction,
 }
 
+/// An aggregate function over one variable within each group.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AggregateFn {
+    /// The number of distinct projected tuples in the group, as I64.
+    Count,
+    /// The number of distinct values of the variable in the group, as I64.
+    CountDistinct,
+    /// The sum over the group's tuples of an I64 or F64 variable, in its type.
+    /// I64 overflow is an error. F64 values are added in ascending order, and a
+    /// non-finite running total is an error.
+    Sum,
+    /// The least value of the variable in the group, in its type.
+    Min,
+    /// The greatest value of the variable in the group, in its type.
+    Max,
+}
+
+/// One aggregate column, named in the result after the selected columns.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Aggregate {
+    /// The function applied within each group.
+    pub function: AggregateFn,
+    /// A variable bound by the patterns.
+    pub var: QueryName,
+    /// The result column name; distinct from every other column.
+    pub name: QueryName,
+}
+
 /// Concrete input values, validated against Query's declared input types.
 pub type Params = BTreeMap<QueryName, Value>;
 
 /// Conjunctive match/filter/project/distinct/order/limit query.
 /// Execution, interchange, and SQL compilation follow this AST without extending
-/// it to optional, negative, recursive, or aggregate patterns.
+/// it to optional, negative or recursive patterns.
+///
+/// With aggregates, evaluation is: match and filter; project the selected
+/// variables, the `with` variables and each aggregate's variable; remove
+/// duplicate tuples; group by the selected variables; aggregate each group;
+/// then order and limit. Only distinct tuples are aggregated, so include a
+/// variable in `with` (such as the entity) when equal values from different
+/// matches must each count. No matching tuples yield no rows, even without
+/// selected variables.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Query {
     /// Declared input names and exact types; every input must be supplied.
@@ -110,10 +146,15 @@ pub struct Query {
     pub predicates: Vec<Predicate>,
     /// Bound selected columns, without duplicate names.
     pub select: Vec<QueryName>,
-    /// Optional ordering over selected fields only.
+    /// Optional ordering over selected fields and aggregate names only.
     pub order: Vec<Order>,
     /// Limit after distinct and ordering. Zero is valid; negative is unrepresentable.
     pub limit: Option<u64>,
+    /// Bound variables kept distinct in aggregated tuples but not returned.
+    /// Requires at least one aggregate.
+    pub with: Vec<QueryName>,
+    /// Aggregate columns, after the selected columns. Selected variables group.
+    pub aggregates: Vec<Aggregate>,
 }
 
 /// Owned relation of named columns and typed tuples. Entity-domain columns use
@@ -216,9 +257,59 @@ impl Query {
                 return Err(Error::invalid("select", "duplicate selected column"));
             }
         }
+        if !self.with.is_empty() && self.aggregates.is_empty() {
+            return Err(Error::invalid(
+                "with",
+                "with requires at least one aggregate",
+            ));
+        }
+        let mut kept = BTreeSet::new();
+        for name in &self.with {
+            if !variables.contains_key(name) {
+                return Err(Error::invalid(
+                    "with",
+                    format!("unbound variable: {}", name.as_str()),
+                ));
+            }
+            if selected.contains(name) || !kept.insert(name) {
+                return Err(Error::invalid(
+                    "with",
+                    "with variables must be distinct and not selected",
+                ));
+            }
+        }
+        for aggregate in &self.aggregates {
+            let ty = *variables.get(&aggregate.var).ok_or_else(|| {
+                Error::invalid(
+                    "aggregates",
+                    format!("unbound variable: {}", aggregate.var.as_str()),
+                )
+            })?;
+            if aggregate.function == AggregateFn::Sum
+                && !matches!(ty, ValueType::I64 | ValueType::F64)
+            {
+                return Err(Error::new(
+                    ErrorCode::TypeMismatch,
+                    ErrorContext::TypeMismatch {
+                        expected: ValueType::I64,
+                        actual: ty,
+                    },
+                    "sum requires an i64 or f64 variable",
+                ));
+            }
+            if !selected.insert(&aggregate.name) {
+                return Err(Error::invalid(
+                    "aggregates",
+                    "aggregate name duplicates another column",
+                ));
+            }
+        }
         for order in &self.order {
             if !selected.contains(&order.field) {
-                return Err(Error::invalid("order", "order field must be selected"));
+                return Err(Error::invalid(
+                    "order",
+                    "order field must be selected or an aggregate",
+                ));
             }
         }
         Ok(variables)

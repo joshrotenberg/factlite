@@ -5,7 +5,7 @@ replay, owned pinned reads, strict interchange, exact retries, historical SQL
 queries, CLI parity, process recovery and standalone backups are implemented and
 tested. Item 9.1 adds a derived, verified temporal datom index. Reads and commits
 load the pinned state from that index instead of replaying the log. The latest
-gate passed 173 tests, including forty-eight 1,024-case properties, plus the
+gate passed 179 tests, including forty-nine 1,024-case properties, plus the
 asserted Rust workflow. Item 10.1 adds a babashka pod that translates Clojure data
 into the strict wire requests. Remote publication (8.2) and direct indexed reads
 (9.2) are open. Reviews are self-reviews; remote CI and independent review have not
@@ -637,6 +637,19 @@ run.
 - **Blockers:** None locally.
 - **What's next:** Aggregates and new value types (keyword, inst) were deferred
   in the original design and need a user decision before any work.
+
+## 11.4 Aggregates: done
+
+- **Done:** count, count-distinct, sum, min and max with grouping by selected
+  variables and an explicit `with` list, in Rust, JSON, CLI and the pod. All
+  179 tests passed, including forty-nine 1,024-case properties; full checks
+  passed. Review: `reviews/0041-aggregates.md`.
+- **Decisions:** Distinct-tuple semantics, exact-or-error arithmetic, and no
+  rows for no matches. See `decisions.md`.
+- **Measured:** Cost per recipe over 1,401 runs on the clajent store copy took
+  1.85 ms through the pod, against 4.7 ms to fetch and reduce in babashka.
+- **Blockers:** None locally.
+- **What's next:** New value types (keyword, inst) remain undecided.
 
 ## Environment notes
 

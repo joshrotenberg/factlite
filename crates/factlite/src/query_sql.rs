@@ -246,13 +246,25 @@ pub(crate) fn evaluate(
         let model = crate::index::model_at(transaction, basis)?;
         return crate::query_eval::evaluate(query, params, schema, model.facts());
     }
-    let compiled = compile(query, params, schema, basis)?;
     if query.limit == Some(0) {
         return Ok(QueryResult {
-            columns: query.select.clone(),
+            columns: crate::query_aggregate::result_columns(query),
             rows: Vec::new(),
         });
     }
+    if !query.aggregates.is_empty() {
+        // SQL produces the distinct tuples; grouping and arithmetic are shared
+        // with the reference evaluator.
+        let tuples = evaluate(
+            transaction,
+            &crate::query_aggregate::tuple_query(query),
+            params,
+            schema,
+            basis,
+        )?;
+        return crate::query_aggregate::finish(query, tuples.rows);
+    }
+    let compiled = compile(query, params, schema, basis)?;
     let mut output = Vec::new();
     let mut statement = transaction.prepare(&compiled.sql)?;
     let mut rows = statement.query(params_from_iter(&compiled.bindings))?;
@@ -339,6 +351,32 @@ mod tests {
             )?;
             assert_eq!(count, 0, "queries create no temporary relation");
             Ok(actual)
+        })
+        .unwrap()
+    }
+    /// Like `parity`, but sum overflow may fail: both paths must then fail with
+    /// the same code.
+    fn parity_or_error(
+        db: &Db,
+        q: &Query,
+        params: &Params,
+    ) -> std::result::Result<QueryResult, crate::ErrorCode> {
+        db.read(|transaction, model| {
+            let schema = model.catalog.schema_at(db.snapshot().revision())?;
+            let actual = evaluate(transaction, q, params, &schema, db.snapshot());
+            let expected = crate::query_eval::evaluate(q, params, &schema, model.facts());
+            Ok(match (actual, expected) {
+                (Ok(actual), Ok(expected)) => {
+                    assert_eq!(actual, expected);
+                    Ok(actual)
+                }
+                (Err(actual), Err(expected)) => {
+                    assert_eq!(actual.code(), expected.code());
+                    assert_eq!(actual.to_string(), expected.to_string());
+                    Err(actual.code())
+                }
+                (actual, expected) => panic!("diverged: {actual:?} vs {expected:?}"),
+            })
         })
         .unwrap()
     }
@@ -521,14 +559,28 @@ mod tests {
             for (a,b) in edges { tx = tx.assert(ids[a].clone(),"x/link".parse().unwrap(),ValueTerm::Value(Value::Ref(ids[b].clone()))); }
             let a = store.commit(tx.build().unwrap()).unwrap(); let db_a = store.db().unwrap();
             let direction = if descending {Direction::Desc} else {Direction::Asc};
-            let q = Query { inputs:[(name("wanted"),domain)].into(),patterns:vec![pattern(var("e"),"x/link",var("peer")),pattern(var("peer"),"x/value",var("v"))],predicates:vec![Predicate {left:var("v"),comparison:[Comparison::Eq,Comparison::Ne,Comparison::Lt,Comparison::Le,Comparison::Gt,Comparison::Ge][op],right:Term::Param(name("wanted"))}],select:vec![name("v"),name("e"),name("peer")],order:vec![order("v",direction),order("e",direction),order("peer",direction)],limit:Some(limit) };
+            let q = Query { inputs:[(name("wanted"),domain)].into(),patterns:vec![pattern(var("e"),"x/link",var("peer")),pattern(var("peer"),"x/value",var("v"))],predicates:vec![Predicate {left:var("v"),comparison:[Comparison::Eq,Comparison::Ne,Comparison::Lt,Comparison::Le,Comparison::Gt,Comparison::Ge][op],right:Term::Param(name("wanted"))}],select:vec![name("v"),name("e"),name("peer")],order:vec![order("v",direction),order("e",direction),order("peer",direction)],limit:Some(limit), ..Query::default() };
             let params = [(name("wanted"),wanted)].into(); let expected = parity(&db_a,&q,&params);
+            // The same join, aggregated per entity, through SQL tuples and the reference.
+            let mut aggregates = vec![
+                crate::Aggregate { function: crate::AggregateFn::Count, var: name("peer"), name: name("n") },
+                crate::Aggregate { function: crate::AggregateFn::CountDistinct, var: name("v"), name: name("distinct") },
+                crate::Aggregate { function: crate::AggregateFn::Min, var: name("v"), name: name("low") },
+                crate::Aggregate { function: crate::AggregateFn::Max, var: name("v"), name: name("high") },
+            ];
+            if matches!(domain, ValueType::I64 | ValueType::F64) {
+                aggregates.push(crate::Aggregate { function: crate::AggregateFn::Sum, var: name("v"), name: name("total") });
+            }
+            let grouped = Query { select: vec![name("e")], with: vec![name("peer")], aggregates, order: vec![order("e", direction)], limit: Some(limit), ..q.clone() };
+            let grouped_expected = parity_or_error(&db_a,&grouped,&params);
             // Later commits retract and add values and links; A must not see them.
             store.commit(Tx::builder().define_attribute(definition("later/value",ValueType::Bool)).retract(ids[0].clone(),"x/value".parse().unwrap(),values[0].clone()).assert(ids[1].clone(),"x/link".parse().unwrap(),ValueTerm::Value(Value::Ref(ids[2].clone()))).build().unwrap()).unwrap();
             store.commit(Tx::builder().assert(ids[2].clone(),"x/value".parse().unwrap(),wanted_again(&values)).assert(ids[0].clone(),"x/value".parse().unwrap(),values[0].clone()).build().unwrap()).unwrap();
             prop_assert_eq!(parity(&db_a,&q,&params),expected.clone());
+            prop_assert_eq!(parity_or_error(&db_a,&grouped,&params),grouped_expected.clone());
             drop((store,db_a));let reopened = Store::open(&path).unwrap();
             prop_assert_eq!(parity(&reopened.db_at(&a.after).unwrap(),&q,&params),expected);
+            prop_assert_eq!(parity_or_error(&reopened.db_at(&a.after).unwrap(),&grouped,&params),grouped_expected);
         }
     }
 }

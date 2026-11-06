@@ -4,8 +4,8 @@ use serde_json::{Map, Value as Json, json};
 
 use super::{Object, concrete_value, strict, text, value_json};
 use crate::{
-    Comparison, Direction, Error, Order, Params, Pattern, Predicate, Query, QueryName, QueryResult,
-    Result, Term, ValueType,
+    Aggregate, AggregateFn, Comparison, Direction, Error, Order, Params, Pattern, Predicate, Query,
+    QueryName, QueryResult, Result, Term, ValueType,
 };
 
 fn term(value: Json) -> Result<Term> {
@@ -156,6 +156,34 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
             Ok(Order { field, direction })
         })
         .collect::<Result<_>>()?;
+    let with = object
+        .array("with")?
+        .into_iter()
+        .map(|value| QueryName::new(text(value, "with")?))
+        .collect::<Result<_>>()?;
+    let aggregates = object
+        .array("aggregates")?
+        .into_iter()
+        .map(|value| {
+            let mut object = Object::new(value, "aggregate")?;
+            let function = match text(object.required("fn")?, "fn")?.as_str() {
+                "count" => AggregateFn::Count,
+                "count_distinct" => AggregateFn::CountDistinct,
+                "sum" => AggregateFn::Sum,
+                "min" => AggregateFn::Min,
+                "max" => AggregateFn::Max,
+                _ => return Err(Error::invalid("fn", "unknown aggregate function")),
+            };
+            let var = QueryName::new(text(object.required("var")?, "var")?)?;
+            let name = QueryName::new(text(object.required("name")?, "name")?)?;
+            object.finish()?;
+            Ok(Aggregate {
+                function,
+                var,
+                name,
+            })
+        })
+        .collect::<Result<_>>()?;
     let limit = object
         .optional("limit")
         .map(|value| {
@@ -178,6 +206,8 @@ pub fn decode_query(input: &str) -> Result<(Query, Params)> {
             select,
             order,
             limit,
+            with,
+            aggregates,
         },
         params,
     ))
@@ -195,6 +225,28 @@ pub fn encode_query(query: &Query, params: &Params) -> String {
     });
     if let Some(limit) = query.limit {
         inner["limit"] = json!(limit);
+    }
+    if !query.with.is_empty() {
+        inner["with"] = json!(query.with.iter().map(QueryName::as_str).collect::<Vec<_>>());
+    }
+    if !query.aggregates.is_empty() {
+        inner["aggregates"] = json!(
+            query
+                .aggregates
+                .iter()
+                .map(|aggregate| json!({
+                    "fn": match aggregate.function {
+                        AggregateFn::Count => "count",
+                        AggregateFn::CountDistinct => "count_distinct",
+                        AggregateFn::Sum => "sum",
+                        AggregateFn::Min => "min",
+                        AggregateFn::Max => "max",
+                    },
+                    "var": aggregate.var.as_str(),
+                    "name": aggregate.name.as_str(),
+                }))
+                .collect::<Vec<_>>()
+        );
     }
     json!({"version":1,"query":inner,"params":params.iter().map(|(name,value)| (name.as_str().to_owned(),value_json(value))).collect::<Map<_,_>>()}).to_string()
 }
