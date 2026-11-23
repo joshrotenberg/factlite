@@ -17,7 +17,7 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 239 pass locally with babashka installed and `REQUIRE_BB=1`,
+- **Tests:** 244 pass locally with babashka installed and `REQUIRE_BB=1`,
   including fifty-five 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions is unavailable for
   this account this month, so the local gate stands in for CI.
@@ -38,8 +38,8 @@ current.
 - **Explored:** agent-native use (roadmap 11, `design/agent-native.md`),
   written 2026-11-23. Its candidates 6 and 11 are done as plan step 13: the
   [queue guide](queues.md) and the [agent guide](agents.md).
-- **Found, undecided:** head reads over churned attributes are linear in
-  history (roadmap 12).
+- **Found, undecided:** head reads that join attributes of finished entities
+  are linear in history (roadmap 12).
 
 ## 0.1 Inspect and initialize — done
 
@@ -879,18 +879,21 @@ current.
 
 - **Done:** a work queue on the public API in
   `examples/work_queue/queue.rs`, shared by the `work_queue` example and
-  `tests/work_queue.rs`. Nine deterministic cases, a 1,024-case property
-  against a state machine of the contract, four worker processes finishing
-  100 jobs exactly once with no extra revision, and a killed worker's job
-  finished by another process. `docs/queues.md` states each guarantee with
+  `tests/work_queue.rs`. Twelve deterministic cases, a 1,024-case property
+  against a state machine of the contract, and three process tests: four
+  processes that hold the same candidate commit exactly one claim; four
+  worker processes finish 100 jobs exactly once with no extra revision; and
+  a killed worker's job is finished by another process. `docs/queues.md` states each guarantee with
   its test, what is not guaranteed, and measured costs. Measurements in
   `measurements.md`.
 - **Decisions:** see `decisions.md`, "Work queue pattern and agent
   conventions". The fence is the attempt number; a takeover expects state,
   lease and attempt; nothing is retracted; the caller supplies the clock.
 - **Validation:** local `scripts/check.sh` with `REQUIRE_BB=1`; GitHub Actions
-  is unavailable. Three mutations of the pattern each fail at least one
-  test, checked by hand. The process tests passed eight repeated runs.
+  is unavailable. Eight single changes to the pattern each fail at least
+  one test, checked by hand. The process tests passed repeated runs.
+  Independent Claude and Codex subagent reviews are recorded in
+  `reviews/0056-queue-and-agent-guides.md`.
 - **Blockers:** none.
 - **Left open:** the claim read grows with finished jobs in the file (roadmap
   12, undecided). The pattern is tested through the Rust API only, not the

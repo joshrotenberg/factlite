@@ -113,23 +113,32 @@ current state.
   Item 10's decision preconditions (items 3 and 4) are met; it still needs
   authorization, its two listed prerequisites and a design revision.
 
-## 12. Head reads over churned attributes: found, undecided
+## 12. Head reads that join attributes of finished entities: found, undecided
 
 - **Why:** measuring the queue pattern (plan 13.1) showed that the read
-  behind every claim grows by about 0.8 ms per 1,000 finished jobs in the
-  file, from 0.22 ms with none to 6.6 ms with 8,000. It follows the jobs ever
-  processed, not the jobs pending. Any workload that queries at the head for
-  the few entities in one state among many that have left it will see the
-  same. Figures and method: [measurements](measurements.md), "Work queue
-  pattern".
-- **What is known:** in an experiment outside the repository, an index on
-  `(attribute, value, retracted, entity, asserted)` cut one form of the query
-  from 1.99 ms to 0.21 ms at 4,000 finished jobs, and made no difference to
-  the form that also matches an attribute every job holds. `ANALYZE` alone
-  changed nothing. Pattern order in the query changed the time by a third.
-  So a remedy involves an index and how the generated SQL orders its joins.
-- **Decision needed:** whether to design it. It would be a storage format
-  change with an upgrade, and needs the reference-evaluator parity and
-  measurement evidence that items 9.1 to 9.5 had.
+  behind every claim grows by about 0.8 to 1.2 ms per 1,000 finished jobs in
+  the file, from 0.22 ms with none to 6.6 ms and 9.8 ms with 8,000. It
+  follows the jobs ever processed, not the jobs pending. Any workload that
+  queries for the few entities in one state, joined to attributes that the
+  many entities which left that state still hold, will see the same. Figures
+  and method: [measurements](measurements.md), "Work queue pattern".
+- **What is known:**
+  - Every read that joined two or more of the job attributes grew at about
+    the same rate. A read of the single pattern `job/state = pending` grew
+    about fourteen times more slowly: 0.46 ms at 8,000 finished jobs.
+  - A reviewer's reproduction of the generated SQL on plain SQLite found the
+    join driven from the due-time range, probing state per job. The plan used
+    by the bundled SQLite was not captured.
+  - In an experiment outside the repository, an index on
+    `(attribute, value, retracted, entity, asserted)` cut one form of the
+    query from 1.99 ms to 0.21 ms at 4,000 finished jobs and did not help the
+    form that also matches an attribute every job holds. `ANALYZE` alone
+    changed nothing. Pattern order in the query changed the time by a third.
+- **Candidate remedies, none tried in the library:** make the generated SQL
+  follow the query's pattern order, so the author can put the selective
+  pattern first; keep planner statistics; add an index over open intervals by
+  attribute and value. The first needs no storage format change.
+- **Decision needed:** whether to investigate. The first step would be to
+  capture the real query plan.
 - **Until then:** the [queue guide](queues.md) says to start a new store file
   after a few thousand jobs.

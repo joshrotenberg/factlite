@@ -9,7 +9,7 @@ use factlite::{
     Db, EntityId, ErrorCode, FactFilter, Operation, PulledValue, Revision, Store, TempId, Tx, Value,
 };
 use proptest::prelude::*;
-use queue::{CLAIMED, Candidate, Claim, DONE, FAILED, PENDING, attr};
+use queue::{Basis, CLAIMED, Candidate, Claim, DONE, FAILED, PENDING, attr};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -155,7 +155,7 @@ fn a_heartbeat_between_read_and_reclaim_wins() {
     queue::enqueue(&store, QUEUE, "a", "", 0).unwrap();
     let held = claim(&store, "a", 0).unwrap();
     let stale = queue::candidates(&store.db().unwrap(), QUEUE, LEASE + 1, 1).unwrap();
-    assert_eq!(stale[0].expired_lease, Some(LEASE));
+    assert_eq!(stale[0].basis, Basis::Expired { lease_until: LEASE });
     let extended = queue::heartbeat(&store, &held, "a", LEASE + 1, LEASE)
         .unwrap()
         .unwrap();
@@ -179,7 +179,7 @@ fn a_stale_pending_candidate_does_not_claim_a_released_job() {
         [Candidate {
             job: job.clone(),
             attempt: 0,
-            expired_lease: None
+            basis: Basis::Due { run_after: 0 }
         }]
     );
     // Claimed and released: pending again, but at attempt 1.
@@ -254,6 +254,110 @@ fn history_keeps_every_state_a_job_passed_through() {
     );
 }
 
+#[test]
+fn a_takeover_loses_to_a_late_finish_fail_or_release() {
+    for ending in ["finish", "fail", "release"] {
+        let (_dir, store) = open();
+        let job = queue::enqueue(&store, QUEUE, "a", "", 0).unwrap();
+        let held = claim(&store, "a", 0).unwrap();
+        // Another worker reads the job as expired, and then the owner acts.
+        let stale = queue::candidates(&store.db().unwrap(), QUEUE, LEASE + 1, 1).unwrap();
+        assert_eq!(stale[0].basis, Basis::Expired { lease_until: LEASE });
+        assert!(
+            match ending {
+                "finish" => queue::finish(&store, &held, "a", "ok"),
+                "fail" => queue::fail(&store, &held, "a", "no"),
+                _ => queue::release(&store, &held, "a", LEASE + 1),
+            }
+            .unwrap()
+        );
+        // None of these touches the lease or the attempt, so only the state
+        // expectation stops the takeover.
+        let head = store.head().unwrap();
+        assert_eq!(
+            queue::try_claim(&store, &stale[0], "b", LEASE + 1, LEASE).unwrap(),
+            None,
+            "after {ending}"
+        );
+        assert_eq!(store.head().unwrap(), head);
+        let expected = match ending {
+            "finish" => DONE,
+            "fail" => FAILED,
+            _ => PENDING,
+        };
+        assert_eq!(state(&store, &job), expected);
+        // A released job is claimable again, from a fresh read.
+        let again = claim(&store, "b", LEASE + 1).map(|claim| claim.attempt);
+        assert_eq!(again, (ending == "release").then_some(2));
+    }
+}
+
+#[test]
+fn a_candidate_is_not_claimed_before_the_time_it_was_read_for() {
+    let (_dir, store) = open();
+    queue::enqueue(&store, QUEUE, "a", "", 10).unwrap();
+    let due = queue::candidates(&store.db().unwrap(), QUEUE, 10, 1).unwrap();
+    assert_eq!(due[0].basis, Basis::Due { run_after: 10 });
+    let head = store.head().unwrap();
+    assert_eq!(
+        queue::try_claim(&store, &due[0], "a", 9, LEASE).unwrap(),
+        None
+    );
+    assert_eq!(store.head().unwrap(), head);
+    let held = queue::try_claim(&store, &due[0], "a", 10, LEASE)
+        .unwrap()
+        .unwrap();
+    let expired = queue::candidates(&store.db().unwrap(), QUEUE, held.lease_until + 1, 1).unwrap();
+    let head = store.head().unwrap();
+    let at_lease_end = queue::try_claim(&store, &expired[0], "b", held.lease_until, LEASE);
+    assert_eq!(at_lease_end.unwrap(), None);
+    assert_eq!(store.head().unwrap(), head);
+}
+
+#[test]
+fn a_heartbeat_never_shortens_the_lease() {
+    let (_dir, store) = open();
+    let job = queue::enqueue(&store, QUEUE, "a", "", 0).unwrap();
+    let held = claim(&store, "a", 0).unwrap();
+    let kept = queue::heartbeat(&store, &held, "a", 50, 10)
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.lease_until, LEASE);
+    assert_eq!(
+        one(&store.db().unwrap(), &job, "job/lease-until"),
+        Some(Value::Inst(LEASE))
+    );
+    assert_eq!(claim(&store, "b", LEASE), None);
+}
+
+#[test]
+fn due_jobs_come_before_expired_ones_and_ties_have_one_order() {
+    let (_dir, store) = open();
+    let old = queue::enqueue(&store, QUEUE, "old", "", 0).unwrap();
+    assert_eq!(claim(&store, "x", 0).unwrap().job, old);
+    let mut tied = [
+        queue::enqueue(&store, QUEUE, "a", "", 10).unwrap(),
+        queue::enqueue(&store, QUEUE, "b", "", 10).unwrap(),
+    ];
+    tied.sort();
+    let now = LEASE + 1;
+    let jobs = |limit| -> Vec<EntityId> {
+        queue::candidates(&store.db().unwrap(), QUEUE, now, limit)
+            .unwrap()
+            .into_iter()
+            .map(|candidate| candidate.job)
+            .collect()
+    };
+    // The limit applies to due jobs and to expired jobs separately.
+    assert_eq!(jobs(1), [tied[0].clone(), old.clone()]);
+    assert_eq!(jobs(2), [tied[0].clone(), tied[1].clone(), old.clone()]);
+    // With a spread of one, the expired job is taken only when none is due.
+    let order: Vec<EntityId> = (0..3)
+        .map(|_| claim(&store, "w", now).unwrap().job)
+        .collect();
+    assert_eq!(order, [tied[0].clone(), tied[1].clone(), old]);
+}
+
 /// The documented contract as a state machine, with no queries or storage.
 #[derive(Clone, Debug)]
 struct ModelJob {
@@ -263,6 +367,11 @@ struct ModelJob {
     attempt: i64,
     lease_until: i64,
     run_after: i64,
+    /// The due time of the original enqueue request, which a release does
+    /// not change.
+    enqueued_for: i64,
+    /// The worker and attempt whose finish committed.
+    finished: Option<(usize, i64)>,
 }
 
 impl ModelJob {
@@ -273,14 +382,21 @@ impl ModelJob {
     fn held_by(&self, worker: usize, claim: &Claim) -> bool {
         self.state == CLAIMED && self.owner == Some(worker) && self.attempt == claim.attempt
     }
+    fn result(&self) -> Option<Value> {
+        match self.state {
+            DONE => Some(Value::String("ok".into())),
+            FAILED => Some(Value::String("no".into())),
+            _ => None,
+        }
+    }
 }
 
 const WORKERS: [&str; 3] = ["w0", "w1", "w2"];
 
-/// Runs random enqueues, claims, heartbeats, finishes, releases, failures and
-/// clock steps. Workers keep every claim they were ever given, including ones
-/// they have since lost or replaced by claiming the same job again, and keep
-/// trying to use them.
+/// Runs one sequential trace of random enqueues, claims, heartbeats,
+/// finishes, releases, failures and clock steps. Workers keep every claim
+/// they were ever given, including ones they have since lost or replaced by
+/// claiming the same job again, and keep trying to use them.
 fn run_trace(operations: &[(u8, usize, usize, i64)]) {
     let (_dir, store) = open();
     let mut now = 0_i64;
@@ -295,9 +411,11 @@ fn run_trace(operations: &[(u8, usize, usize, i64)]) {
                 let entity = queue::enqueue(&store, QUEUE, &format!("job-{job}"), "", run_after);
                 match jobs.get(&job) {
                     // A different due time under the same job id is refused.
-                    Some(existing) if existing.run_after != run_after => {
+                    Some(existing) if existing.enqueued_for != run_after => {
                         assert_eq!(entity.unwrap_err().code(), ErrorCode::IdempotencyConflict)
                     }
+                    // The original request again is exact, whatever the job
+                    // has done since.
                     Some(existing) => assert_eq!(entity.unwrap(), existing.entity),
                     None => {
                         jobs.insert(
@@ -309,6 +427,8 @@ fn run_trace(operations: &[(u8, usize, usize, i64)]) {
                                 attempt: 0,
                                 lease_until: 0,
                                 run_after,
+                                enqueued_for: run_after,
+                                finished: None,
                             },
                         );
                     }
@@ -343,42 +463,45 @@ fn run_trace(operations: &[(u8, usize, usize, i64)]) {
                     continue;
                 };
                 let chosen = usize::try_from(step).unwrap() % claims.len();
-                let claim = &claims[chosen].clone();
+                let claim = claims[chosen].clone();
                 // Only the current owner at the current attempt may write.
                 // Time alone takes nothing away: an expired lease that nobody
                 // has taken still belongs to its owner.
-                let expected = model.held_by(worker, claim);
+                let holds = model.held_by(worker, &claim);
                 let head = store.head().unwrap();
                 let committed = match kind {
                     3 => {
-                        let extended = queue::heartbeat(&store, claim, name, now, LEASE).unwrap();
+                        let extended = queue::heartbeat(&store, &claim, name, now, LEASE).unwrap();
                         if let Some(extended) = &extended {
-                            model.lease_until = extended.lease_until;
+                            // The later of the lease held and the one asked for.
+                            let lease = model.lease_until.max(now + LEASE);
+                            assert_eq!(
+                                (extended.attempt, extended.lease_until),
+                                (claim.attempt, lease)
+                            );
+                            model.lease_until = lease;
+                            claims[chosen] = extended.clone();
                         }
-                        let committed = extended.is_some();
-                        if let Some(extended) = extended {
-                            claims[chosen] = extended;
-                        }
-                        committed
+                        extended.is_some()
                     }
                     4 => {
-                        let done = queue::finish(&store, claim, name, "ok").unwrap();
-                        // A repeated finish of a committed attempt is an exact
-                        // retry, whatever happened to the job since.
-                        if done && !expected {
-                            assert_eq!(model.state, DONE);
-                            assert_eq!(model.attempt, claim.attempt);
+                        let done = queue::finish(&store, &claim, name, "ok").unwrap();
+                        if model.finished == Some((worker, claim.attempt)) {
+                            // The finish that committed, sent again: the same
+                            // answer and no new revision.
+                            assert!(done, "a repeated finish must report the original commit");
                             assert_eq!(store.head().unwrap(), head);
                             continue;
                         }
                         if done {
                             model.state = DONE;
+                            model.finished = Some((worker, claim.attempt));
                         }
                         done
                     }
                     5 => {
                         let run_after = now + step;
-                        let released = queue::release(&store, claim, name, run_after).unwrap();
+                        let released = queue::release(&store, &claim, name, run_after).unwrap();
                         if released {
                             model.state = PENDING;
                             model.run_after = run_after;
@@ -386,14 +509,14 @@ fn run_trace(operations: &[(u8, usize, usize, i64)]) {
                         released
                     }
                     _ => {
-                        let failed = queue::fail(&store, claim, name, "no").unwrap();
+                        let failed = queue::fail(&store, &claim, name, "no").unwrap();
                         if failed {
                             model.state = FAILED;
                         }
                         failed
                     }
                 };
-                assert_eq!(committed, expected, "kind {kind} by {name} on {model:?}");
+                assert_eq!(committed, holds, "kind {kind} by {name} on {model:?}");
                 if !committed {
                     assert_eq!(
                         store.head().unwrap(),
@@ -413,35 +536,25 @@ fn run_trace(operations: &[(u8, usize, usize, i64)]) {
         .map(|candidate| candidate.job)
         .collect();
     for model in jobs.values() {
+        let stored = |name: &str| one(&db, &model.entity, name);
         assert_eq!(state(&store, &model.entity), model.state);
+        assert_eq!(stored("job/attempt"), Some(Value::I64(model.attempt)));
         assert_eq!(
-            one(&db, &model.entity, "job/attempt"),
-            Some(Value::I64(model.attempt))
-        );
-        assert_eq!(
-            one(&db, &model.entity, "job/owner"),
+            stored("job/owner"),
             model
                 .owner
                 .map(|owner| Value::String(WORKERS[owner].into()))
         );
+        assert_eq!(stored("job/run-after"), Some(Value::Inst(model.run_after)));
+        assert_eq!(
+            stored("job/lease-until"),
+            model.owner.map(|_| Value::Inst(model.lease_until))
+        );
+        assert_eq!(stored("job/result"), model.result());
         assert_eq!(claimable.contains(&model.entity), model.claimable(now));
         // Attempts only ever advance by one.
-        let attempts: Vec<Value> = db
-            .history(
-                FactFilter {
-                    entity: Some(model.entity.clone()),
-                    attribute: Some(attr("job/attempt")),
-                    value: None,
-                },
-                Revision::ZERO,
-            )
-            .unwrap()
-            .into_iter()
-            .filter(|event| event.operation == Operation::Assert)
-            .map(|event| event.fact.value)
-            .collect();
         assert_eq!(
-            attempts,
+            asserted(&db, &model.entity, "job/attempt"),
             (0..=model.attempt).map(Value::I64).collect::<Vec<_>>()
         );
     }
@@ -463,11 +576,13 @@ proptest! {
 
 // Separate worker processes. Each test re-enters itself in child processes, as
 // `process_recovery` does, so no helper binary exists and nothing here is
-// counted twice. Children signal through files beside the database; no
-// assertion depends on how long anything takes.
+// counted twice. Children signal through files beside the database, and
+// leases are either far longer than the test or expired by a clock offset, so
+// no assertion depends on how long anything takes.
 
 const STOP: &str = "stop";
 const WAIT: Duration = Duration::from_secs(60);
+const HOUR: i64 = 3_600_000;
 
 fn wall_clock() -> i64 {
     let elapsed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -482,14 +597,16 @@ impl Drop for KillOnDrop {
     }
 }
 
-fn spawn(test: &str, path: &Path, worker: usize, role: &str, lease_ms: i64) -> KillOnDrop {
+/// Starts this test again as worker `worker`, whose clock runs `ahead_ms`
+/// ahead of the wall clock.
+fn spawn(test: &str, path: &Path, worker: usize, role: &str, ahead_ms: i64) -> KillOnDrop {
     KillOnDrop(
         Command::new(std::env::current_exe().unwrap())
             .args(["--exact", test, "--nocapture"])
             .env("FACTLITE_QUEUE_DB", path)
             .env("FACTLITE_QUEUE_WORKER", worker.to_string())
             .env("FACTLITE_QUEUE_ROLE", role)
-            .env("FACTLITE_QUEUE_LEASE", lease_ms.to_string())
+            .env("FACTLITE_QUEUE_AHEAD", ahead_ms.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -537,54 +654,76 @@ fn ran_as_worker() -> bool {
     };
     let variable = |name: &str| std::env::var(name).unwrap();
     let worker = variable("FACTLITE_QUEUE_WORKER");
-    let lease_ms: i64 = variable("FACTLITE_QUEUE_LEASE").parse().unwrap();
+    let ahead: i64 = variable("FACTLITE_QUEUE_AHEAD").parse().unwrap();
+    let now = move || wall_clock() + ahead;
     let name = format!("w{worker}");
     let dir = Path::new(&path).parent().unwrap().to_owned();
     let store = Store::open(&path).unwrap();
-    publish(&dir, &format!("ready-{worker}"), "");
-    if variable("FACTLITE_QUEUE_ROLE") == "stall" {
+    match variable("FACTLITE_QUEUE_ROLE").as_str() {
+        // Read the one claimable job, wait until every racer has read it, and
+        // then try to claim it.
+        "race" => {
+            let seen = queue::candidates(&store.db().unwrap(), QUEUE, now(), 1).unwrap();
+            assert_eq!(seen.len(), 1);
+            publish(&dir, &format!("read-{worker}"), "");
+            await_file(&dir, "go");
+            let claimed = queue::try_claim(&store, &seen[0], &name, now(), HOUR).unwrap();
+            let outcome = if claimed.is_some() { "won" } else { "lost" };
+            publish(&dir, &format!("outcome-{worker}"), outcome);
+        }
         // Claim one job and never finish it; the parent kills this process.
-        loop {
-            let claimed = queue::claim(&store, QUEUE, &name, wall_clock(), lease_ms, 1, 0).unwrap();
-            if claimed.claim.is_some() {
-                publish(&dir, "stalled", "");
-                loop {
-                    std::thread::sleep(Duration::from_secs(1));
+        "stall" => {
+            publish(&dir, &format!("ready-{worker}"), "");
+            loop {
+                let claimed = queue::claim(&store, QUEUE, &name, now(), HOUR, 1, 0).unwrap();
+                if claimed.claim.is_some() {
+                    publish(&dir, "stalled", "");
+                    loop {
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
                 }
+                std::thread::sleep(Duration::from_millis(1));
             }
-            std::thread::sleep(Duration::from_millis(1));
+        }
+        _ => {
+            publish(&dir, &format!("ready-{worker}"), "");
+            let worked = queue::work_until_stopped(
+                &store,
+                QUEUE,
+                STOP,
+                &name,
+                HOUR,
+                1,
+                Duration::from_millis(1),
+                now,
+                |_, payload| payload.to_uppercase(),
+            )
+            .unwrap();
+            let report = format!("{}\n{}", worked.lost, worked.finished.join("\n"));
+            publish(&dir, &format!("finished-{worker}"), &report);
         }
     }
-    let worked = queue::work_until_stopped(
-        &store,
-        QUEUE,
-        STOP,
-        &name,
-        lease_ms,
-        1,
-        Duration::from_millis(1),
-        wall_clock,
-        |_, payload| payload.to_uppercase(),
-    )
-    .unwrap();
-    publish(
-        &dir,
-        &format!("finished-{worker}"),
-        &worked.finished.join("\n"),
-    );
     true
 }
 
-/// Which worker reported finishing each job, failing on any job reported twice.
-fn finished_by(dir: &Path, workers: impl Iterator<Item = usize>) -> BTreeMap<String, String> {
+/// Which worker reported finishing each job, failing on any job reported
+/// twice, and the claims the workers lost between them.
+fn finished_by(
+    dir: &Path,
+    workers: impl Iterator<Item = usize>,
+) -> (BTreeMap<String, String>, u64) {
     let mut finished = BTreeMap::new();
+    let mut lost = 0;
     for worker in workers {
-        for job in await_file(dir, &format!("finished-{worker}")).lines() {
+        let report = await_file(dir, &format!("finished-{worker}"));
+        let mut lines = report.lines();
+        lost += lines.next().unwrap().parse::<u64>().unwrap();
+        for job in lines {
             let earlier = finished.insert(job.to_owned(), format!("w{worker}"));
             assert_eq!(earlier, None, "{job} was finished twice");
         }
     }
-    finished
+    (finished, lost)
 }
 
 fn asserted(db: &Db, job: &EntityId, name: &str) -> Vec<Value> {
@@ -602,6 +741,56 @@ fn asserted(db: &Db, job: &EntityId, name: &str) -> Vec<Value> {
 }
 
 #[test]
+fn processes_that_read_the_same_job_commit_exactly_one_claim() {
+    if ran_as_worker() {
+        return;
+    }
+    const TEST: &str = "processes_that_read_the_same_job_commit_exactly_one_claim";
+    const RACERS: usize = 4;
+    let (dir, store) = open();
+    let path = dir.path().join("queue.sqlite");
+    let job = queue::enqueue(&store, QUEUE, "contested", "", 0).unwrap();
+    let head = store.head().unwrap();
+    let children: Vec<_> = (0..RACERS)
+        .map(|worker| spawn(TEST, &path, worker, "race", 0))
+        .collect();
+    // Every process holds the same candidate before any of them may claim.
+    for worker in 0..RACERS {
+        await_file(dir.path(), &format!("read-{worker}"));
+    }
+    assert_eq!(store.head().unwrap(), head);
+    publish(dir.path(), "go", "");
+    await_exit(children);
+
+    let outcomes: Vec<String> = (0..RACERS)
+        .map(|worker| await_file(dir.path(), &format!("outcome-{worker}")))
+        .collect();
+    let winner = outcomes
+        .iter()
+        .position(|outcome| outcome == "won")
+        .unwrap();
+    assert_eq!(
+        outcomes.iter().filter(|outcome| *outcome == "won").count(),
+        1
+    );
+    assert_eq!(
+        outcomes.iter().filter(|outcome| *outcome == "lost").count(),
+        RACERS - 1
+    );
+    // One revision was added, and it is the winner's claim.
+    let db = store.db().unwrap();
+    assert_eq!(db.transactions(head.revision()).unwrap().len(), 1);
+    assert_eq!(
+        asserted(&db, &job, "job/attempt"),
+        [Value::I64(0), Value::I64(1)]
+    );
+    assert_eq!(
+        asserted(&db, &job, "job/owner"),
+        [Value::String(format!("w{winner}"))]
+    );
+}
+
+#[test]
 fn worker_processes_finish_each_job_exactly_once() {
     if ran_as_worker() {
         return;
@@ -611,14 +800,14 @@ fn worker_processes_finish_each_job_exactly_once() {
     const JOBS: usize = 100;
     let (dir, store) = open();
     let path = dir.path().join("queue.sqlite");
-    // Leases far longer than the test, so no job is ever taken over.
+    // Leases last an hour, so no job is ever taken over.
     let children: Vec<_> = (0..WORKERS)
-        .map(|worker| spawn(TEST, &path, worker, "work", 3_600_000))
+        .map(|worker| spawn(TEST, &path, worker, "work", 0))
         .collect();
     for worker in 0..WORKERS {
         await_file(dir.path(), &format!("ready-{worker}"));
     }
-    // Every worker asks for the first claimable job, so each job is contended.
+    // Every worker asks for the first claimable job.
     let jobs: Vec<EntityId> = (0..JOBS)
         .map(|job| {
             queue::enqueue(&store, QUEUE, &format!("job-{job}"), &format!("p{job}"), 0).unwrap()
@@ -627,7 +816,7 @@ fn worker_processes_finish_each_job_exactly_once() {
     queue::enqueue(&store, "control", STOP, "", 0).unwrap();
     await_exit(children);
 
-    let finished = finished_by(dir.path(), 0..WORKERS);
+    let (finished, _lost) = finished_by(dir.path(), 0..WORKERS);
     assert_eq!(finished.len(), JOBS);
     let db = store.db().unwrap();
     for (index, job) in jobs.iter().enumerate() {
@@ -648,7 +837,8 @@ fn worker_processes_finish_each_job_exactly_once() {
         );
     }
     // The schema, each enqueue, the stop job, and one claim and one finish per
-    // job. A lost claim commits nothing, so there is no other revision.
+    // job. A lost claim commits nothing, so there is no other revision,
+    // however many claims the workers lost.
     assert_eq!(
         db.transactions(Revision::ZERO).unwrap().len(),
         1 + JOBS + 1 + 2 * JOBS
@@ -661,18 +851,19 @@ fn a_killed_workers_job_is_finished_by_another_process() {
         return;
     }
     const TEST: &str = "a_killed_workers_job_is_finished_by_another_process";
-    const LEASE_MS: i64 = 300;
     let (dir, store) = open();
     let path = dir.path().join("queue.sqlite");
-    let stalled = spawn(TEST, &path, 0, "stall", LEASE_MS);
+    let stalled = spawn(TEST, &path, 0, "stall", 0);
     await_file(dir.path(), "ready-0");
     let abandoned = queue::enqueue(&store, QUEUE, "abandoned", "left", 0).unwrap();
     await_file(dir.path(), "stalled");
     drop(stalled);
     assert_eq!(state(&store, &abandoned), CLAIMED);
 
+    // The rescuers' clocks run a day ahead, so the dead worker's hour-long
+    // lease has passed for them, while their own leases outlast the test.
     let children: Vec<_> = (1..3)
-        .map(|worker| spawn(TEST, &path, worker, "work", LEASE_MS))
+        .map(|worker| spawn(TEST, &path, worker, "work", 24 * HOUR))
         .collect();
     let mut jobs = vec![("abandoned".to_owned(), abandoned.clone())];
     for job in 0..10 {
@@ -683,25 +874,31 @@ fn a_killed_workers_job_is_finished_by_another_process() {
     queue::enqueue(&store, "control", STOP, "", 0).unwrap();
     await_exit(children);
 
-    let finished = finished_by(dir.path(), 1..3);
+    let (finished, _lost) = finished_by(dir.path(), 1..3);
     assert_eq!(finished.len(), jobs.len());
     let db = store.db().unwrap();
     for (id, job) in &jobs {
-        // Done exactly once, by the worker that reported it. A slow machine
-        // may let a live lease pass, so other jobs may also show two attempts.
-        let done = Value::Keyword(factlite::Keyword::new(DONE).unwrap());
-        let states = asserted(&db, job, "job/state");
-        assert_eq!(states.iter().filter(|state| **state == done).count(), 1);
-        assert_eq!(states.last(), Some(&done));
+        let attempts = if *job == abandoned { 2 } else { 1 };
+        assert_eq!(state(&store, job), DONE);
+        assert_eq!(
+            asserted(&db, job, "job/attempt"),
+            (0..=attempts).map(Value::I64).collect::<Vec<_>>()
+        );
         assert_eq!(
             asserted(&db, job, "job/owner").last(),
             Some(&Value::String(finished[id].clone()))
         );
     }
-    // The killed worker's claim is in history, and its job was taken over.
+    // The killed worker's claim is in history, and a rescuer took the job.
     let owners = asserted(&db, &abandoned, "job/owner");
-    assert_eq!(owners[0], Value::String("w0".into()));
-    assert!(owners.len() >= 2 && owners[1..].iter().all(|owner| *owner != owners[0]));
+    assert_eq!(
+        owners,
+        [
+            Value::String("w0".into()),
+            Value::String(finished["abandoned"].clone())
+        ]
+    );
+    assert_ne!(finished["abandoned"], "w0");
     assert_eq!(
         one(&db, &abandoned, "job/result"),
         Some(Value::String("LEFT".into()))

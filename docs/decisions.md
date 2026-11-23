@@ -831,9 +831,15 @@ change.
 - **Time alone takes nothing away.** An expired lease that nobody has taken
   still belongs to its owner. The store has no clock, so this is the only
   rule it can enforce.
-- **Nothing is retracted.** `job/owner` is the last claimant and stays on a
-  finished job. Fewer events per job, and the owner of a finished job is
-  readable at the head.
+- **No explicit retractions.** Single-valued attributes are replaced, which
+  ends the prior value's interval. `job/owner` is the last claimant and stays
+  on a finished job, so the owner of a finished job is readable at the head.
+- **A candidate carries why it was claimable,** and `try_claim` refuses one
+  that is not claimable at the claimer's time. A heartbeat never shortens a
+  lease.
+- **Outside effects are keyed without the attempt number.** A key that
+  includes it would let two attempts both take effect. The attempt is a
+  fencing token, not part of an idempotency key.
 - **Keys where a caller repeats without reading:** enqueue (from the job id)
   and finish (from the job and attempt). Claim and heartbeat read first and
   are fenced, so they carry no key and store no retry record.
@@ -843,5 +849,6 @@ change.
   in metadata on every commit, keys named by session and step, find-or-create
   for unique names, and one value in force held by an expectation on a
   single-valued attribute instead of supersession links.
-- **Found, not decided:** a head read whose patterns match attributes that
-  finished jobs still hold is linear in the jobs ever processed. Roadmap 12.
+- **Found, not decided:** a head read that joins attributes finished jobs
+  still hold is linear in the jobs ever processed, because the join is driven
+  from one of those attributes. Roadmap 12.

@@ -282,22 +282,42 @@ runs from that instant to the last worker's exit. One run per configuration.
 | 4 | 8,000 | 8 | 14,516 | 551 | 2,165 | 0.222, 9.836 | 69,840,896 | 951.1 |
 
 Each job is three revisions (`3 * jobs + 2` in every run) and about 8.7 KB of
-file. A writable open cost about 31 microseconds per revision.
+file. A writable open cost about 31 to 40 microseconds per revision.
 
 The candidate read is the median of 21 calls to the read that starts every
 claim, taken with every job pending (start) and with every job finished
-(end). At the start it does not depend on the number of pending jobs. At the
-end it grows by about 0.8 ms per 1,000 finished jobs. A head read whose
-patterns match attributes that finished jobs still hold is therefore linear
-in the jobs ever processed, and the queue's throughput falls as its file
-fills.
+(end). At the start it was the same at 500, 2,000 and 8,000 pending jobs. At
+the end it was about 0.8 ms per 1,000 finished jobs in five runs and 1.2 ms
+in the four-worker run over 8,000. The runs were made on the commit before
+the review changes to the pattern; those changes do not alter the queries.
 
 An earlier form of this run gave every job the same due time. The read then
 also grew with the number of pending jobs, 1.9 ms at 2,000, because ordering
 by due time and then by job had to read the whole tie. Distinct due times, as
 jobs enqueued over time have, removed that.
 
-An experiment that is not in the repository added
+A second measurement, with a test that is not in the repository, timed
+variants of the pending-jobs read on stores with 50 pending jobs and 0, 2,000
+or 8,000 finished ones. Mean of 30 calls, in milliseconds:
+
+| Read | 0 finished | 2,000 | 8,000 |
+| --- | ---: | ---: | ---: |
+| As in the pattern: queue, state, due time, attempt; due-time predicate; ordered; limit 1 | 0.117 | 1.562 | 6.536 |
+| Without the predicate | 0.104 | 1.489 | 6.486 |
+| Without predicate, order or limit | 0.116 | 1.521 | 6.372 |
+| Queue and state patterns only | 0.056 | 0.990 | 4.416 |
+| State pattern only | 0.038 | 0.147 | 0.459 |
+| Pull of one job by entity | 0.027 | 0.028 | 0.028 |
+
+Every read that joins two or more patterns grows at about the same rate,
+whatever its predicate, order or limit. The single-pattern read grows about
+fourteen times more slowly, and a pull by entity not at all. The join is
+therefore driven from an attribute that every job holds, and the cost is in
+visiting finished jobs, not in finding pending ones. The SQLite query plan
+was not captured. A reviewer who compiled the same SQL on plain SQLite 3.45.3
+found it driven from the due-time range of the attribute and value index.
+
+An experiment that is also not in the repository added
 `CREATE INDEX ... ON datoms(attribute, value, retracted, entity, asserted)`
 to a file with 4,000 finished and 100 pending jobs and ran `ANALYZE`. The
 pending-jobs query without its `job/queue` pattern went from 1.99 ms to

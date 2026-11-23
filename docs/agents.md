@@ -3,7 +3,8 @@
 For authors of agents and agent harnesses that keep notes, decisions, run
 records or work items in a Factlite store. Plan item 13.2.
 
-Every convention here is checked by a runnable example:
+The conventions here are exercised by a runnable example, except where a
+section says otherwise:
 [`examples/agent_session.rs`](../crates/factlite/examples/agent_session.rs).
 
 ```sh
@@ -79,6 +80,11 @@ Factlite records commit order. It does not record who wrote a commit or when.
 Put the agent, the session and the time in transaction metadata on every
 commit. `transactions` returns them.
 
+The exception is shared setup that any process may repeat, such as declaring
+the schema. For the repeat to be exact, every caller must send the same
+request, so it carries a fixed key and no author or time. The example's
+schema commit is written this way.
+
 Metadata cannot be matched by `query`. If you need to find things by author or
 time with a query, write those as facts as well, as the example does with
 `note/at`.
@@ -97,6 +103,10 @@ the same key and gets the first report back, with no second commit.
 The retried request must be identical, including its timestamp. Take the time
 once per step, not once per attempt. The same key with different contents is
 refused with `IdempotencyConflict`.
+
+Build keys so that two different steps cannot produce the same string. If a
+session or step name can contain the separator, encode the parts or use fixed
+lengths.
 
 ### Find or create, never assume
 
@@ -148,8 +158,13 @@ gives the same for one entity or attribute.
 
 A snapshot encodes to a short string naming the store, its lineage and a
 revision. Pass it to the next agent. A read at that token returns what the
-sender saw, after the store is reopened and from a backup. The receiver then
-asks what changed since.
+sender saw. The receiver then asks what changed since.
+
+The example encodes a token, decodes it and reads at it through the same open
+store. That a token still resolves after the store is reopened, and in a
+backup that contains its revision, is shown by the library's
+[revision read](../crates/factlite/tests/revision_reads.rs) and
+[backup](../crates/factlite/tests/backups.rs) tests.
 
 ## Work items
 

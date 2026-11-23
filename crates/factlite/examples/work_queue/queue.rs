@@ -5,12 +5,16 @@
 //! code. Nothing here is part of the library.
 //!
 //! Every function takes the current time from the caller, in milliseconds
-//! since the Unix epoch. Factlite records no clock.
+//! since the Unix epoch. Factlite records no clock. Lease lengths must be
+//! positive.
+//!
+//! A [`Claim`] belongs to one thread of control. Two writers working from
+//! copies of the same claim are not told apart.
 
 use factlite::{
-    AttrName, AttributeDefinition, Cardinality, Comparison, Db, Direction, EntityId, ErrorCode,
-    Keyword, Order, Params, Pattern, Predicate, Query, QueryName, Result, Store, TempId, Term, Tx,
-    TxBuilder, Uniqueness, Value, ValueType,
+    AttrName, AttributeDefinition, Cardinality, CommitOutcome, Comparison, Db, Direction, EntityId,
+    ErrorCode, Keyword, Order, Params, Pattern, Predicate, Query, QueryName, Result, Store, TempId,
+    Term, Tx, TxBuilder, Uniqueness, Value, ValueType,
 };
 
 /// Waiting to be claimed.
@@ -58,8 +62,33 @@ pub struct Candidate {
     pub job: EntityId,
     /// Attempts made so far, as read at the snapshot.
     pub attempt: i64,
-    /// `None` for a pending job; the expired lease for a claimed one.
-    pub expired_lease: Option<i64>,
+    /// Why the job was claimable.
+    pub basis: Basis,
+}
+
+/// Why a [`Candidate`] was claimable, with the value that made it so.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Basis {
+    /// Pending, and due at `run_after`.
+    Due {
+        /// The job's `job/run-after`.
+        run_after: i64,
+    },
+    /// Claimed, under a lease that ended at `lease_until`.
+    Expired {
+        /// The job's `job/lease-until`.
+        lease_until: i64,
+    },
+}
+
+impl Basis {
+    /// Whether a job read with this basis is claimable at `now`.
+    pub fn holds_at(self, now: i64) -> bool {
+        match self {
+            Self::Due { run_after } => run_after <= now,
+            Self::Expired { lease_until } => lease_until < now,
+        }
+    }
 }
 
 /// Declares the queue's attributes. Safe to call from every process: the
@@ -118,7 +147,8 @@ pub fn enqueue(
 
 /// Jobs in `queue` that are claimable at `now` in this view: pending jobs
 /// that are due, oldest `run-after` first, then claimed jobs whose lease has
-/// passed. At most `limit` of each.
+/// passed, oldest lease first. At most `limit` of each kind, so up to twice
+/// `limit` in all.
 ///
 /// Factlite queries have no disjunction, so this is two queries. Both read the
 /// same view, so they agree with each other.
@@ -180,7 +210,10 @@ pub fn candidates(db: &Db, queue: &str, now: i64, limit: u64) -> Result<Vec<Cand
             found.push(Candidate {
                 job: job.clone(),
                 attempt: *attempt,
-                expired_lease: (state == CLAIMED).then_some(*at),
+                basis: match state {
+                    PENDING => Basis::Due { run_after: *at },
+                    _ => Basis::Expired { lease_until: *at },
+                },
             });
         }
     }
@@ -188,12 +221,16 @@ pub fn candidates(db: &Db, queue: &str, now: i64, limit: u64) -> Result<Vec<Cand
 }
 
 /// Tries to take one candidate. Returns `None` if the job changed after the
-/// candidate was read: another worker claimed it, or its owner extended the
-/// lease.
+/// candidate was read: another worker claimed it, its owner extended the
+/// lease, or its owner finished, failed or released it. Also returns `None`,
+/// without committing, if the candidate is not claimable at this `now`.
 ///
 /// The expectations name the exact values the candidate was read with. A
 /// pending job must still be pending at the same attempt. An expired job must
-/// still carry the same lease, so a concurrent heartbeat wins.
+/// still be claimed, at the same attempt, under the same lease. The lease
+/// expectation makes a concurrent heartbeat win. The state expectation makes
+/// a late finish win: an expectation covers one attribute, and a finish does
+/// not touch the lease.
 pub fn try_claim(
     store: &Store,
     candidate: &Candidate,
@@ -201,25 +238,28 @@ pub fn try_claim(
     now: i64,
     lease_ms: i64,
 ) -> Result<Option<Claim>> {
+    if !candidate.basis.holds_at(now) {
+        return Ok(None);
+    }
     let job = &candidate.job;
     let claim = Claim {
         job: job.clone(),
         attempt: candidate.attempt + 1,
-        lease_until: now + lease_ms,
+        lease_until: now.saturating_add(lease_ms),
     };
     let mut tx = Tx::builder().expect(
         job.clone(),
         attr("job/attempt"),
         vec![Value::I64(candidate.attempt)],
     );
-    tx = match candidate.expired_lease {
-        None => tx.expect(job.clone(), attr("job/state"), vec![keyword(PENDING)]),
-        Some(lease) => tx
+    tx = match candidate.basis {
+        Basis::Due { .. } => tx.expect(job.clone(), attr("job/state"), vec![keyword(PENDING)]),
+        Basis::Expired { lease_until } => tx
             .expect(job.clone(), attr("job/state"), vec![keyword(CLAIMED)])
             .expect(
                 job.clone(),
                 attr("job/lease-until"),
-                vec![Value::Inst(lease)],
+                vec![Value::Inst(lease_until)],
             ),
     };
     let tx = tx
@@ -246,10 +286,12 @@ pub struct Claimed {
 /// Claims one job from `queue`, or returns no claim when none is claimable at
 /// `now`.
 ///
-/// Reads up to `spread` candidates of each kind and starts from the one
-/// `salt` selects. With `spread` 1 every worker contends for the same job;
-/// a larger spread and a salt that differs between workers trades strict
-/// ordering for fewer lost attempts. After a lost attempt it reads again.
+/// Reads up to `spread` candidates of each kind, due jobs before expired
+/// ones, and starts from the one `salt` selects. With `spread` 1 and `salt`
+/// 0 every worker asks for the oldest due job, or for the oldest expired job
+/// when none is due. A larger spread and a salt that differs between workers
+/// trades strict ordering for fewer lost attempts. After a lost attempt it
+/// reads again.
 pub fn claim(
     store: &Store,
     queue: &str,
@@ -298,8 +340,9 @@ fn commit_unless_changed(store: &Store, tx: TxBuilder) -> Result<bool> {
     }
 }
 
-/// Extends the lease to `now + lease_ms`. Returns `None` if the claim was
-/// lost; the worker must then stop work on the job.
+/// Extends the lease to `now + lease_ms`, never shortening the lease this
+/// claim records. Returns `None` if the claim was lost; the worker must then
+/// stop work on the job.
 ///
 /// Each heartbeat is a permanent revision. Prefer a lease long enough to need
 /// few of them.
@@ -311,7 +354,7 @@ pub fn heartbeat(
     lease_ms: i64,
 ) -> Result<Option<Claim>> {
     let extended = Claim {
-        lease_until: now + lease_ms,
+        lease_until: claim.lease_until.max(now.saturating_add(lease_ms)),
         ..claim.clone()
     };
     let tx = fenced(claim, worker).assert(
@@ -370,7 +413,18 @@ pub struct Worked {
 ///
 /// Returns once the job `stop_id` exists and no job in `queue` is pending or
 /// claimed. `now` supplies the clock and `handle` turns a job's id and payload
-/// into its result. A busy store is retried.
+/// into its result.
+///
+/// What this loop leaves out:
+///
+/// - The producer must enqueue the `stop_id` job after its last job. A job
+///   enqueued after a worker saw the queue empty and stopped is not worked.
+/// - `handle` cannot fail or release a job. If it panics, or this function
+///   returns an error, the claim is left to expire and another worker takes
+///   the job.
+/// - A busy store is retried when nothing was committed. A commit whose
+///   outcome is unknown is returned as an error. A claim is not keyed, so a
+///   claim lost that way is also left to expire.
 ///
 /// Factlite has no notification, so an idle worker sleeps for `idle` and reads
 /// again. A job can become claimable without a new revision, when its
@@ -388,53 +442,55 @@ pub fn work_until_stopped(
     now: impl Fn() -> i64,
     mut handle: impl FnMut(&str, &str) -> String,
 ) -> Result<Worked> {
-    let retry_busy = |error: factlite::Error| match error.code() {
-        ErrorCode::Busy => Ok(()),
-        _ => Err(error),
-    };
     let mut worked = Worked::default();
     let mut salt = worker
         .bytes()
         .fold(0_u64, |sum, byte| sum + u64::from(byte));
     loop {
         salt = salt.wrapping_add(1);
-        let claimed = match claim(store, queue, worker, now(), lease_ms, spread, salt) {
-            Ok(claimed) => claimed,
-            Err(error) => {
-                retry_busy(error)?;
-                continue;
-            }
-        };
+        let claimed = retry_busy(|| claim(store, queue, worker, now(), lease_ms, spread, salt))?;
         worked.lost += claimed.lost;
         let Some(claim) = claimed.claim else {
-            let db = store.db()?;
-            let stopped = db.lookup(&attr("job/id"), &string(stop_id))?.is_some();
-            if stopped && !unfinished(&db, queue)? {
+            let stopped = retry_busy(|| {
+                let db = store.db()?;
+                let stop = db.lookup(&attr("job/id"), &string(stop_id))?;
+                Ok(stop.is_some() && !unfinished(&db, queue)?)
+            })?;
+            if stopped {
                 return Ok(worked);
             }
             std::thread::sleep(idle);
             continue;
         };
-        let job = store
-            .db()?
-            .pull(&claim.job, &[attr("job/id"), attr("job/payload")])?
-            .expect("a claimed job exists");
+        let job = retry_busy(|| {
+            store
+                .db()?
+                .pull(&claim.job, &[attr("job/id"), attr("job/payload")])
+        })?
+        .expect("a claimed job exists");
         let text = |name: &str| match &job.attributes[&attr(name)] {
             factlite::PulledValue::One(Value::String(text)) => text.clone(),
             other => unreachable!("{name} is a single string, not {other:?}"),
         };
         let result = handle(&text("job/id"), &text("job/payload"));
-        loop {
-            match finish(store, &claim, worker, &result) {
-                Ok(true) => worked.finished.push(text("job/id")),
-                // The lease passed and another worker took the job.
-                Ok(false) => {}
-                Err(error) => {
-                    retry_busy(error)?;
-                    continue;
-                }
+        // False means the lease passed and another worker took the job.
+        if retry_busy(|| finish(store, &claim, worker, &result))? {
+            worked.finished.push(text("job/id"));
+        }
+    }
+}
+
+/// Repeats `operation` while the store is busy and nothing was committed.
+fn retry_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
+    loop {
+        match operation() {
+            Err(error)
+                if error.code() == ErrorCode::Busy
+                    && error.commit_outcome() != Some(CommitOutcome::Unknown) =>
+            {
+                std::thread::yield_now();
             }
-            break;
+            other => return other,
         }
     }
 }

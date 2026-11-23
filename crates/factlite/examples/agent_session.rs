@@ -48,6 +48,9 @@ impl Writer {
     }
 }
 
+/// Declares the schema. Any agent may call this, so the request is the same
+/// for all of them: a fixed key and no author or time. A second call returns
+/// the first call's report.
 fn define_schema(store: &Store) -> Result<()> {
     let mut tx = Tx::builder().idempotency_key("memory/schema/v1");
     for (name, ty, unique) in [
@@ -195,6 +198,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // One file per scope. Deleting the file is the only way to forget it.
     let store = Store::open(directory.path().join("project-memory.sqlite"))?;
     define_schema(&store)?;
+    let head = store.head()?;
+    define_schema(&store)?;
+    assert_eq!(store.head()?, head);
     let ada = Writer {
         agent: "ada",
         session: "session-41",
