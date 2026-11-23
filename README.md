@@ -52,6 +52,8 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
 - [Backups](docs/backup.md): SQLite-safe copies, read-only access, and lineage rules.
 - [Permanence](docs/permanence.md): retained history, sensitive data, encryption limits and physical deletion.
 - [Comparison](docs/comparison.md): features compared with Datomic, XTDB, Datahike, Datalevin, DataScript, Mentat, CozoDB and SQLite.
+- [Agent guide](docs/agents.md): what agents must never write, a store per scope, and conventions for provenance, keys, snapshots and handoff.
+- [Work queues](docs/queues.md): a tested queue pattern with leases and takeover, its guarantees and measured costs.
 - [Agent-native exploration](docs/design/agent-native.md): Datalevin's MCP interface, and Factlite for agent context, history, recall and work queues. Undecided.
 - [CLI](docs/cli.md): commands, output/exit contracts, and a runnable Ada/task example.
 - [Rust guide](docs/rust.md): an executable application workflow and API choices.

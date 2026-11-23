@@ -253,3 +253,55 @@ Median of seven CLI `schema` runs, including process start. On the 120,000-fact
 synthetic store (875 revisions), full validation took 774 ms and structural
 3.2 ms. On a copy of the clajent store (3,205 revisions), full validation took
 156 ms and structural 4.1 ms. `verify` costs the same as a full open.
+
+## Work queue pattern (13.1): 2026-11-23
+
+The `work_queue` example's measured mode, on the `docs/queue-and-agent-guides`
+branch. Apple M4 Pro, macOS 27.2.1, Rust 1.99.0, release build, OS temporary
+directory. Raw output:
+[benchmarks/2026-11-23-macos-work-queue.jsonl](benchmarks/2026-11-23-macos-work-queue.jsonl).
+
+```sh
+cargo run --release --locked -p factlite --example work_queue -- \
+  --workers 4 --jobs 2000 --spread 8
+```
+
+The run enqueues every job with a distinct due time in the past, starts the
+worker processes, and has them begin claiming at the same instant. Each worker
+claims, reads the job and finishes it, with no work in between. `drain_ms`
+runs from that instant to the last worker's exit. One run per configuration.
+
+| Workers | Jobs | Spread | Drain ms | Jobs per second | Lost claims | Candidate read ms, start and end | File bytes | Writable open ms |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 500 | 1 | 422 | 1,185 | 0 | 0.215, 0.463 | 4,448,256 | 43.1 |
+| 1 | 2,000 | 1 | 2,698 | 741 | 0 | 0.215, 1.537 | 17,498,112 | 184.0 |
+| 4 | 2,000 | 1 | 3,055 | 655 | 2,300 | 0.219, 1.540 | 17,522,688 | 183.0 |
+| 4 | 2,000 | 8 | 2,029 | 986 | 256 | 0.213, 1.567 | 17,448,960 | 185.3 |
+| 8 | 2,000 | 16 | 2,085 | 959 | 228 | 0.216, 1.587 | 17,645,568 | 185.1 |
+| 1 | 8,000 | 1 | 30,967 | 258 | 0 | 0.216, 6.551 | 69,840,896 | 776.0 |
+| 4 | 8,000 | 8 | 14,516 | 551 | 2,165 | 0.222, 9.836 | 69,840,896 | 951.1 |
+
+Each job is three revisions (`3 * jobs + 2` in every run) and about 8.7 KB of
+file. A writable open cost about 31 microseconds per revision.
+
+The candidate read is the median of 21 calls to the read that starts every
+claim, taken with every job pending (start) and with every job finished
+(end). At the start it does not depend on the number of pending jobs. At the
+end it grows by about 0.8 ms per 1,000 finished jobs. A head read whose
+patterns match attributes that finished jobs still hold is therefore linear
+in the jobs ever processed, and the queue's throughput falls as its file
+fills.
+
+An earlier form of this run gave every job the same due time. The read then
+also grew with the number of pending jobs, 1.9 ms at 2,000, because ordering
+by due time and then by job had to read the whole tie. Distinct due times, as
+jobs enqueued over time have, removed that.
+
+An experiment that is not in the repository added
+`CREATE INDEX ... ON datoms(attribute, value, retracted, entity, asserted)`
+to a file with 4,000 finished and 100 pending jobs and ran `ANALYZE`. The
+pending-jobs query without its `job/queue` pattern went from 1.99 ms to
+0.21 ms. With the `job/queue` pattern, which matches every job, it went from
+3.0 ms to 3.9 ms. `ANALYZE` alone changed nothing. Reordering the query's
+patterns to put `job/state` first, with no new index, gave 2.0 ms against
+3.0 ms.
