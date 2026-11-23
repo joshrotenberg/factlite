@@ -147,9 +147,9 @@ fn walk_through() -> Result<(), Box<dyn Error>> {
 }
 
 /// Median time of one `candidates` call, the read every claim starts with.
-fn candidate_read_ms(store: &Store) -> Result<f64, Box<dyn Error>> {
+fn candidate_read_ms(store: &Store, ahead_ms: i64) -> Result<f64, Box<dyn Error>> {
     let db = store.db()?;
-    let now = wall_clock() + 10_000;
+    let now = wall_clock() + ahead_ms;
     let mut samples = Vec::new();
     for _ in 0..21 {
         let reading = Instant::now();
@@ -205,7 +205,7 @@ fn measure(
     }
     queue::enqueue(&store, "control", STOP, "", 0)?;
     // One candidate read while every job is pending and none is finished.
-    let read_at_start_ms = candidate_read_ms(&store)?;
+    let read_at_start_ms = candidate_read_ms(&store, 10_000)?;
     drop(store);
 
     // Two seconds from now, by which time every worker has opened the store.
@@ -244,7 +244,9 @@ fn measure(
     let open_ms = opening.elapsed().as_secs_f64() * 1000.0;
     let revisions = store.db()?.transactions(Revision::ZERO)?.len();
     // The same read once every job is finished and none is pending.
-    let read_at_end_ms = candidate_read_ms(&store)?;
+    let read_at_end_ms = candidate_read_ms(&store, 10_000)?;
+    // And once more at a time by which every lease ever granted has passed.
+    let read_after_leases_ms = candidate_read_ms(&store, 2 * LEASE_MS)?;
     // Checkpoint through SQLite's own close so the size is the main file's.
     drop(store);
     let bytes = std::fs::metadata(&database)?.len();
@@ -253,6 +255,7 @@ fn measure(
          \"drain_ms\":{elapsed_ms},\"jobs_per_second\":{:.0},\"lost_claims\":{lost},\
          \"candidate_read_ms_at_start\":{read_at_start_ms:.3},\
          \"candidate_read_ms_at_end\":{read_at_end_ms:.3},\
+         \"candidate_read_ms_after_leases\":{read_after_leases_ms:.3},\
          \"revisions\":{revisions},\"file_bytes\":{bytes},\"writable_open_ms\":{open_ms:.1}}}",
         jobs as f64 * 1000.0 / elapsed_ms as f64,
     );

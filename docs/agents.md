@@ -65,10 +65,11 @@ One per project, one per session, one per queue are all reasonable.
 
 - **References do not cross files.** Refer across files by a stable string or
   keyword in a unique attribute, and look it up.
-- **Each file is opened separately.** A writable open validates the whole log,
-  measured at roughly 15 to 50 microseconds per revision
-  ([measurements](measurements.md)). A read-only open can skip that with
-  structural validation.
+- **Each file is opened separately.** A writable open validates the whole log
+  and loads live state. It was measured at 15 to 50 microseconds per revision
+  on stores with a few facts per revision, and at 774 ms for a store of
+  120,000 facts in 875 revisions ([measurements](measurements.md)). A
+  read-only open can skip that with structural validation.
 - **Several agent processes can write one file.** Commits are serialized by
   SQLite's lock on one host.
 
@@ -101,8 +102,11 @@ as `session-41/decide/cite-by-session`. A harness that retries the step sends
 the same key and gets the first report back, with no second commit.
 
 The retried request must be identical, including its timestamp. Take the time
-once per step, not once per attempt. The same key with different contents is
-refused with `IdempotencyConflict`.
+once per step, not once per attempt. Once a request has committed under a
+key, the same key with different contents is refused with
+`IdempotencyConflict`. A refused request binds nothing: the example's second
+agent is refused under a key, reads again, and commits a changed request
+under the same key.
 
 Build keys so that two different steps cannot produce the same string. If a
 session or step name can contain the separator, encode the parts or use fixed
@@ -133,8 +137,8 @@ force.
 
 The chain of decisions needs no extra bookkeeping. The history of
 `topic/decision` lists every decision in order, and a read at an earlier
-snapshot returns the one in force then. A store without history has to record
-supersession as explicit links, and nothing stops two writers from each
+snapshot returns the one in force then. Recording supersession as links
+between notes instead would need its own rule to keep two writers from each
 adding a successor.
 
 ### Load context at one snapshot

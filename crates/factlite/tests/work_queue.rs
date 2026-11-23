@@ -121,6 +121,11 @@ fn an_expired_lease_is_taken_and_the_old_claim_can_no_longer_commit() {
     assert_eq!(store.head().unwrap(), head);
     assert!(queue::finish(&store, &second, "b", "ok").unwrap());
     assert_eq!(state(&store, &job), DONE);
+    // The first worker's finish is still refused once the job is done. Its
+    // key names attempt 1, so it does not collide with the finish above.
+    let head = store.head().unwrap();
+    assert!(!queue::finish(&store, &first, "a", "stale").unwrap());
+    assert_eq!(store.head().unwrap(), head);
     assert_eq!(
         one(&store.db().unwrap(), &job, "job/result"),
         Some(Value::String("ok".into()))
@@ -150,6 +155,27 @@ fn a_worker_that_claims_its_own_expired_job_again_loses_the_earlier_claim() {
 }
 
 #[test]
+fn a_claim_from_before_a_release_is_refused_even_with_the_same_owner_and_lease() {
+    let (_dir, store) = open();
+    queue::enqueue(&store, QUEUE, "a", "", 0).unwrap();
+    let before = claim(&store, "a", 0).unwrap();
+    assert!(queue::release(&store, &before, "a", 0).unwrap());
+    // Claimed again by the same name at the same instant: the same owner and
+    // the same lease, so only the attempt tells the two claims apart.
+    let after = claim(&store, "a", 0).unwrap();
+    assert_eq!(before.lease_until, after.lease_until);
+    assert_eq!((before.attempt, after.attempt), (1, 2));
+    let head = store.head().unwrap();
+    assert!(!queue::finish(&store, &before, "a", "stale").unwrap());
+    assert_eq!(
+        queue::heartbeat(&store, &before, "a", 1, LEASE).unwrap(),
+        None
+    );
+    assert_eq!(store.head().unwrap(), head);
+    assert!(queue::finish(&store, &after, "a", "ok").unwrap());
+}
+
+#[test]
 fn a_heartbeat_between_read_and_reclaim_wins() {
     let (_dir, store) = open();
     queue::enqueue(&store, QUEUE, "a", "", 0).unwrap();
@@ -166,7 +192,59 @@ fn a_heartbeat_between_read_and_reclaim_wins() {
         None
     );
     assert_eq!(store.head().unwrap(), head);
+    // The claim from before the heartbeat is out of date about its own lease
+    // and is refused; the current one is accepted.
+    assert!(!queue::finish(&store, &held, "a", "ok").unwrap());
+    assert_eq!(store.head().unwrap(), head);
     assert!(queue::finish(&store, &extended, "a", "ok").unwrap());
+}
+
+#[test]
+fn a_job_holds_a_due_time_only_while_pending_and_a_lease_only_while_claimed() {
+    let (_dir, store) = open();
+    let job = queue::enqueue(&store, QUEUE, "a", "", 3).unwrap();
+    let times = |store: &Store| {
+        let db = store.db().unwrap();
+        (
+            one(&db, &job, "job/run-after"),
+            one(&db, &job, "job/lease-until"),
+        )
+    };
+    assert_eq!(times(&store), (Some(Value::Inst(3)), None));
+    let held = claim(&store, "a", 3).unwrap();
+    assert_eq!(times(&store), (None, Some(Value::Inst(3 + LEASE))));
+    assert!(queue::release(&store, &held, "a", 9).unwrap());
+    assert_eq!(times(&store), (Some(Value::Inst(9)), None));
+    let held = claim(&store, "b", 9).unwrap();
+    let taken = claim(&store, "c", 9 + LEASE + 1).unwrap();
+    assert_eq!(times(&store), (None, Some(Value::Inst(taken.lease_until))));
+    assert!(!queue::finish(&store, &held, "b", "late").unwrap());
+    assert!(queue::finish(&store, &taken, "c", "ok").unwrap());
+    assert_eq!(times(&store), (None, None));
+    // The values are gone from the head, not from history.
+    assert_eq!(
+        asserted(&store.db().unwrap(), &job, "job/run-after"),
+        [Value::Inst(3), Value::Inst(9)]
+    );
+}
+
+#[test]
+fn the_original_enqueue_stays_exact_after_the_job_is_rescheduled() {
+    let (_dir, store) = open();
+    let job = queue::enqueue(&store, QUEUE, "a", "", 0).unwrap();
+    let held = claim(&store, "a", 0).unwrap();
+    assert!(queue::release(&store, &held, "a", 7).unwrap());
+    let head = store.head().unwrap();
+    // The request that created the job, sent again, is still the same request.
+    assert_eq!(queue::enqueue(&store, QUEUE, "a", "", 0).unwrap(), job);
+    assert_eq!(store.head().unwrap(), head);
+    // Naming the due time the job has now is a different request.
+    let moved = queue::enqueue(&store, QUEUE, "a", "", 7).unwrap_err();
+    assert_eq!(moved.code(), ErrorCode::IdempotencyConflict);
+    // So is the same job id in another queue: job ids are store-wide.
+    let elsewhere = queue::enqueue(&store, "other", "a", "", 0).unwrap_err();
+    assert_eq!(elsewhere.code(), ErrorCode::IdempotencyConflict);
+    assert_eq!(store.head().unwrap(), head);
 }
 
 #[test]
@@ -545,10 +623,14 @@ fn run_trace(operations: &[(u8, usize, usize, i64)]) {
                 .owner
                 .map(|owner| Value::String(WORKERS[owner].into()))
         );
-        assert_eq!(stored("job/run-after"), Some(Value::Inst(model.run_after)));
+        // A due time only while pending, a lease only while claimed.
+        assert_eq!(
+            stored("job/run-after"),
+            (model.state == PENDING).then_some(Value::Inst(model.run_after))
+        );
         assert_eq!(
             stored("job/lease-until"),
-            model.owner.map(|_| Value::Inst(model.lease_until))
+            (model.state == CLAIMED).then_some(Value::Inst(model.lease_until))
         );
         assert_eq!(stored("job/result"), model.result());
         assert_eq!(claimable.contains(&model.entity), model.claimable(now));

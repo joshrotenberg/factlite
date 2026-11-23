@@ -317,11 +317,11 @@ Through the pod, a keyed 13-fact create took 0.52 ms and a conditional finish
 - **No claim-next primitive.** Query then commit is two calls. Factlite has
   no transaction functions, by design: a request is data and validation is on
   the final state.
-- **Measured since** (plan 13.1, [queue guide](../queues.md)): about 8.7 KB
-  of file per job; a writable open of about 31 microseconds per revision;
-  551 jobs per second with four worker processes over 8,000 jobs; and a claim
-  read that grows by about 0.8 ms per 1,000 finished jobs in the file
-  (roadmap 12). Behaviour beyond 24,000 revisions is still not measured.
+- **Measured since** (plan 13.1, [queue guide](../queues.md)): about 9.5 KB
+  of file per job; a writable open of 32 to 34 microseconds per revision;
+  about 1,000 jobs per second over 8,000 jobs, with one worker process or
+  four; and a claim read that grows by 0.05 to 0.1 ms per 1,000 finished
+  jobs. Behaviour beyond 24,000 revisions is still not measured.
 
 This fits agent-scale work: tasks, runs and handoffs in the thousands, where
 the audit trail matters. It does not fit a high-throughput broker.

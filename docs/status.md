@@ -17,7 +17,7 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 244 pass locally with babashka installed and `REQUIRE_BB=1`,
+- **Tests:** 247 pass locally with babashka installed and `REQUIRE_BB=1`,
   including fifty-five 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions is unavailable for
   this account this month, so the local gate stands in for CI.
@@ -38,8 +38,9 @@ current.
 - **Explored:** agent-native use (roadmap 11, `design/agent-native.md`),
   written 2026-11-23. Its candidates 6 and 11 are done as plan step 13: the
   [queue guide](queues.md) and the [agent guide](agents.md).
-- **Found, undecided:** head reads that join attributes of finished entities
-  are linear in history (roadmap 12).
+- **Found, undecided:** a joined read visits every entity holding the
+  attribute it is driven from (roadmap 12). The queue pattern works around
+  it.
 
 ## 0.1 Inspect and initialize — done
 
@@ -875,11 +876,11 @@ current.
 - **Left open:** queue figures at scale are extrapolated, not measured.
 - **What's next:** plan step 13, the queue guide and the agent guide.
 
-## 13.1 Work queue guide with a tested pattern — done
+## 13.1 Work queue guide with a tested pattern: done
 
 - **Done:** a work queue on the public API in
   `examples/work_queue/queue.rs`, shared by the `work_queue` example and
-  `tests/work_queue.rs`. Twelve deterministic cases, a 1,024-case property
+  `tests/work_queue.rs`. Fifteen deterministic cases, a 1,024-case property
   against a state machine of the contract, and three process tests: four
   processes that hold the same candidate commit exactly one claim; four
   worker processes finish 100 jobs exactly once with no extra revision; and
@@ -887,21 +888,23 @@ current.
   its test, what is not guaranteed, and measured costs. Measurements in
   `measurements.md`.
 - **Decisions:** see `decisions.md`, "Work queue pattern and agent
-  conventions". The fence is the attempt number; a takeover expects state,
-  lease and attempt; nothing is retracted; the caller supplies the clock.
+  conventions". The fence is the attempt number and the lease; a takeover
+  expects state, lease and attempt; a job holds a due time only while pending
+  and a lease only while claimed; the caller supplies the clock.
 - **Validation:** local `scripts/check.sh` with `REQUIRE_BB=1`; GitHub Actions
-  is unavailable. Eight single changes to the pattern each fail at least
-  one test, checked by hand. The process tests passed repeated runs.
+  is unavailable. Of sixteen single changes to the pattern tried by hand,
+  fourteen fail at least one test and two remove expectations that others
+  imply. The process tests passed repeated runs.
   Independent Claude and Codex subagent reviews are recorded in
   `reviews/0056-queue-and-agent-guides.md`.
 - **Blockers:** none.
-- **Left open:** the claim read grows with finished jobs in the file (roadmap
-  12, undecided). The pattern is tested through the Rust API only, not the
-  CLI or pod. Measurements are one run per configuration on one machine, up
-  to 8,000 jobs.
+- **Left open:** how joined reads are executed in the library (roadmap 12,
+  undecided). The worker loop's busy handling is untested. The pattern is
+  tested through the Rust API only, not the CLI or pod. Measurements are one
+  run per configuration on one machine, up to 8,000 jobs.
 - **What's next:** 13.2.
 
-## 13.2 Agent guide — done
+## 13.2 Agent guide: done
 
 - **Done:** `docs/agents.md`: what agents must never write, a store per
   scope, and conventions for provenance, time, keys, find-or-create, one

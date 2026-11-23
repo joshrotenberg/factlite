@@ -241,6 +241,22 @@ pub fn try_claim(
     if !candidate.basis.holds_at(now) {
         return Ok(None);
     }
+    commit_claim(store, candidate, worker, now, lease_ms)
+}
+
+/// Commits a claim of `candidate` without checking it against `now`.
+///
+/// A job holds `job/run-after` only while pending and `job/lease-until` only
+/// while claimed, so the claim of a pending job retracts its due time. This
+/// keeps finished jobs out of the two reads in [`candidates`], which are
+/// driven from those values.
+fn commit_claim(
+    store: &Store,
+    candidate: &Candidate,
+    worker: &str,
+    now: i64,
+    lease_ms: i64,
+) -> Result<Option<Claim>> {
     let job = &candidate.job;
     let claim = Claim {
         job: job.clone(),
@@ -253,7 +269,9 @@ pub fn try_claim(
         vec![Value::I64(candidate.attempt)],
     );
     tx = match candidate.basis {
-        Basis::Due { .. } => tx.expect(job.clone(), attr("job/state"), vec![keyword(PENDING)]),
+        Basis::Due { run_after } => tx
+            .expect(job.clone(), attr("job/state"), vec![keyword(PENDING)])
+            .retract(job.clone(), attr("job/run-after"), Value::Inst(run_after)),
         Basis::Expired { lease_until } => tx
             .expect(job.clone(), attr("job/state"), vec![keyword(CLAIMED)])
             .expect(
@@ -309,7 +327,9 @@ pub fn claim(
         }
         let index = usize::try_from(salt.wrapping_add(lost) % found.len() as u64)
             .expect("an index below the candidate count");
-        if let Some(claim) = try_claim(store, &found[index], worker, now, lease_ms)? {
+        // The candidates were read for this `now`, so only a change to the
+        // job can refuse the claim, and each refusal means another commit.
+        if let Some(claim) = commit_claim(store, &found[index], worker, now, lease_ms)? {
             return Ok(Claimed {
                 claim: Some(claim),
                 lost,
@@ -320,6 +340,10 @@ pub fn claim(
 }
 
 /// Starts a request that commits only while `worker` still holds `claim`.
+///
+/// The lease is expected as well, so that the writes which retract it name
+/// the stored value. A claim that is out of date about its own lease, which
+/// can only be a copy used beside the original, is refused like a lost one.
 fn fenced(claim: &Claim, worker: &str) -> TxBuilder {
     Tx::builder()
         .expect(claim.job.clone(), attr("job/state"), vec![keyword(CLAIMED)])
@@ -329,6 +353,21 @@ fn fenced(claim: &Claim, worker: &str) -> TxBuilder {
             attr("job/attempt"),
             vec![Value::I64(claim.attempt)],
         )
+        .expect(
+            claim.job.clone(),
+            attr("job/lease-until"),
+            vec![Value::Inst(claim.lease_until)],
+        )
+}
+
+/// Ends the lease this claim records. Used by every write that gives the job
+/// up, so a job that is not claimed holds no lease.
+fn without_lease(tx: TxBuilder, claim: &Claim) -> TxBuilder {
+    tx.retract(
+        claim.job.clone(),
+        attr("job/lease-until"),
+        Value::Inst(claim.lease_until),
+    )
 }
 
 /// Commits, mapping a failed expectation to `false`.
@@ -371,7 +410,7 @@ pub fn heartbeat(
 /// see the outcome of its commit can repeat the call and get the original
 /// report, even though the job is no longer claimed.
 pub fn finish(store: &Store, claim: &Claim, worker: &str, result: &str) -> Result<bool> {
-    let tx = fenced(claim, worker)
+    let tx = without_lease(fenced(claim, worker), claim)
         .idempotency_key(format!("queue/finish/{}/{}", claim.job, claim.attempt))
         .assert(claim.job.clone(), attr("job/state"), keyword(DONE))
         .assert(claim.job.clone(), attr("job/result"), string(result));
@@ -381,7 +420,7 @@ pub fn finish(store: &Store, claim: &Claim, worker: &str, result: &str) -> Resul
 /// Gives up on the job with `error` as its result. Returns `false` if the
 /// claim was lost.
 pub fn fail(store: &Store, claim: &Claim, worker: &str, error: &str) -> Result<bool> {
-    let tx = fenced(claim, worker)
+    let tx = without_lease(fenced(claim, worker), claim)
         .assert(claim.job.clone(), attr("job/state"), keyword(FAILED))
         .assert(claim.job.clone(), attr("job/result"), string(error));
     commit_unless_changed(store, tx)
@@ -390,7 +429,7 @@ pub fn fail(store: &Store, claim: &Claim, worker: &str, error: &str) -> Result<b
 /// Returns the job to pending, claimable again at `run_after`. The attempt
 /// count is kept. Returns `false` if the claim was lost.
 pub fn release(store: &Store, claim: &Claim, worker: &str, run_after: i64) -> Result<bool> {
-    let tx = fenced(claim, worker)
+    let tx = without_lease(fenced(claim, worker), claim)
         .assert(claim.job.clone(), attr("job/state"), keyword(PENDING))
         .assert(
             claim.job.clone(),

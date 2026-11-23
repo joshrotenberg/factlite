@@ -831,9 +831,22 @@ change.
 - **Time alone takes nothing away.** An expired lease that nobody has taken
   still belongs to its owner. The store has no clock, so this is the only
   rule it can enforce.
-- **No explicit retractions.** Single-valued attributes are replaced, which
-  ends the prior value's interval. `job/owner` is the last claimant and stays
-  on a finished job, so the owner of a finished job is readable at the head.
+- **A job holds a due time only while pending and a lease only while
+  claimed.** A claim retracts `job/run-after`; finish, fail and release
+  retract `job/lease-until`. The first form of the pattern retracted nothing,
+  and its claim read was driven through every finished job: 6.5 ms at 8,000
+  finished jobs against 0.6 ms now. The cost is one more event per claim and
+  per finish, about 0.8 KB more file per job. `job/owner` is still the last
+  claimant and stays on a finished job.
+- **A holder's write also expects the lease it records,** so the retraction
+  names the stored value. This makes a claim copied before a heartbeat fail
+  like a lost one, and makes the state expectations on a holder's write and
+  on a takeover redundant. They are kept as a second guard.
+- **`claim` commits without rechecking the time;** `try_claim` checks it. A
+  candidate that `claim` has just read for the same instant can only be
+  refused by a commit, so the retry loop always makes progress. With the
+  check inside the loop, a disagreement between the query and the check
+  would spin forever.
 - **A candidate carries why it was claimable,** and `try_claim` refuses one
   that is not claimable at the claimer's time. A heartbeat never shortens a
   lease.
@@ -849,6 +862,6 @@ change.
   in metadata on every commit, keys named by session and step, find-or-create
   for unique names, and one value in force held by an expectation on a
   single-valued attribute instead of supersession links.
-- **Found, not decided:** a head read that joins attributes finished jobs
-  still hold is linear in the jobs ever processed, because the join is driven
-  from one of those attributes. Roadmap 12.
+- **Found, not decided for the library:** a read that joins attributes is
+  driven from one of them and visits every entity holding it. The pattern
+  now avoids this; other workloads may not be able to. Roadmap 12.
