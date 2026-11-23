@@ -92,7 +92,7 @@ current state.
   its report fails. The latter changes the CLI's exit-code contract, so it
   needs a decision.
 
-## 11. Agent-native use: explored, undecided
+## 11. Agent-native use: explored, first candidates chosen
 
 - **Why:** the user asked on 2026-11-23 whether Factlite can also serve as an
   agent's store for context, history, recall and durable work queues, with
@@ -106,6 +106,8 @@ current state.
   largest are building item 10 with an MCP front end, and full-text search
   through SQLite FTS5. The smallest are a tested queue guide and an agent
   guide, which need no library change.
-- **Decision needed:** which candidates, if any, to move into the plan. Item
-  10's preconditions (items 3 and 4) are decided; it still needs
-  authorization.
+- **Decided 2026-11-23:** candidates 6 and 11, the queue guide with a tested
+  claim pattern and the agent guide, move into the plan as step 13.
+- **Decision needed:** which other candidates, if any, to move into the plan.
+  Item 10's decision preconditions (items 3 and 4) are met; it still needs
+  authorization, its two listed prerequisites and a design revision.
