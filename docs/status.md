@@ -33,6 +33,8 @@ current.
   - 12.5: `avg` and HAVING (done).
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
+- **Explored, undecided:** agent-native use (roadmap 11,
+  `design/agent-native.md`), written 2026-11-23.
 
 ## 0.1 Inspect and initialize — done
 
@@ -848,6 +850,24 @@ current.
   projects release.
 - **What's next:** unchanged: expectation lookups and the open roadmap
   entries, each needing the user's go-ahead.
+
+## Agent-native exploration (user request, 2026-11-23): written, undecided
+
+- **Done:** `design/agent-native.md` records Datalevin 1.2.11's MCP server
+  (stdio, 32 tools, read-only by default, a 200-item cap, no schema
+  discovery), its model and retrieval features, and what each means for
+  Factlite as a store for agent context, history, recall and work queues. It
+  lists eleven candidates with the decision each needs, and how the MCP front
+  end should differ from the RPC surface in `design/json-rpc.md`. Roadmap
+  item 11 and a README link added. Documentation only, not a plan item.
+- **Decisions:** none. Nothing is authorized to build.
+- **Validation:** local `scripts/check.sh` only; GitHub Actions is
+  unavailable. Datalevin claims came from a research subagent and were
+  spot-checked against downloaded source for the tool count, limits, write
+  gating, capabilities and CLI flags. Datalevin was not run.
+- **Left open:** no review record yet; the pull request stays a draft until
+  one is added. Queue figures at scale are extrapolated, not measured.
+- **What's next:** the user chooses which candidates move into the plan.
 
 ## Environment notes
 

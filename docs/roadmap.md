@@ -91,3 +91,21 @@ current state.
   itself today); and a defined CLI outcome when a commit succeeds but writing
   its report fails. The latter changes the CLI's exit-code contract, so it
   needs a decision.
+
+## 11. Agent-native use: explored, undecided
+
+- **Why:** the user asked on 2026-11-23 whether Factlite can also serve as an
+  agent's store for context, history, recall and durable work queues, with
+  Datalevin's MCP interface as the reference.
+- **Exploration:** [`design/agent-native.md`](design/agent-native.md). History
+  is covered by what exists. Recall lacks full-text and vector search. Work
+  queues are expressible with expectations and keyed retries, at the cost of
+  permanent history under churn. Permanence is the main hazard for agent
+  writers.
+- **Candidates:** eleven, listed there with the decision each needs. The
+  largest are building item 10 with an MCP front end, and full-text search
+  through SQLite FTS5. The smallest are a tested queue guide and an agent
+  guide, which need no library change.
+- **Decision needed:** which candidates, if any, to move into the plan. Item
+  10's preconditions (items 3 and 4) are decided; it still needs
+  authorization.
