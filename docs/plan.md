@@ -324,3 +324,32 @@ Decided by the user on 2026-11-06 from the briefs in `decision-briefs/`.
   - deterministic rounding cases that a double-rounding division gets wrong;
   - validation of HAVING scope, types and parameters;
   - wire, CLI and pod scenarios.
+
+## Step 13: Agent guides
+
+Chosen by the user on 2026-11-23 from the candidates in
+[`design/agent-native.md`](design/agent-native.md) (6 and 11). Guides, examples
+and tests on the existing public API. No library change.
+
+- [ ] **13.1 Work queue guide with a tested pattern.** A work queue written on
+  the public API only, shared by a runnable example and its tests: schema,
+  enqueue, claim, heartbeat, finish, fail and release, with the clock supplied
+  by the caller. `docs/queues.md` states each guarantee with a link to the
+  test that shows it, the costs, and what the pattern is not. Coverage:
+  - deterministic cases: exact enqueue retry and duplicate refusal; due time
+    and order; lease takeover; a heartbeat racing a takeover; a stale pending
+    candidate; one worker name claiming twice; a repeated finish; retained
+    history;
+  - a 1,024-case property comparing random traces with a small state machine
+    of the contract;
+  - separate worker processes on one file: every job finished exactly once
+    with no revision beyond one claim and one finish per job, and a killed
+    worker's job finished by another process;
+  - a measured multi-process run recorded in `measurements.md`: throughput,
+    lost claims, revisions per job, file size and writable open time.
+- [ ] **13.2 Agent guide.** `docs/agents.md` for authors of agents that write
+  to Factlite: what never to write and why, a store per scope, provenance and
+  time conventions, identity without upsert, one current value enforced by an
+  expectation, context loads at one basis, changes since a revision, handoff
+  by snapshot token, and keyed writes. A runnable example checks every
+  convention the guide shows. `scripts/check.sh` runs both new examples.
