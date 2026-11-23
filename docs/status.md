@@ -33,6 +33,9 @@ current.
   - 12.5: `avg` and HAVING (done).
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
+- **Explored:** agent-native use (roadmap 11, `design/agent-native.md`),
+  written 2026-11-23. The user chose its candidates 6 and 11, a tested queue
+  guide and an agent guide, as the next work.
 
 ## 0.1 Inspect and initialize — done
 
@@ -848,6 +851,25 @@ current.
   projects release.
 - **What's next:** unchanged: expectation lookups and the open roadmap
   entries, each needing the user's go-ahead.
+
+## Agent-native exploration (user request, 2026-11-23): done
+
+- **Done:** `design/agent-native.md` records Datalevin 1.2.11's MCP server
+  (stdio, 32 tools, read-only by default, a 200-item cap, no schema
+  discovery), its model and retrieval features, and what each means for
+  Factlite as a store for agent context, history, recall and work queues. It
+  lists eleven candidates with the decision each needs, and how the MCP front
+  end should differ from the RPC surface in `design/json-rpc.md`. Roadmap
+  item 11 and a README link added. Documentation only, not a plan item.
+- **Decisions:** the user chose candidates 6 and 11 on 2026-11-23. Nothing
+  else is authorized to build.
+- **Validation:** local `scripts/check.sh` only; GitHub Actions is
+  unavailable. An independent subagent fact-checked the document; its
+  findings and their outcomes are in
+  `reviews/0055-agent-native-exploration.md`. `dtlv` 1.2.11 was run to
+  confirm that its default mode creates databases on open.
+- **Left open:** queue figures at scale are extrapolated, not measured.
+- **What's next:** plan step 13, the queue guide and the agent guide.
 
 ## Environment notes
 
