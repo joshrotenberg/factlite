@@ -331,7 +331,7 @@ Chosen by the user on 2026-11-23 from the candidates in
 [`design/agent-native.md`](design/agent-native.md) (6 and 11). Guides, examples
 and tests on the existing public API. No library change.
 
-- [ ] **13.1 Work queue guide with a tested pattern.** A work queue written on
+- [x] **13.1 Work queue guide with a tested pattern.** A work queue written on
   the public API only, shared by a runnable example and its tests: schema,
   enqueue, claim, heartbeat, finish, fail and release, with the clock supplied
   by the caller. `docs/queues.md` states each guarantee with a link to the
@@ -347,7 +347,7 @@ and tests on the existing public API. No library change.
     worker's job finished by another process;
   - a measured multi-process run recorded in `measurements.md`: throughput,
     lost claims, revisions per job, file size and writable open time.
-- [ ] **13.2 Agent guide.** `docs/agents.md` for authors of agents that write
+- [x] **13.2 Agent guide.** `docs/agents.md` for authors of agents that write
   to Factlite: what never to write and why, a store per scope, provenance and
   time conventions, identity without upsert, one current value enforced by an
   expectation, context loads at one basis, changes since a revision, handoff

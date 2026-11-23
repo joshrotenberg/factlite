@@ -809,3 +809,39 @@ them.
 - CLI: `--validation full|structural` on read commands, and `verify`, which
   opens structurally and then validates fully, so it validates once. Pod:
   `:validation` on `open`, and `verify`.
+
+## Work queue pattern and agent conventions (13.1, 13.2)
+
+Chosen by the user on 2026-11-23. Guides, examples and tests; no library
+change.
+
+- **The queue is a pattern, not a library feature.** It lives in
+  `examples/work_queue/queue.rs`, which the example and
+  `tests/work_queue.rs` both include, so the guide describes the code that is
+  tested.
+- **The fence is the attempt number.** Every write by a holder expects
+  `job/state`, `job/owner` and `job/attempt`. Owner alone is not enough: one
+  worker name can claim the same job twice. A mutation that removed the
+  attempt expectation passed the first test suite, which led to a
+  deterministic case and a property that keeps every claim a worker was ever
+  given.
+- **A takeover expects state, lease and attempt.** An expectation covers one
+  attribute, so expecting the lease alone would let a takeover follow a late
+  finish. The lease expectation makes it lose to a heartbeat.
+- **Time alone takes nothing away.** An expired lease that nobody has taken
+  still belongs to its owner. The store has no clock, so this is the only
+  rule it can enforce.
+- **Nothing is retracted.** `job/owner` is the last claimant and stays on a
+  finished job. Fewer events per job, and the owner of a finished job is
+  readable at the head.
+- **Keys where a caller repeats without reading:** enqueue (from the job id)
+  and finish (from the job and attempt). Claim and heartbeat read first and
+  are fenced, so they carry no key and store no retry record.
+- **The caller supplies the clock** in every function, so tests are
+  deterministic and no assertion depends on elapsed time.
+- **Agent conventions** are recorded in `docs/agents.md`: provenance and time
+  in metadata on every commit, keys named by session and step, find-or-create
+  for unique names, and one value in force held by an expectation on a
+  single-valued attribute instead of supersession links.
+- **Found, not decided:** a head read whose patterns match attributes that
+  finished jobs still hold is linear in the jobs ever processed. Roadmap 12.

@@ -107,7 +107,29 @@ current state.
   through SQLite FTS5. The smallest are a tested queue guide and an agent
   guide, which need no library change.
 - **Decided 2026-11-23:** candidates 6 and 11, the queue guide with a tested
-  claim pattern and the agent guide, move into the plan as step 13.
+  claim pattern and the agent guide, move into the plan as step 13. Done:
+  [queues](queues.md) and [agents](agents.md).
 - **Decision needed:** which other candidates, if any, to move into the plan.
   Item 10's decision preconditions (items 3 and 4) are met; it still needs
   authorization, its two listed prerequisites and a design revision.
+
+## 12. Head reads over churned attributes: found, undecided
+
+- **Why:** measuring the queue pattern (plan 13.1) showed that the read
+  behind every claim grows by about 0.8 ms per 1,000 finished jobs in the
+  file, from 0.22 ms with none to 6.6 ms with 8,000. It follows the jobs ever
+  processed, not the jobs pending. Any workload that queries at the head for
+  the few entities in one state among many that have left it will see the
+  same. Figures and method: [measurements](measurements.md), "Work queue
+  pattern".
+- **What is known:** in an experiment outside the repository, an index on
+  `(attribute, value, retracted, entity, asserted)` cut one form of the query
+  from 1.99 ms to 0.21 ms at 4,000 finished jobs, and made no difference to
+  the form that also matches an attribute every job holds. `ANALYZE` alone
+  changed nothing. Pattern order in the query changed the time by a third.
+  So a remedy involves an index and how the generated SQL orders its joins.
+- **Decision needed:** whether to design it. It would be a storage format
+  change with an upgrade, and needs the reference-evaluator parity and
+  measurement evidence that items 9.1 to 9.5 had.
+- **Until then:** the [queue guide](queues.md) says to start a new store file
+  after a few thousand jobs.

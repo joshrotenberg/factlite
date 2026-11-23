@@ -2,21 +2,23 @@
 
 ## Current state
 
-Updated 2026-11-06 (plan item 12.5 done). This section is the summary. The entries below are the full
+Updated 2026-11-23 (plan step 13 done). This section is the summary. The entries below are the full
 per-item log, oldest first, and are kept as written, so older entries describe
 the state at their time. Where they disagree with this section, this section is
 current.
 
-- **Implemented:** plan steps 0 to 11, all checked in `plan.md`: the v1
+- **Implemented:** plan steps 0 to 13, all checked in `plan.md`: the v1
   contract, plus the temporal datom index and indexed reads and commits (9.1 to
-  9.5), the babashka pod (10.1), and consumer requests (11.1 to 11.5).
+  9.5), the babashka pod (10.1), consumer requests (11.1 to 11.5), the
+  decided roadmap items (12.1 to 12.5), and the queue and agent guides (13.1
+  and 13.2), which changed no library code.
   Storage format 4.
 - **Roadmap:**
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 228 pass locally with babashka installed and `REQUIRE_BB=1`,
-  including fifty-four 1,024-case properties and the pod's three babashka
+- **Tests:** 239 pass locally with babashka installed and `REQUIRE_BB=1`,
+  including fifty-five 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions is unavailable for
   this account this month, so the local gate stands in for CI.
 - **Reviews:** entries 0001 to 0043 in `reviews/` are self-reviews. Since 0044,
@@ -34,8 +36,10 @@ current.
 - **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
   and pod registry publishing.
 - **Explored:** agent-native use (roadmap 11, `design/agent-native.md`),
-  written 2026-11-23. The user chose its candidates 6 and 11, a tested queue
-  guide and an agent guide, as the next work.
+  written 2026-11-23. Its candidates 6 and 11 are done as plan step 13: the
+  [queue guide](queues.md) and the [agent guide](agents.md).
+- **Found, undecided:** head reads over churned attributes are linear in
+  history (roadmap 12).
 
 ## 0.1 Inspect and initialize — done
 
@@ -870,6 +874,44 @@ current.
   confirm that its default mode creates databases on open.
 - **Left open:** queue figures at scale are extrapolated, not measured.
 - **What's next:** plan step 13, the queue guide and the agent guide.
+
+## 13.1 Work queue guide with a tested pattern — done
+
+- **Done:** a work queue on the public API in
+  `examples/work_queue/queue.rs`, shared by the `work_queue` example and
+  `tests/work_queue.rs`. Nine deterministic cases, a 1,024-case property
+  against a state machine of the contract, four worker processes finishing
+  100 jobs exactly once with no extra revision, and a killed worker's job
+  finished by another process. `docs/queues.md` states each guarantee with
+  its test, what is not guaranteed, and measured costs. Measurements in
+  `measurements.md`.
+- **Decisions:** see `decisions.md`, "Work queue pattern and agent
+  conventions". The fence is the attempt number; a takeover expects state,
+  lease and attempt; nothing is retracted; the caller supplies the clock.
+- **Validation:** local `scripts/check.sh` with `REQUIRE_BB=1`; GitHub Actions
+  is unavailable. Three mutations of the pattern each fail at least one
+  test, checked by hand. The process tests passed eight repeated runs.
+- **Blockers:** none.
+- **Left open:** the claim read grows with finished jobs in the file (roadmap
+  12, undecided). The pattern is tested through the Rust API only, not the
+  CLI or pod. Measurements are one run per configuration on one machine, up
+  to 8,000 jobs.
+- **What's next:** 13.2.
+
+## 13.2 Agent guide — done
+
+- **Done:** `docs/agents.md`: what agents must never write, a store per
+  scope, and conventions for provenance, time, keys, find-or-create, one
+  value in force, context loads, changes since a revision and handoff by
+  token. `examples/agent_session.rs` checks each convention.
+  `scripts/check.sh` runs both new examples. README links added.
+- **Decisions:** one value in force is a single-valued attribute changed
+  under an expectation, with the chain read from history, instead of
+  supersession links.
+- **Validation:** as 13.1. Review: `reviews/0056-queue-and-agent-guides.md`.
+- **Blockers:** none.
+- **What's next:** the user chooses among the remaining candidates in
+  `design/agent-native.md` and roadmap 12.
 
 ## Environment notes
 
