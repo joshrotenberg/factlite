@@ -1444,3 +1444,64 @@ fn store_names_that_differ_only_in_case_have_distinct_resources() {
         ]
     );
 }
+
+/// The 2026-07-28 revision replaces list-change notifications with a
+/// `subscriptions/listen` stream. Nothing this server lists changes, so it
+/// acknowledges the stream with an empty filter and never writes to it.
+#[test]
+fn a_subscription_is_acknowledged_with_nothing_honored_and_stays_silent() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("notes.sqlite");
+    store_with(&path, 1);
+    let mut server = start(&bind("--store", "notes", &path));
+
+    let filter = json!({"toolsListChanged": true, "promptsListChanged": true,
+        "resourcesListChanged": true, "resourceSubscriptions": ["factlite://stores/notes/schema"]});
+    for id in [json!(7), json!("listen-a")] {
+        server.send(
+            &json!({"jsonrpc": "2.0", "id": id, "method": "subscriptions/listen",
+                "params": {"_meta": meta(), "notifications": filter}})
+            .to_string(),
+        );
+        let acknowledged = server.response();
+        assert_eq!(
+            acknowledged,
+            json!({"jsonrpc": "2.0", "method": "notifications/subscriptions/acknowledged",
+                "params": {"_meta": {"io.modelcontextprotocol/subscriptionId": id}, "notifications": {}}})
+        );
+        // The stream stays open and silent: the next line answers the next
+        // request, and cancelling the stream says nothing.
+        assert_eq!(
+            server.ok("tools/list", json!({"_meta": meta()}))["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            8
+        );
+        server.send(
+            &json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                "params": {"_meta": meta(), "requestId": id}})
+            .to_string(),
+        );
+    }
+    // The filter must be an object, and the method belongs to 2026-07-28.
+    assert_eq!(
+        server.err(
+            "subscriptions/listen",
+            json!({"_meta": meta(), "notifications": true})
+        )["code"],
+        -32602
+    );
+    assert_eq!(
+        server.err("subscriptions/listen", json!({"_meta": meta()}))["code"],
+        -32602
+    );
+    assert_eq!(
+        server.err("subscriptions/listen", json!({"notifications": {}}))["code"],
+        -32601
+    );
+    let (status, rest, stderr) = server.finish();
+    assert!(status.success());
+    assert!(rest.is_empty(), "{rest:?}");
+    assert_eq!(stderr, "");
+}

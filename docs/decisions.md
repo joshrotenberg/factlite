@@ -963,3 +963,15 @@ Plan item 14.3, designed in `design/mcp.md`. Decisions made while building it:
   `offset` needing `at`, a non-empty key, and the operator's metadata keys.
   One difference is left: JSON Schema counts `1.0` as an integer and the
   wire contract does not; the descriptions say so.
+
+## MCP subscription streams (2026-11-23)
+
+- **`subscriptions/listen` is acknowledged with an empty filter.** The
+  2026-07-28 revision delivers list-change and resource-update notifications
+  only on this stream. Nothing `factlite-mcp` lists changes while it runs,
+  and its one resource, a schema, is read at the head with a zero cache
+  lifetime, so it honors no notification type and says so in the
+  acknowledgment. Answering -32601 instead made `mcp-repl` 0.4.0 retry the
+  stream with backoff in its interactive mode.
+- **No state is kept for an open stream.** Nothing is ever written for it, so
+  a later `notifications/cancelled` needs no bookkeeping.
