@@ -25,6 +25,7 @@ pub const HANDSHAKE_REVISIONS: [&str; 4] = ["2024-11-05", "2025-03-26", "2025-06
 const PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
 const CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
 const SERVER_INFO: &str = "io.modelcontextprotocol/serverInfo";
+const SUBSCRIPTION_ID: &str = "io.modelcontextprotocol/subscriptionId";
 const SERVER_NAME: &str = "factlite-mcp";
 
 const PARSE_ERROR: i64 = -32700;
@@ -337,6 +338,17 @@ impl McpServer {
         if !valid {
             return invalid("id must be a string or an integer");
         }
+        if request.method == "subscriptions/listen" {
+            return Some(match self.listen(id.get(), request.params.as_deref()) {
+                Ok(line) => line,
+                Err(error) => server::failure(
+                    id.get(),
+                    error.code,
+                    &error.message,
+                    error.data.map(|data| data.to_string()).as_deref(),
+                ),
+            });
+        }
         Some(
             match self.respond(&request.method, request.params.as_deref()) {
                 Ok(result) => server::success(id.get(), &result.to_string()),
@@ -348,6 +360,42 @@ impl McpServer {
                 ),
             },
         )
+    }
+
+    /// Opens a `subscriptions/listen` stream of the 2026-07-28 revision and
+    /// returns its acknowledgment.
+    ///
+    /// Nothing this server lists changes while it runs, so it honors no
+    /// notification type: the acknowledgment's filter is empty. The request
+    /// stays open with no response, as the revision requires, until the
+    /// client cancels it with `notifications/cancelled`, which is accepted
+    /// and ignored like any notification. No message is ever sent for it
+    /// again, so no state is kept.
+    fn listen(&mut self, id: &str, params: Option<&RawValue>) -> Result<String, ProtocolError> {
+        let mut params = match params {
+            None => Members::default(),
+            Some(raw) => match Top::parse(raw.get()) {
+                Ok(Top::Object(members)) => members,
+                Ok(_) => return Err(ProtocolError::params("params must be an object")),
+                Err(Malformed::Duplicate(message) | Malformed::Syntax(message)) => {
+                    return Err(ProtocolError::params(message));
+                }
+            },
+        };
+        if self.era(&mut params)? != Era::Stateless {
+            return Err(ProtocolError::new(
+                METHOD_NOT_FOUND,
+                format!(
+                    "method not found: subscriptions/listen belongs to revision {STATELESS_REVISION}"
+                ),
+            ));
+        }
+        if params.take("notifications").as_deref().map(json::kind) != Some(Kind::Object) {
+            return Err(ProtocolError::params("notifications must be an object"));
+        }
+        Ok(format!(
+            r#"{{"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged","params":{{"_meta":{{"{SUBSCRIPTION_ID}":{id}}},"notifications":{{}}}}}}"#
+        ))
     }
 
     fn respond(&mut self, method: &str, params: Option<&RawValue>) -> Result<Json, ProtocolError> {

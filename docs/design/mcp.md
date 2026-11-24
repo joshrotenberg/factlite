@@ -153,7 +153,16 @@ raw tool output and personal data must not be written.
   - The server keeps no state between requests in either era.
 - **Methods:** `initialize`, `server/discover`, `ping`, `tools/list`,
   `tools/call`, `resources/list`, `resources/read`,
-  `resources/templates/list`.
+  `resources/templates/list`, and `subscriptions/listen` in the 2026-07-28
+  form.
+- **`subscriptions/listen`** is acknowledged with
+  `notifications/subscriptions/acknowledged` carrying an empty filter: the
+  server honors no notification type, because nothing it lists changes while
+  it runs. The request stays open with no response until the client cancels
+  it, and nothing is written for it again. A client that refreshes its view
+  of the server on list changes learns at once that it need not wait for
+  any. Added after `mcp-repl` 0.4.0, which opens this stream in its
+  interactive mode, retried on the -32601 the first version answered.
 - **Notifications** are accepted and ignored.
 - **Batches** are answered entry by entry. `2025-03-26` allows them and
   later revisions removed them; a client of a later revision does not send

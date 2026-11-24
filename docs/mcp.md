@@ -123,7 +123,9 @@ latest revision.
   in `_meta`, through `server/discover` or any request. Each request is
   answered in the form of the revision it names.
 - **Capabilities:** tools and resources. No prompts, sampling, roots,
-  logging, subscriptions or list-change notifications.
+  logging or list-change notifications. A `subscriptions/listen` request in
+  the `2026-07-28` form is acknowledged with nothing honored and stays open
+  and silent until the client cancels it.
 - **Batches** are answered entry by entry, as `2025-03-26` allows.
 - **Not supported:** `null` or fractional ids, list cursors, HTTP.
 

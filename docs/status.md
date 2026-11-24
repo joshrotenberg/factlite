@@ -986,6 +986,14 @@ current.
   `2026-07-28` and `auto` lifecycles, with the same results in each.
   Recorded in `mcp.md` and as an addendum to review 0058.
 - **Validation:** by hand; not part of the automated gate.
+
+## MCP subscription streams (follow-up to 14.3): done
+
+- **Done:** `factlite-mcp` acknowledges a `2026-07-28` `subscriptions/listen`
+  request with an empty filter and keeps it open and silent. Found when
+  `mcp-repl` 0.4.0 retried the stream in its interactive mode.
+- **Decisions:** `decisions.md`, "MCP subscription streams (2026-11-23)".
+- **Validation:** `reviews/0059-mcp-subscriptions-listen.md` (self-review).
 - **What's next:** unchanged.
 
 ## Environment notes
