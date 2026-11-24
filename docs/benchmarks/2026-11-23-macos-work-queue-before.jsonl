@@ -1,0 +1,7 @@
+{"workers":1,"jobs":500,"spread":1,"drain_ms":422,"jobs_per_second":1185,"lost_claims":0,"candidate_read_ms_at_start":0.215,"candidate_read_ms_at_end":0.463,"revisions":1502,"file_bytes":4448256,"writable_open_ms":43.1}
+{"workers":1,"jobs":2000,"spread":1,"drain_ms":2698,"jobs_per_second":741,"lost_claims":0,"candidate_read_ms_at_start":0.215,"candidate_read_ms_at_end":1.537,"revisions":6002,"file_bytes":17498112,"writable_open_ms":184.0}
+{"workers":4,"jobs":2000,"spread":1,"drain_ms":3055,"jobs_per_second":655,"lost_claims":2300,"candidate_read_ms_at_start":0.219,"candidate_read_ms_at_end":1.540,"revisions":6002,"file_bytes":17522688,"writable_open_ms":183.0}
+{"workers":4,"jobs":2000,"spread":8,"drain_ms":2029,"jobs_per_second":986,"lost_claims":256,"candidate_read_ms_at_start":0.213,"candidate_read_ms_at_end":1.567,"revisions":6002,"file_bytes":17448960,"writable_open_ms":185.3}
+{"workers":8,"jobs":2000,"spread":16,"drain_ms":2085,"jobs_per_second":959,"lost_claims":228,"candidate_read_ms_at_start":0.216,"candidate_read_ms_at_end":1.587,"revisions":6002,"file_bytes":17645568,"writable_open_ms":185.1}
+{"workers":1,"jobs":8000,"spread":1,"drain_ms":30967,"jobs_per_second":258,"lost_claims":0,"candidate_read_ms_at_start":0.216,"candidate_read_ms_at_end":6.551,"revisions":24002,"file_bytes":69840896,"writable_open_ms":776.0}
+{"workers":4,"jobs":8000,"spread":8,"drain_ms":14516,"jobs_per_second":551,"lost_claims":2165,"candidate_read_ms_at_start":0.222,"candidate_read_ms_at_end":9.836,"revisions":24002,"file_bytes":69840896,"writable_open_ms":951.1}

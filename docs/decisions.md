@@ -809,3 +809,62 @@ them.
 - CLI: `--validation full|structural` on read commands, and `verify`, which
   opens structurally and then validates fully, so it validates once. Pod:
   `:validation` on `open`, and `verify`.
+
+## Work queue pattern and agent conventions (13.1, 13.2)
+
+Chosen by the user on 2026-11-23. Guides, examples and tests; no library
+change.
+
+- **The queue is a pattern, not a library feature.** It lives in
+  `examples/work_queue/queue.rs`, which the example and
+  `tests/work_queue.rs` both include, so the guide describes the code that is
+  tested.
+- **The fence is the attempt number.** Every write by a holder expects
+  `job/state`, `job/owner` and `job/attempt`, and not the lease. Owner alone
+  is not enough: one worker name can claim the same job twice. A mutation that removed the
+  attempt expectation passed the first test suite, which led to a
+  deterministic case and a property that keeps every claim a worker was ever
+  given.
+- **A takeover expects state, lease and attempt.** The lease expectation
+  makes it lose to a heartbeat, and to a late finish, fail or release, which
+  set the lease to the largest instant. The state expectation is a second
+  guard for the latter.
+- **Time alone takes nothing away.** An expired lease that nobody has taken
+  still belongs to its owner. The store has no clock, so this is the only
+  rule it can enforce.
+- **A job holds a real due time only while pending and a real lease only
+  while claimed.** A claim sets `job/run-after` to the largest instant;
+  finish, fail and release set `job/lease-until` to it. The first form of the
+  pattern left both alone, and its claim read was driven through every
+  finished job: 6.5 ms at 8,000 finished jobs against 0.6 ms now. The cost is
+  two more events per claim and per finish, about 1.6 KB more file per job.
+  `job/owner` is still the last claimant and stays on a finished job.
+- **A value, not a retraction.** Retracting the two attributes was tried. A
+  retraction must name the stored value, so every write that gave a job up
+  had to expect the exact lease, and a claim copied before a heartbeat was
+  refused while its worker still held the job. Writing a value replaces what
+  is stored, the lease stays out of the fence, and copies of a claim are
+  interchangeable.
+- **`claim` commits without rechecking the time;** `try_claim` checks it. A
+  candidate that `claim` has just read for the same instant can only be
+  refused by a commit, so the retry loop always makes progress. With the
+  check inside the loop, a disagreement between the query and the check
+  would spin forever.
+- **A candidate carries why it was claimable,** and `try_claim` refuses one
+  that is not claimable at the claimer's time. A heartbeat never shortens a
+  lease.
+- **Outside effects are keyed without the attempt number.** A key that
+  includes it would let two attempts both take effect. The attempt is a
+  fencing token, not part of an idempotency key.
+- **Keys where a caller repeats without reading:** enqueue (from the job id)
+  and finish (from the job and attempt). Claim and heartbeat read first and
+  are fenced, so they carry no key and store no retry record.
+- **The caller supplies the clock** in every function, so tests are
+  deterministic and no assertion depends on elapsed time.
+- **Agent conventions** are recorded in `docs/agents.md`: provenance and time
+  in metadata on every commit, keys named by session and step, find-or-create
+  for unique names, and one value in force held by an expectation on a
+  single-valued attribute instead of supersession links.
+- **Found, not decided for the library:** a read that joins attributes is
+  driven from one of them and visits every entity holding it. The pattern
+  now avoids this; other workloads may not be able to. Roadmap 12.

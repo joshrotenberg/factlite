@@ -317,8 +317,11 @@ Through the pod, a keyed 13-fact create took 0.52 ms and a conditional finish
 - **No claim-next primitive.** Query then commit is two calls. Factlite has
   no transaction functions, by design: a request is data and validation is on
   the final state.
-- **Not measured:** claim throughput with several processes contending, and
-  behaviour at 100,000 or more revisions.
+- **Measured since** (plan 13.1, [queue guide](../queues.md)): about 10.3 KB
+  of file per job; a writable open of 35 to 45 microseconds per revision;
+  about 900 jobs per second over 8,000 jobs, with one worker process or
+  four; and a claim read that grows by 0.05 to 0.1 ms per 1,000 finished
+  jobs. Behaviour beyond 24,000 revisions is still not measured.
 
 This fits agent-scale work: tasks, runs and handoffs in the thousands, where
 the audit trail matters. It does not fit a high-throughput broker.
@@ -378,12 +381,12 @@ None is authorized. Sizes are rough.
 | 3 | Nested pull as a read API | context | A design (depth limit, cycles) and a go-ahead; brief 05 only placed it as a separate read API | medium |
 | 4 | Full-text search through FTS5 | recall | Decisions on declaration, validation, ranking and query integration; a storage format change | large |
 | 5 | Vector search | recall | A decision among the three sizes; a dependency decision for sqlite-vec | small to large |
-| 6 | A queue guide with a tested schema and claim pattern, including a multi-process no-double-claim test | queues | Go-ahead only; no library change | small |
+| 6 | A queue guide with a tested schema and claim pattern, including a multi-process no-double-claim test | queues | Done 2026-11-23: [queues](../queues.md) | small |
 | 7 | A way to wait for a new revision | queues, context | A design: in-process only, or cross-process through SQLite's data version | medium |
 | 8 | A Datalog text front end for queries | all four | A decision: a second query syntax to specify and keep in parity with the JSON form | medium |
 | 9 | A query deadline | all four | A decision on the error and its outcome semantics | small |
 | 10 | A convention or support for commit time and queryable provenance | history | A decision: convention only, adapter-stamped metadata, or metadata visible to `query` | small to medium |
-| 11 | An agent guide: store-per-scope, the reference pattern, what never to write | all four | Go-ahead only | small |
+| 11 | An agent guide: store-per-scope, the reference pattern, what never to write | all four | Done 2026-11-23: [agents](../agents.md) | small |
 
 ## Suggested order
 

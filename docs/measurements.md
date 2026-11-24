@@ -253,3 +253,120 @@ Median of seven CLI `schema` runs, including process start. On the 120,000-fact
 synthetic store (875 revisions), full validation took 774 ms and structural
 3.2 ms. On a copy of the clajent store (3,205 revisions), full validation took
 156 ms and structural 4.1 ms. `verify` costs the same as a full open.
+
+## Work queue pattern (13.1): 2026-11-23
+
+The `work_queue` example's measured mode, on the `docs/queue-and-agent-guides`
+branch. Apple M4 Pro, macOS 27.2.1, Rust 1.99.0, release build, OS temporary
+directory.
+
+```sh
+cargo run --release --locked -p factlite --example work_queue -- \
+  --workers 4 --jobs 2000 --spread 8
+```
+
+The run enqueues every job with a distinct due time in the past, starts the
+worker processes, and has them begin claiming at the same instant, two
+seconds after the first is started. Each worker claims, reads the job and
+finishes it, with no work in between. `drain_ms` runs from that instant to
+the last worker's exit. One run per configuration.
+
+The candidate read is the median of 21 calls to the read that starts every
+claim. It is taken three times: with every job pending; with every job
+finished; and with every job finished at a time by which every lease has
+passed. Leases in these runs last an hour, so the third is the only one in
+which the takeover query has expired leases to consider.
+
+### The pattern as committed
+
+Raw output:
+[benchmarks/2026-11-23-macos-work-queue.jsonl](benchmarks/2026-11-23-macos-work-queue.jsonl).
+
+| Workers | Jobs | Spread | Drain ms | Jobs per second | Lost claims | Candidate read ms: start, end, after leases | File bytes | Writable open ms |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 500 | 1 | 423 | 1,182 | 0 | 0.216, 0.242, 0.267 | 5,238,784 | 53.0 |
+| 1 | 2,000 | 1 | 2,104 | 951 | 0 | 0.222, 0.327, 1.123 | 20,676,608 | 256.9 |
+| 4 | 2,000 | 1 | 1,984 | 1,008 | 248 | 0.229, 0.312, 0.409 | 20,647,936 | 215.6 |
+| 4 | 2,000 | 8 | 2,346 | 853 | 102 | 0.223, 0.326, 0.451 | 20,742,144 | 268.3 |
+| 8 | 2,000 | 16 | 1,983 | 1,009 | 147 | 0.222, 0.321, 0.423 | 20,910,080 | 220.2 |
+| 1 | 8,000 | 1 | 8,649 | 925 | 0 | 0.224, 0.610, 1.031 | 82,685,952 | 921.8 |
+| 4 | 8,000 | 8 | 9,200 | 870 | 866 | 0.221, 0.596, 0.983 | 83,062,784 | 913.4 |
+
+Each job is three revisions (`3 * jobs + 2` in every run) and about 10.3 KB
+of file. A writable open cost 35 to 45 microseconds per revision. The
+candidate read grew by about 0.05 ms per 1,000 finished jobs, and about 0.1
+ms once their leases had passed. The after-leases reading of 1.123 ms in the
+second row is out of line with the four other 2,000-job runs, 0.41 to 0.45
+ms, and was not repeated. `lost_claims` can undercount: a worker that meets a
+busy store in the middle of a claim drops the losses it had counted in that
+call.
+
+### Before finished jobs gave up their scheduling values
+
+The first form of the pattern left `job/run-after` and `job/lease-until` as
+they were on finished jobs. Raw output:
+[benchmarks/2026-11-23-macos-work-queue-before.jsonl](benchmarks/2026-11-23-macos-work-queue-before.jsonl).
+It has no after-leases reading.
+
+| Workers | Jobs | Spread | Jobs per second | Lost claims | Candidate read ms: start, end | File bytes | Writable open ms |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 500 | 1 | 1,185 | 0 | 0.215, 0.463 | 4,448,256 | 43.1 |
+| 1 | 2,000 | 1 | 741 | 0 | 0.215, 1.537 | 17,498,112 | 184.0 |
+| 4 | 2,000 | 1 | 655 | 2,300 | 0.219, 1.540 | 17,522,688 | 183.0 |
+| 4 | 2,000 | 8 | 986 | 256 | 0.213, 1.567 | 17,448,960 | 185.3 |
+| 8 | 2,000 | 16 | 959 | 228 | 0.216, 1.587 | 17,645,568 | 185.1 |
+| 1 | 8,000 | 1 | 258 | 0 | 0.216, 6.551 | 69,840,896 | 776.0 |
+| 4 | 8,000 | 8 | 551 | 2,165 | 0.222, 9.836 | 69,840,896 | 951.1 |
+
+The read at the end grew by 0.5 to 1.2 ms per 1,000 finished jobs. A reviewer
+timed the same read after the finished jobs' leases had passed at 2.9 ms for
+2,000 and 12.6 ms for 8,000, about 1.9 times the figures above, because the
+takeover query then visits every finished job as well.
+
+A second measurement on that form, with a test that is not in the repository,
+timed variants of the pending-jobs read on stores with 50 pending jobs and 0,
+2,000 or 8,000 finished ones. Mean of 30 calls, in milliseconds:
+
+| Read | 0 finished | 2,000 | 8,000 |
+| --- | ---: | ---: | ---: |
+| As in the pattern: queue, state, due time, attempt; due-time predicate; ordered; limit 1 | 0.117 | 1.562 | 6.536 |
+| Without the predicate | 0.104 | 1.489 | 6.486 |
+| Without predicate, order or limit | 0.116 | 1.521 | 6.372 |
+| Queue and state patterns only | 0.056 | 0.990 | 4.416 |
+| State pattern only | 0.038 | 0.147 | 0.459 |
+| Pull of one job by entity | 0.027 | 0.028 | 0.028 |
+
+Every read that joins two or more patterns grew at about the same rate,
+whatever its predicate, order or limit. The single-pattern read grew about
+fourteen times more slowly, and a pull by entity not at all. So the join was
+driven from an attribute that every job held, and the cost was in visiting
+finished jobs, not in finding pending ones.
+
+Two reviewers compiled the generated SQL on plain SQLite (3.45.3 and 3.54.0,
+no statistics) and found both queries driven from the time attribute's range
+in the attribute and value index, with the queue, state and attempt looked up
+by primary key for each job in the range. The plan inside the bundled SQLite
+was not captured. Finished jobs hold the oldest times, so the scan passed all
+of them before the first pending job. An interval that has been retracted is
+rejected from the index alone, with no lookup, which is why moving the two
+values out of the scanned ranges removes most of the cost and leaves a
+smaller linear term.
+
+An intermediate form retracted the two values instead of setting them to the
+largest instant. It measured slightly better, 998 to 1,292 jobs per second
+and about 9.5 KB per job, with the same reads. It was replaced because its
+writes had to expect the exact stored lease.
+
+Two other observations on the first form:
+
+- With one shared due time for every job, the read also grew with the number
+  of pending jobs, 1.9 ms at 2,000, because ordering by due time and then by
+  job had to read the whole tie.
+- An experiment that is not in the repository added
+  `CREATE INDEX ... ON datoms(attribute, value, retracted, entity, asserted)`
+  to a file with 4,000 finished and 100 pending jobs and ran `ANALYZE`. The
+  pending-jobs query without its `job/queue` pattern went from 1.99 ms to
+  0.21 ms. With the `job/queue` pattern, which matched every job, it went
+  from 3.0 ms to 3.9 ms. `ANALYZE` alone changed nothing. Putting
+  `job/state` first in the query's patterns, with no new index, gave 2.0 ms
+  against 3.0 ms.

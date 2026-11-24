@@ -229,3 +229,17 @@ repository.
   mismatches;
 - refused writable structural opens that create no file;
 - `verify` on pinned views and after tampering.
+
+The work queue pattern (plan 13.1) is example code, tested in
+`tests/work_queue.rs`, which includes `examples/work_queue/queue.rs` by path.
+Fifteen deterministic cases each pin one guarantee stated in `queues.md`. A
+1,024-case property runs sequential random traces against a state machine of
+the contract and compares outcomes and stored values. Three process tests
+re-enter the test binary as workers: four processes that all hold one
+candidate before any may claim commit exactly one claim; four workers finish
+100 jobs exactly once with no extra revision; and a killed worker's job is
+finished by processes whose clocks run a day ahead. Children signal through
+files, and no assertion depends on elapsed time. The pattern's mutations
+listed in `queues.md` were applied by hand, not by a tool. `scripts/check.sh`
+runs the `work_queue` walkthrough, a small measured run with three worker
+processes, and the `agent_session` example.

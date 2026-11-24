@@ -107,7 +107,41 @@ current state.
   through SQLite FTS5. The smallest are a tested queue guide and an agent
   guide, which need no library change.
 - **Decided 2026-11-23:** candidates 6 and 11, the queue guide with a tested
-  claim pattern and the agent guide, move into the plan as step 13.
+  claim pattern and the agent guide, move into the plan as step 13. Done:
+  [queues](queues.md) and [agents](agents.md).
 - **Decision needed:** which other candidates, if any, to move into the plan.
   Item 10's decision preconditions (items 3 and 4) are met; it still needs
   authorization, its two listed prerequisites and a design revision.
+
+## 12. Joined reads visit every entity holding the driving attribute: found, undecided
+
+- **Why:** measuring the queue pattern (plan 13.1) showed its claim read
+  growing by 0.5 to 1.2 ms per 1,000 finished jobs, to 6.5 ms at 8,000, and
+  about twice that once the finished jobs' leases had passed. The read joins
+  four attributes of a job. It was driven from the time attribute's range,
+  and looked up the other three for every job in that range, including every
+  finished job. Figures and method: [measurements](measurements.md), "Work
+  queue pattern".
+- **Worked around in the pattern:** a finished job now holds the largest
+  instant as its due time and lease, so each range holds only closed
+  intervals for it, which are skipped from the index. The read is 0.6 to 1.0
+  ms at 8,000 finished jobs.
+  A workload whose finished entities must keep the attribute a read is
+  driven from cannot do the same.
+- **What is known:**
+  - Every read that joined two or more of the job attributes grew at about
+    the same rate. A single-pattern read grew about fourteen times more
+    slowly.
+  - Two reviewers found the plan described above by compiling the generated
+    SQL on plain SQLite. The plan inside the bundled SQLite was not captured.
+  - In an experiment outside the repository, an index on
+    `(attribute, value, retracted, entity, asserted)` cut one form of the
+    query from 1.99 ms to 0.21 ms at 4,000 finished jobs and did not help the
+    form that also matched an attribute every job holds. `ANALYZE` alone
+    changed nothing. Pattern order in the query changed the time by a third.
+- **Candidate remedies, none tried in the library:** make the generated SQL
+  follow the query's pattern order, so the author can put the selective
+  pattern first; keep planner statistics; add an index over open intervals by
+  attribute and value. The first needs no storage format change.
+- **Decision needed:** whether to investigate. The first step would be to
+  capture the real query plan.
