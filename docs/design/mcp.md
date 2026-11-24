@@ -19,7 +19,9 @@ factlite-mcp --store NAME=PATH ... [--writable-store NAME=PATH ...] [options]
 ```
 
 - **`--store NAME=PATH`** binds a store read-only: a read-only connection
-  that cannot create, upgrade or write.
+  that cannot create the store, upgrade it or write to it. SQLite still
+  creates its `-wal` and `-shm` files beside an existing store, so the
+  directory must be writable.
 - **`--writable-store NAME=PATH`** binds a store that `transact` may write.
 - **`--create`** lets a writable store be created when its file is missing.
   Without it a missing file is an error at start-up.
@@ -54,8 +56,9 @@ Nine, the dispatch's methods minus the lifecycle ones:
 - Each tool's input schema lists the bound store names, so the model sees
   which stores exist without a discovery call.
 - Every tool states all four behaviour hints. Reads are read-only. `transact`
-  is not read-only, is not destructive (a commit adds to the log and every
-  earlier state stays readable), and is idempotent (see below).
+  is not read-only, is destructive (a retraction or a replacement changes
+  the current state, though every earlier state stays readable), and is
+  idempotent (see below).
 - **`head` also returns `now`,** the server's clock as an instant. A store has
   no clock and a model has none either, and the [agent guide](../agents.md)
   asks writers to record time. This is the one result that is not a library
@@ -79,8 +82,10 @@ A model cannot take an unbounded result. `schema`, `facts`, `history`,
 `transactions` and `query` return at most a page of items:
 
 - **Page size:** `--page-items` (200) items and `--page-bytes` (262,144) bytes
-  of items, whichever is reached first, and always at least one item. `limit`
-  lowers the item count for one call. It cannot raise it.
+  of items, whichever is reached first. A page holds at least one item
+  whenever one remains, even an item larger than the byte bound. `limit`
+  lowers the item count for one call. It cannot raise it. An offset past the
+  end gives an empty page whose `offset` is the total.
 - **`page`** is `{offset, count, total}`, plus `next` when items remain.
 - **To continue,** repeat the call with the same arguments, `at` set to the
   result's `basis`, and `offset` set to `next`.
@@ -117,7 +122,8 @@ for a model reading a few pages.
 
 ## The schema is also a resource
 
-`factlite://NAME/schema`, one per store, read at the head. Its text is the
+`factlite://stores/NAME/schema`, one per store. The name is in the path,
+which is case-sensitive, not in the authority, which a client may lowercase, read at the head. Its text is the
 `schema` tool's result without a page cut. Hosts that show resources to the
 person or attach them to context can use it without a tool call.
 
@@ -149,8 +155,14 @@ raw tool output and personal data must not be written.
   `tools/call`, `resources/list`, `resources/read`,
   `resources/templates/list`.
 - **Notifications** are accepted and ignored.
-- **Batches** are refused with -32600; current revisions do not have them.
-- **A null `id`** is refused with -32600, as the specification requires.
+- **Batches** are answered entry by entry. `2025-03-26` allows them and
+  later revisions removed them; a client of a later revision does not send
+  them.
+- **Ids** are strings or integers. A null or fractional `id` is refused with
+  -32600, as the specification requires.
+- **`initialize`** requires `capabilities` and `clientInfo` objects; the
+  stateless form requires `clientCapabilities` to be an object.
+- **No list is paged,** so any `cursor` is refused with -32602.
 - **Unknown members of MCP params are ignored,** because the protocol adds
   them between revisions. Unknown members of a tool's `arguments` are refused.
 - **Capabilities:** `tools` and `resources`, with no list-changed or

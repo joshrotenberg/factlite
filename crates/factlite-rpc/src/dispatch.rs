@@ -279,10 +279,12 @@ impl Dispatcher {
                 params.finish()?;
                 let store = self.conn(&handle)?.writer()?;
                 let request = wire::decode_tx(request.get())?;
-                if self.options.require_idempotency_key && request.idempotency_key().is_none() {
+                if self.options.require_idempotency_key
+                    && request.idempotency_key().is_none_or(str::is_empty)
+                {
                     return Err(Failure::invalid(
                         "idempotency_key",
-                        "this server requires an idempotency key on every transaction",
+                        "this server requires a non-empty idempotency key on every transaction",
                     ));
                 }
                 Ok(Reply::Value(wire::encode_report(&store.commit(request)?)))

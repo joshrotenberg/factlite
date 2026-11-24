@@ -928,8 +928,9 @@ Plan item 14.3, designed in `design/mcp.md`. Decisions made while building it:
 - **Stores are named at start-up, never opened by a tool.** No tool takes a
   path, so a model reaches only the files its operator named.
 - **Read-only unless bound writable, at the connection.** A read-only binding
-  opens a read-only connection, which cannot create, upgrade or write a file,
-  and `transact` is not listed when no store is writable.
+  opens a read-only connection, which cannot create, upgrade or write the
+  store, and `transact` is not listed when no store is writable. SQLite still
+  creates its sidecar files, so the store's directory must be writable.
 - **Results are one text block.** No `structuredContent` and no output
   schema, so a result is never sent twice.
 - **Wrong arguments are tool errors.** Only an unknown tool or `arguments`
@@ -949,6 +950,16 @@ Plan item 14.3, designed in `design/mcp.md`. Decisions made while building it:
 - **Unknown MCP params members are ignored; unknown tool arguments are
   refused.** The protocol grows between revisions; a tool's arguments are
   this server's contract.
-- **Annotations:** reads are read-only; `transact` is not destructive,
-  because every earlier state stays readable, and is idempotent, because a
-  key is required.
+- **Annotations:** reads are read-only; `transact` is destructive, because a
+  retraction or replacement changes the current state even though history
+  keeps it, and idempotent, because a non-empty key is required.
+- **Resource URIs put the store name in the path:**
+  `factlite://stores/NAME/schema`. Names are case-sensitive and a URI's
+  authority is not.
+- **Batches are accepted.** The 2025-03-26 revision allows them; refusing
+  them would break that revision, and later clients do not send them.
+- **Schemas are as strict as the decoders where JSON Schema can say so:**
+  tagged values, change entities, query terms, patterns and predicates,
+  `offset` needing `at`, a non-empty key, and the operator's metadata keys.
+  One difference is left: JSON Schema counts `1.0` as an integer and the
+  wire contract does not; the descriptions say so.

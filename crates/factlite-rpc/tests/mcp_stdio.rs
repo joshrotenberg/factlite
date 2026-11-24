@@ -176,7 +176,7 @@ fn the_stateless_revision_is_served_per_request() {
     );
     let read = server.ok(
         "resources/read",
-        json!({"_meta": meta(), "uri": "factlite://notes/schema"}),
+        json!({"_meta": meta(), "uri": "factlite://stores/notes/schema"}),
     );
     assert_eq!(read["ttlMs"], 0);
 
@@ -218,7 +218,9 @@ fn protocol_errors_use_the_standard_codes_and_notifications_are_never_answered()
 
     for (line, code) in [
         ("not json", -32700),
-        (r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#, -32600),
+        ("[]", -32600),
+        (r#"{"jsonrpc":"2.0","id":1.5,"method":"ping"}"#, -32600),
+        (r#"{"jsonrpc":"2.0","id":1e3,"method":"ping"}"#, -32600),
         (r#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#, -32600),
         (r#"{"jsonrpc":"2.0","id":true,"method":"ping"}"#, -32600),
         (r#"{"jsonrpc":"2.0","id":1,"id":2,"method":"ping"}"#, -32600),
@@ -241,7 +243,10 @@ fn protocol_errors_use_the_standard_codes_and_notifications_are_never_answered()
     assert_eq!(server.err("prompts/list", json!({}))["code"], -32601);
     assert_eq!(server.err("tools/list", json!([]))["code"], -32602);
     // Unknown members of MCP params are ignored; the protocol adds them.
-    server.ok("tools/list", json!({"cursor": "x", "future": 1}));
+    server.ok(
+        "tools/list",
+        json!({"future": 1, "_meta": {"progressToken": 3}}),
+    );
     assert_eq!(
         server.err("tools/call", json!({"arguments": {}}))["code"],
         -32602
@@ -463,6 +468,15 @@ fn pages_of_one_read_tile_its_result_at_the_first_basis_while_others_commit() {
     type Whole = Box<dyn Fn(&Db) -> Json>;
     let cases: Vec<(&str, Json, &str, Whole, Option<u64>)> = vec![
         (
+            "schema",
+            json!({}),
+            "schema",
+            Box::new(|db: &Db| {
+                parse(&wire::encode_schema(&db.schema().unwrap()))["schema"].clone()
+            }),
+            Some(1),
+        ),
+        (
             "facts",
             json!({"filter": {"attr": "note/id"}}),
             "facts",
@@ -574,25 +588,36 @@ fn a_page_is_cut_by_bytes_but_always_holds_one_item() {
     initialize(&mut server, "2025-11-25");
 
     let mut arguments = json!({"filter": {"attr": "note/text"}});
-    let mut seen = 0;
+    let mut pages: Vec<Vec<usize>> = Vec::new();
     loop {
         let result = tool(&mut server, "facts", arguments.clone());
         let items = result["value"]["facts"].as_array().unwrap();
-        let bytes: usize = items.iter().map(|item| item.to_string().len()).sum();
-        assert!(!items.is_empty());
-        assert!(
-            items.len() == 1 || bytes <= 300,
-            "{bytes} bytes in {} items",
-            items.len()
-        );
-        seen += items.len();
+        pages.push(items.iter().map(|item| item.to_string().len()).collect());
         let Some(next) = result["page"].get("next") else {
             break;
         };
         arguments["at"] = result["basis"].clone();
         arguments["offset"] = next.clone();
     }
-    assert_eq!(seen, 12);
+    assert_eq!(pages.iter().map(Vec::len).sum::<usize>(), 12);
+    // Each page holds as many items as fit in 300 bytes, and at least one:
+    // a page under the bound would have had room for the next page's first
+    // item otherwise.
+    for (index, page) in pages.iter().enumerate() {
+        let bytes: usize = page.iter().sum();
+        assert!(!page.is_empty());
+        assert!(page.len() == 1 || bytes <= 300, "{bytes} bytes in {page:?}");
+        if let Some(next) = pages.get(index + 1) {
+            assert!(
+                bytes + next[0] > 300,
+                "page {index} had room: {page:?} then {next:?}"
+            );
+        }
+    }
+    assert!(
+        pages.iter().any(|page| page.len() > 1),
+        "the bound allows several items"
+    );
 
     let mut args: Vec<String> = bind("--store", "notes", &path).into();
     args.extend(["--page-bytes".into(), "0".into()]);
@@ -772,16 +797,25 @@ fn each_store_schema_is_a_resource() {
         .iter()
         .map(|resource| resource["uri"].as_str().unwrap())
         .collect();
-    assert_eq!(uris, ["factlite://alpha/schema", "factlite://beta/schema"]);
+    assert_eq!(
+        uris,
+        [
+            "factlite://stores/alpha/schema",
+            "factlite://stores/beta/schema"
+        ]
+    );
     assert_eq!(
         server.ok("resources/templates/list", json!({})),
         json!({"resourceTemplates": []})
     );
 
-    let read = server.ok("resources/read", json!({"uri": "factlite://alpha/schema"}));
+    let read = server.ok(
+        "resources/read",
+        json!({"uri": "factlite://stores/alpha/schema"}),
+    );
     let contents = read["contents"].as_array().unwrap();
     assert_eq!(contents.len(), 1);
-    assert_eq!(contents[0]["uri"], "factlite://alpha/schema");
+    assert_eq!(contents[0]["uri"], "factlite://stores/alpha/schema");
     assert_eq!(contents[0]["mimeType"], "application/json");
     let schema = parse(contents[0]["text"].as_str().unwrap());
     let view = Db::open_read_only(&first).unwrap();
@@ -789,18 +823,27 @@ fn each_store_schema_is_a_resource() {
         schema["value"],
         parse(&wire::encode_schema(&view.schema().unwrap()))
     );
-    let empty = server.ok("resources/read", json!({"uri": "factlite://beta/schema"}));
+    let empty = server.ok(
+        "resources/read",
+        json!({"uri": "factlite://stores/beta/schema"}),
+    );
     assert_eq!(
         parse(empty["contents"][0]["text"].as_str().unwrap())["value"]["schema"],
         json!([])
     );
 
-    let missing = server.err("resources/read", json!({"uri": "factlite://gamma/schema"}));
-    assert_eq!(missing["code"], -32002);
-    assert_eq!(missing["data"], json!({"uri": "factlite://gamma/schema"}));
     let missing = server.err(
         "resources/read",
-        json!({"_meta": meta(), "uri": "factlite://alpha/facts"}),
+        json!({"uri": "factlite://stores/gamma/schema"}),
+    );
+    assert_eq!(missing["code"], -32002);
+    assert_eq!(
+        missing["data"],
+        json!({"uri": "factlite://stores/gamma/schema"})
+    );
+    let missing = server.err(
+        "resources/read",
+        json!({"_meta": meta(), "uri": "factlite://stores/alpha/facts"}),
     );
     assert_eq!(missing["code"], -32602);
     assert_eq!(server.err("resources/read", json!({}))["code"], -32602);
@@ -872,6 +915,9 @@ fn start_up_refuses_bad_arguments_before_reading_anything() {
 /// Returns the path of the first violation.
 fn violation(schema: &Json, value: &Json, at: &str) -> Option<String> {
     let fail = || Some(at.to_owned());
+    if schema == &json!(false) {
+        return fail();
+    }
     if let Some(types) = schema.get("type") {
         let kinds: Vec<&str> = match types {
             Json::String(kind) => vec![kind.as_str()],
@@ -882,7 +928,8 @@ fn violation(schema: &Json, value: &Json, at: &str) -> Option<String> {
             "object" => value.is_object(),
             "array" => value.is_array(),
             "string" => value.is_string(),
-            "integer" => value.is_u64() || value.is_i64(),
+            // JSON Schema counts 1.0 as an integer.
+            "integer" => value.as_f64().is_some_and(|number| number.fract() == 0.0),
             "boolean" => value.is_boolean(),
             other => panic!("type {other} at {at}"),
         });
@@ -900,18 +947,47 @@ fn violation(schema: &Json, value: &Json, at: &str) -> Option<String> {
     {
         return fail();
     }
-    if let Some(minimum) = schema.get("minimum")
-        && value
-            .as_i64()
-            .is_some_and(|number| number < minimum.as_i64().unwrap())
+    if let Some(inner) = schema.get("not")
+        && violation(inner, value, at).is_none()
     {
         return fail();
     }
-    if schema.get("pattern").is_some() {
-        // The one pattern used: canonical unsigned decimal.
-        assert_eq!(schema["pattern"], "^(0|[1-9][0-9]*)$");
-        let text = value.as_str().unwrap_or("");
-        if text.parse::<Revision>().is_err() {
+    if let Some(options) = schema.get("oneOf") {
+        let matching = options
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|option| violation(option, value, at).is_none())
+            .count();
+        if matching != 1 {
+            return fail();
+        }
+    }
+    if let Some(minimum) = schema.get("minimum")
+        && value
+            .as_f64()
+            .is_some_and(|number| number < minimum.as_f64().unwrap())
+    {
+        return fail();
+    }
+    if let Some(text) = value.as_str() {
+        if schema
+            .get("minLength")
+            .is_some_and(|min| (text.chars().count() as u64) < min.as_u64().unwrap())
+        {
+            return fail();
+        }
+        // The two patterns the schemas use, checked without a regex engine.
+        let matches = match schema.get("pattern").and_then(Json::as_str) {
+            None => true,
+            Some("^(0|[1-9][0-9]*)$") => text.parse::<Revision>().is_ok(),
+            Some("^[+-]?[0-9]+$") => {
+                let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+                !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+            }
+            Some(other) => panic!("pattern {other} at {at}"),
+        };
+        if !matches {
             return fail();
         }
     }
@@ -926,11 +1002,15 @@ fn violation(schema: &Json, value: &Json, at: &str) -> Option<String> {
         {
             return fail();
         }
-        if let Some(item) = schema.get("items") {
-            for (index, element) in items.iter().enumerate() {
-                if let Some(path) = violation(item, element, &format!("{at}[{index}]")) {
-                    return Some(path);
-                }
+        let prefix = schema.get("prefixItems").and_then(Json::as_array);
+        for (index, element) in items.iter().enumerate() {
+            let item = prefix
+                .and_then(|prefix| prefix.get(index))
+                .or_else(|| schema.get("items"));
+            if let Some(item) = item
+                && let Some(path) = violation(item, element, &format!("{at}[{index}]"))
+            {
+                return Some(path);
             }
         }
     }
@@ -956,17 +1036,30 @@ fn violation(schema: &Json, value: &Json, at: &str) -> Option<String> {
                 return Some(format!("{at}.{}", required.as_str().unwrap()));
             }
         }
-        for (key, member) in members {
-            match properties.and_then(|properties| properties.get(key)) {
-                Some(property) => {
-                    if let Some(path) = violation(property, member, &format!("{at}.{key}")) {
-                        return Some(path);
+        if let Some(dependent) = schema.get("dependentRequired").and_then(Json::as_object) {
+            for (key, needs) in dependent {
+                if members.contains_key(key) {
+                    for need in needs.as_array().unwrap() {
+                        if !members.contains_key(need.as_str().unwrap()) {
+                            return Some(format!("{at}.{}", need.as_str().unwrap()));
+                        }
                     }
                 }
-                None if schema.get("additionalProperties") == Some(&json!(false)) => {
-                    return Some(format!("{at}.{key}"));
-                }
-                None => {}
+            }
+        }
+        for (key, member) in members {
+            if let Some(names) = schema.get("propertyNames")
+                && violation(names, &json!(key), &format!("{at}.{key}")).is_some()
+            {
+                return Some(format!("{at}.{key}"));
+            }
+            let rule = properties
+                .and_then(|properties| properties.get(key))
+                .or_else(|| schema.get("additionalProperties"));
+            if let Some(rule) = rule
+                && let Some(path) = violation(rule, member, &format!("{at}.{key}"))
+            {
+                return Some(path);
             }
         }
     }
@@ -980,6 +1073,7 @@ fn published_input_schemas_accept_what_the_tools_accept_and_name_every_argument(
     store_with(&path, 3);
     let mut args: Vec<String> = bind("--writable-store", "notes", &path).into();
     args.extend(bind("--store", "copy", &path));
+    args.extend(["--metadata".into(), "agent=tester".into()]);
     let mut server = start(&args);
     initialize(&mut server, "2025-11-25");
     let tools: Vec<Json> = server.ok("tools/list", json!({}))["tools"]
@@ -1012,7 +1106,7 @@ fn published_input_schemas_accept_what_the_tools_accept_and_name_every_argument(
         let writes = tool["name"] == "transact";
         assert_eq!(
             tool["annotations"],
-            json!({"readOnlyHint": !writes, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
+            json!({"readOnlyHint": !writes, "destructiveHint": writes, "idempotentHint": true, "openWorldHint": false})
         );
     }
     let schema_of =
@@ -1091,6 +1185,39 @@ fn published_input_schemas_accept_what_the_tools_accept_and_name_every_argument(
     }
     // Arguments every schema refuses and the tools refuse too.
     let refused = [
+        (
+            "transact",
+            json!({"store": "notes", "tx": {"version": 1, "idempotency_key": "k", "metadata": {"agent": {"string": "x"}}}}),
+        ),
+        ("schema", json!({"store": "notes", "offset": 1})),
+        (
+            "lookup",
+            json!({"store": "notes", "attr": "note/id", "value": {"string": 1}}),
+        ),
+        (
+            "lookup",
+            json!({"store": "notes", "attr": "note/id", "value": {"text": "a"}}),
+        ),
+        (
+            "query",
+            json!({"store": "notes", "query": {"version": 1, "query": {"match": [[0, 0, 0]], "select": []}}}),
+        ),
+        (
+            "query",
+            json!({"store": "notes", "query": {"version": 1, "query": {"match": [[{"var": "n"}, "note/id", {"var": "v"}]], "select": [], "where": [{"left": {"var": "v"}, "op": "like", "right": {"var": "v"}}]}}}),
+        ),
+        (
+            "transact",
+            json!({"store": "notes", "tx": {"version": 1, "idempotency_key": ""}}),
+        ),
+        (
+            "transact",
+            json!({"store": "notes", "tx": {"version": 1, "idempotency_key": "k", "metadata": {"why": {"ref": {"id": entity}}}}}),
+        ),
+        (
+            "transact",
+            json!({"store": "notes", "tx": {"version": 1, "idempotency_key": "k", "changes": [{"op": "assert", "entity": {"name": "x"}, "attr": "note/rank", "value": {"i64": "1"}}]}}),
+        ),
         ("head", json!({"store": "nope"})),
         ("head", json!({"handle": "h1"})),
         (
@@ -1183,4 +1310,137 @@ fn read_only_stores_open_read_only_and_structural_validation_skips_the_log() {
             json!(["notes"])
         );
     }
+}
+
+#[test]
+fn batches_strict_params_and_notifications_that_would_write() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("notes.sqlite");
+    store_with(&path, 1);
+    let mut server = start(&bind("--writable-store", "notes", &path));
+
+    // A batch, which the 2025-03-26 revision allows, is answered per entry.
+    server.send(
+        r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"},7,{"jsonrpc":"2.0","id":2,"method":"tools/list"}]"#,
+    );
+    let responses = server.response();
+    let responses = responses.as_array().unwrap();
+    assert_eq!(responses.len(), 3, "{responses:?}");
+    assert_eq!(
+        responses[0],
+        json!({"jsonrpc": "2.0", "id": 1, "result": {}})
+    );
+    assert_eq!(responses[1]["error"]["code"], -32600);
+    assert_eq!(responses[2]["id"], 2);
+    assert_eq!(responses[2]["result"]["tools"].as_array().unwrap().len(), 9);
+
+    // initialize needs the client's capabilities and information as objects.
+    for params in [
+        json!({"protocolVersion": "2025-11-25", "clientInfo": {"name": "t", "version": "0"}}),
+        json!({"protocolVersion": "2025-11-25", "capabilities": {}}),
+        json!({"protocolVersion": "2025-11-25", "capabilities": [], "clientInfo": {"name": "t", "version": "0"}}),
+        json!({"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": 0}),
+    ] {
+        assert_eq!(
+            server.err("initialize", params.clone())["code"],
+            -32602,
+            "{params}"
+        );
+    }
+    // The stateless revision needs capabilities as an object.
+    for capabilities in [json!(null), json!(42), json!("x")] {
+        let error = server.err(
+            "server/discover",
+            json!({"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": capabilities}}),
+        );
+        assert_eq!(error["code"], -32602);
+    }
+    let error = server.err(
+        "server/discover",
+        json!({"_meta": {"io.modelcontextprotocol/protocolVersion": "2025-11-25",
+            "io.modelcontextprotocol/clientCapabilities": {}}}),
+    );
+    assert!(
+        error["message"].as_str().unwrap().contains("2026-07-28"),
+        "{error}"
+    );
+    // No list is paged, so no cursor is valid.
+    for method in ["tools/list", "resources/list", "resources/templates/list"] {
+        for cursor in [json!("abc"), json!(false)] {
+            assert_eq!(
+                server.err(method, json!({"cursor": cursor}))["code"],
+                -32602,
+                "{method}"
+            );
+        }
+    }
+    // An unknown tool is a protocol error even when its arguments are bad.
+    server.send(
+        r#"{"jsonrpc":"2.0","id":"t","method":"tools/call","params":{"name":"not_a_tool","arguments":{"a":1,"a":2}}}"#,
+    );
+    assert_eq!(server.response()["error"]["code"], -32602);
+
+    // A write sent as a notification is not executed.
+    server.send(
+        &json!({"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "transact",
+            "arguments": {"tx": {"version": 1, "idempotency_key": "quiet"}}}})
+        .to_string(),
+    );
+    let head = tool(&mut server, "head", json!({}));
+    assert_eq!(head["snapshot"]["revision"], "2");
+    // An empty key is not a key.
+    let empty = tool_error(
+        &mut server,
+        "transact",
+        json!({"tx": {"version": 1, "idempotency_key": ""}}),
+        "InvalidRequest",
+    );
+    assert_eq!(empty["context"]["field"], "idempotency_key");
+
+    // A failing tool in the stateless form is still a result.
+    let failed = server.ok(
+        "tools/call",
+        json!({"_meta": meta(), "name": "facts", "arguments": {"filter": {"attr": "note/none"}}}),
+    );
+    assert_eq!(failed["isError"], true);
+    assert_eq!(failed["resultType"], "complete");
+    assert_eq!(text_of(&failed)["error"]["code"], "UnknownAttribute");
+}
+
+#[test]
+fn store_names_that_differ_only_in_case_have_distinct_resources() {
+    let directory = tempfile::tempdir().unwrap();
+    let full = directory.path().join("full.sqlite");
+    let empty = directory.path().join("empty.sqlite");
+    store_with(&full, 0);
+    Store::open(&empty).unwrap();
+    let mut args: Vec<String> = bind("--store", "Upper", &full).into();
+    args.extend(bind("--store", "upper", &empty));
+    let mut server = start(&args);
+    let schema_of = |server: &mut Server, uri: &str| {
+        let read = server.ok("resources/read", json!({"uri": uri}));
+        parse(read["contents"][0]["text"].as_str().unwrap())["value"]["schema"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    assert_eq!(schema_of(&mut server, "factlite://stores/Upper/schema"), 3);
+    assert_eq!(schema_of(&mut server, "factlite://stores/upper/schema"), 0);
+    // The name sits in the path, so the authority is the same lowercase
+    // word for every store and normalizing it changes nothing.
+    let listed = server.ok("resources/list", json!({}));
+    let uris: Vec<&str> = listed["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|resource| resource["uri"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        uris,
+        [
+            "factlite://stores/Upper/schema",
+            "factlite://stores/upper/schema"
+        ]
+    );
 }

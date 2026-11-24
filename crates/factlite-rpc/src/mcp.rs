@@ -64,7 +64,8 @@ pub struct McpOptions {
     pub metadata: Vec<(String, String)>,
     /// The most items one page holds.
     pub page_items: usize,
-    /// The most bytes of items one page holds, beyond its first item.
+    /// The most bytes of items one page holds. A page still holds one item
+    /// when that item alone is larger.
     pub page_bytes: usize,
     /// The longest accepted line.
     pub max_line_bytes: usize,
@@ -276,13 +277,41 @@ impl McpServer {
     }
 
     /// Handles one line. Returns the line to send, if any.
+    ///
+    /// A batch is answered entry by entry. The 2025-03-26 revision allows
+    /// batches and later revisions removed them; accepting them costs a
+    /// client of a later revision nothing, since it does not send them.
     fn message(&mut self, text: &str) -> Option<String> {
+        match Top::parse(text) {
+            Ok(Top::Array(entries)) => {
+                if entries.is_empty() {
+                    return Some(server::failure(
+                        "null",
+                        INVALID_REQUEST,
+                        "a batch must not be empty",
+                        None,
+                    ));
+                }
+                let responses: Vec<String> = entries
+                    .iter()
+                    .filter_map(|entry| self.entry(Top::parse(entry.get()), true))
+                    .collect();
+                (!responses.is_empty()).then(|| format!("[{}]", responses.join(",")))
+            }
+            top => self.entry(top, false),
+        }
+    }
+
+    /// Handles one request object, alone or as a batch entry.
+    fn entry(&mut self, top: Result<Top, Malformed>, in_batch: bool) -> Option<String> {
         let invalid = |message: &str| Some(server::failure("null", INVALID_REQUEST, message, None));
-        let members = match Top::parse(text) {
+        let members = match top {
             Ok(Top::Object(members)) => members,
-            Ok(Top::Array(_)) => return invalid("batches are not supported"),
-            Ok(Top::Scalar) => return invalid("a request must be an object"),
+            Ok(Top::Array(_)) if in_batch => return invalid("a batch entry must be an object"),
+            Ok(_) => return invalid("a request must be an object"),
             Err(Malformed::Duplicate(message)) => return invalid(&message),
+            // A batch entry was read as JSON with its line.
+            Err(Malformed::Syntax(message)) if in_batch => return invalid(&message),
             Err(Malformed::Syntax(message)) => {
                 return Some(server::failure("null", PARSE_ERROR, &message, None));
             }
@@ -295,8 +324,18 @@ impl McpServer {
         // here: there is no session to initialize and no call to cancel
         // while this one is running.
         let id = request.id?;
-        if json::kind(&id) == Kind::Null {
-            return invalid("id must be a string or a number");
+        // MCP narrows JSON-RPC ids to strings and integers, never null.
+        let integer = |text: &str| {
+            let digits = text.strip_prefix('-').unwrap_or(text);
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        };
+        let valid = match json::kind(&id) {
+            Kind::String => true,
+            Kind::Number => integer(id.get()),
+            _ => false,
+        };
+        if !valid {
+            return invalid("id must be a string or an integer");
         }
         Some(
             match self.respond(&request.method, request.params.as_deref()) {
@@ -332,6 +371,11 @@ impl McpServer {
                     .as_deref()
                     .and_then(json::string)
                     .ok_or_else(|| ProtocolError::params("protocolVersion must be a string"))?;
+                for member in ["capabilities", "clientInfo"] {
+                    if params.take(member).as_deref().map(json::kind) != Some(Kind::Object) {
+                        return Err(ProtocolError::params(format!("{member} must be an object")));
+                    }
+                }
                 let version = HANDSHAKE_REVISIONS
                     .into_iter()
                     .find(|revision| *revision == requested)
@@ -347,7 +391,7 @@ impl McpServer {
             "server/discover" => {
                 if era != Era::Stateless {
                     return Err(ProtocolError::params(format!(
-                        "server/discover needs params._meta with {PROTOCOL_VERSION}"
+                        "server/discover belongs to revision {STATELESS_REVISION}: name it as {PROTOCOL_VERSION} in params._meta"
                     )));
                 }
                 let mut versions = vec![STATELESS_REVISION];
@@ -362,13 +406,21 @@ impl McpServer {
                 )
             }
             "ping" => json!({}),
-            "tools/list" => cached(json!({"tools": self.tools()}), FIXED_LIST_TTL_MS),
+            "tools/list" => {
+                no_cursor(&mut params)?;
+                cached(json!({"tools": self.tools()}), FIXED_LIST_TTL_MS)
+            }
             "tools/call" => {
                 let name = params
                     .take("name")
                     .as_deref()
                     .and_then(json::string)
                     .ok_or_else(|| ProtocolError::params("name must be a string"))?;
+                let tool = Tool::ALL
+                    .into_iter()
+                    .find(|tool| tool.name() == name)
+                    .filter(|tool| *tool != Tool::Transact || self.any_writable())
+                    .ok_or_else(|| ProtocolError::params(format!("Unknown tool: {name}")))?;
                 let arguments = match params.take("arguments") {
                     None => Members::default(),
                     Some(raw) => match Top::parse(raw.get()) {
@@ -380,11 +432,6 @@ impl McpServer {
                         }
                     },
                 };
-                let tool = Tool::ALL
-                    .into_iter()
-                    .find(|tool| tool.name() == name)
-                    .filter(|tool| *tool != Tool::Transact || self.any_writable())
-                    .ok_or_else(|| ProtocolError::params(format!("Unknown tool: {name}")))?;
                 match self.call(tool, arguments) {
                     Ok(text) => {
                         json!({"content": [{"type": "text", "text": text}], "isError": false})
@@ -392,8 +439,10 @@ impl McpServer {
                     Err(failure) => tool_error(&failure_json(&failure)),
                 }
             }
-            "resources/list" => cached(
-                json!({"resources": self.stores.iter().map(|store| json!({
+            "resources/list" => {
+                no_cursor(&mut params)?;
+                cached(
+                    json!({"resources": self.stores.iter().map(|store| json!({
                     "uri": schema_uri(&store.name),
                     "name": format!("{}-schema", store.name),
                     "description": format!(
@@ -402,9 +451,11 @@ impl McpServer {
                     ),
                     "mimeType": "application/json",
                 })).collect::<Vec<_>>()}),
-                FIXED_LIST_TTL_MS,
-            ),
+                    FIXED_LIST_TTL_MS,
+                )
+            }
             "resources/templates/list" => {
+                no_cursor(&mut params)?;
                 cached(json!({"resourceTemplates": []}), FIXED_LIST_TTL_MS)
             }
             "resources/read" => {
@@ -464,6 +515,9 @@ impl McpServer {
         };
         let mut meta = match Top::parse(meta.get()) {
             Ok(Top::Object(members)) => members,
+            Err(Malformed::Duplicate(message)) => {
+                return Err(ProtocolError::params(format!("_meta: {message}")));
+            }
             _ => return Err(ProtocolError::params("_meta must be an object")),
         };
         let Some(version) = meta.take(PROTOCOL_VERSION) else {
@@ -472,9 +526,9 @@ impl McpServer {
         let version = json::string(&version)
             .ok_or_else(|| ProtocolError::params(format!("{PROTOCOL_VERSION} must be a string")))?;
         if version == STATELESS_REVISION {
-            if meta.take(CLIENT_CAPABILITIES).is_none() {
+            if meta.take(CLIENT_CAPABILITIES).as_deref().map(json::kind) != Some(Kind::Object) {
                 return Err(ProtocolError::params(format!(
-                    "_meta is missing {CLIENT_CAPABILITIES}"
+                    "_meta needs {CLIENT_CAPABILITIES}, an object"
                 )));
             }
             return Ok(Era::Stateless);
@@ -669,29 +723,41 @@ impl McpServer {
                     properties["offset"] = json!({
                         "type": "integer",
                         "minimum": 0,
-                        "description": "Skip this many items. Needs at. Use page.next from the previous page.",
+                        "description": "Skip this many items. Needs at. Use page.next from the previous page. Written without a fraction or exponent.",
                     });
                     properties["limit"] = json!({
                         "type": "integer",
                         "minimum": 1,
                         "description": format!(
-                            "Return at most this many items. The server's page holds at most {}.",
+                            "Return at most this many items. The server's page holds at most {}. Written without a fraction or exponent.",
                             self.options.page_items
                         ),
                     });
                 }
+                if writes && !self.options.metadata.is_empty() {
+                    let reserved: Vec<&str> =
+                        self.options.metadata.iter().map(|(key, _)| key.as_str()).collect();
+                    properties["tx"]["properties"]["metadata"]["propertyNames"] =
+                        json!({"not": {"enum": reserved}});
+                }
+                let mut schema = json!({
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": false,
+                });
+                if tool.items().is_some() {
+                    schema["dependentRequired"] = json!({"offset": ["at"]});
+                }
                 json!({
                     "name": tool.name(),
                     "description": description,
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": required,
-                        "additionalProperties": false,
-                    },
+                    "inputSchema": schema,
                     "annotations": {
                         "readOnlyHint": !writes,
-                        "destructiveHint": false,
+                        // A retraction or a replacement changes the current
+                        // state, though every earlier state stays readable.
+                        "destructiveHint": writes,
                         "idempotentHint": true,
                         "openWorldHint": false,
                     },
@@ -721,7 +787,7 @@ impl McpServer {
             "Factlite stores typed facts (entity, attribute, value) with full history. Stores: {stores}.\n\
              - Values are tagged with their type: {{\"string\":\"x\"}}, {{\"i64\":\"3\"}}, {{\"f64\":\"1.5\"}}, {{\"bool\":true}}, {{\"keyword\":\"ns/name\"}}, {{\"inst\":\"<milliseconds since 1970>\"}}, {{\"bytes\":\"<base64>\"}}, {{\"ref\":{{\"id\":\"e1...\"}}}}. Integers are decimal strings.\n\
              - Call schema first: attributes must be defined before use and never change.\n\
-             - Every read returns basis, the snapshot it used. Pass it as at to later reads to see the same state while others write. Without at a read uses the latest state.\n\
+             - Every read except head returns basis, the snapshot it used, and takes at. Pass basis as at to later reads to see the same state while others write. Without at a read uses the latest state.\n\
              - Long results come in pages. When page.next is present, repeat the call with the same arguments, at set to basis and offset set to page.next.\n\
              - Nothing is overwritten: history lists every past value, and a read at an old basis returns the old state.\n"
         );
@@ -733,6 +799,18 @@ impl McpServer {
                  - Facts are permanent. Nothing written can be deleted, and a retracted value stays in history. Never write secrets, credentials, raw tool or file output, conversation text, or personal data. Write a reference and a short summary instead.\n\
                  - head returns now, the current time as an inst, for timestamps you write. Take it once per step so a retry is identical.\n",
             );
+            if !self.options.metadata.is_empty() {
+                let keys: Vec<&str> = self
+                    .options
+                    .metadata
+                    .iter()
+                    .map(|(key, _)| key.as_str())
+                    .collect();
+                text.push_str(&format!(
+                    "- The server adds these metadata keys to every transaction; do not send them: {}.\n",
+                    keys.join(", ")
+                ));
+            }
         }
         text
     }
@@ -742,8 +820,20 @@ fn server_info() -> Json {
     json!({"name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION")})
 }
 
+/// The store name is in the path, which is case-sensitive; a URI host is
+/// not, and a client may lowercase it.
 fn schema_uri(store: &str) -> String {
-    format!("factlite://{store}/schema")
+    format!("factlite://stores/{store}/schema")
+}
+
+/// Refuses a `cursor`: this server never returns one, so none is valid.
+fn no_cursor(params: &mut Members) -> Result<(), ProtocolError> {
+    match params.take("cursor") {
+        None => Ok(()),
+        Some(_) => Err(ProtocolError::params(
+            "unknown cursor: no list here is paged",
+        )),
+    }
 }
 
 fn now_millis() -> i64 {
@@ -825,18 +915,98 @@ fn stamp(request: &RawValue, metadata: &[(String, String)]) -> Result<String, Fa
     Ok(object(stamped))
 }
 
+/// One tagged value. `reference` is the schema of a `ref` value's target,
+/// or `false` where references are not allowed.
+fn tagged(reference: Json) -> Json {
+    let decimal = json!({"type": "string", "pattern": "^[+-]?[0-9]+$"});
+    json!({
+        "type": "object",
+        "properties": {
+            "bool": {"type": "boolean"},
+            "i64": decimal,
+            "inst": decimal,
+            "f64": {"type": "string"},
+            "string": {"type": "string"},
+            "bytes": {"type": "string"},
+            "keyword": {"type": "string"},
+            "ref": reference,
+        },
+        "minProperties": 1,
+        "maxProperties": 1,
+        "additionalProperties": false,
+        "description": "One tagged value, such as {\"string\":\"x\"}, {\"i64\":\"3\"} or {\"ref\":{\"id\":\"e1...\"}}.",
+    })
+}
+
+/// An entity in a change: an id, a label declared in `new_entities`, or the
+/// owner of a unique value.
+fn change_entity(value: &Json) -> Json {
+    let one = |key: &str, inner: Json| {
+        json!({
+            "type": "object",
+            "properties": {key: inner},
+            "required": [key],
+            "additionalProperties": false,
+        })
+    };
+    json!({
+        "oneOf": [
+            one("id", json!({"type": "string"})),
+            one("temp", json!({"type": "string"})),
+            one("lookup", json!({
+                "type": "object",
+                "properties": {"attr": {"type": "string"}, "value": value},
+                "required": ["attr", "value"],
+                "additionalProperties": false,
+            })),
+        ],
+        "description": "{\"id\":\"e1...\"}, {\"temp\":\"label\"}, or {\"lookup\":{\"attr\":unique attribute,\"value\":tagged value}}.",
+    })
+}
+
+/// A query term: a variable, a parameter or a tagged value.
+fn term(value: &Json) -> Json {
+    let named = |key: &str| {
+        json!({
+            "type": "object",
+            "properties": {key: {"type": "string"}},
+            "required": [key],
+            "additionalProperties": false,
+        })
+    };
+    json!({"oneOf": [named("var"), named("param"), value]})
+}
+
+/// A query pattern: `[entity term, "attribute", value term]`.
+fn pattern(value: &Json) -> Json {
+    json!({
+        "type": "array",
+        "prefixItems": [term(value), {"type": "string"}, term(value)],
+        "minItems": 3,
+        "maxItems": 3,
+    })
+}
+
+/// A comparison of two terms.
+fn predicate(value: &Json) -> Json {
+    json!({
+        "type": "object",
+        "properties": {
+            "left": term(value),
+            "op": {"enum": ["eq", "ne", "lt", "le", "gt", "ge"]},
+            "right": term(value),
+        },
+        "required": ["left", "op", "right"],
+        "additionalProperties": false,
+    })
+}
+
 /// A tool's description, the properties of its arguments, and which are
 /// required. `store`, `offset` and `limit` are added by the caller.
 fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
     let at = json!({
         "type": ["object", "string"],
         "description": "Snapshot to read at: a basis or snapshot from an earlier result. Omit for the latest state.",
-    });
-    let value = json!({
-        "type": "object",
-        "minProperties": 1,
-        "maxProperties": 1,
-        "description": "One tagged value, such as {\"string\":\"x\"} or {\"i64\":\"3\"}.",
     });
     let entity = json!({
         "type": "object",
@@ -845,6 +1015,7 @@ fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
         "additionalProperties": false,
         "description": "An existing entity: {\"id\":\"e1...\"}.",
     });
+    let value = tagged(entity.clone());
     let attr = json!({"type": "string", "description": "Attribute name, namespace/name."});
     let filter = json!({
         "type": "object",
@@ -908,11 +1079,11 @@ fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
                             "type": "object",
                             "properties": {
                                 "inputs": {"type": "object", "description": "Declared parameters: name to value type."},
-                                "match": {"type": "array", "items": {"type": "array", "minItems": 3, "maxItems": 3}},
+                                "match": {"type": "array", "items": pattern(&value)},
                                 "where": {
                                     "type": "array",
                                     "description": "Comparisons: {\"left\":term,\"op\":\"eq|ne|lt|le|gt|ge\",\"right\":term}.",
-                                    "items": {"type": "object"},
+                                    "items": predicate(&value),
                                 },
                                 "not": {
                                     "type": "array",
@@ -932,7 +1103,7 @@ fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
                                     "description": "{\"fn\":\"count|count_distinct|sum|avg|min|max\",\"var\":name,\"name\":column}.",
                                     "items": {"type": "object"},
                                 },
-                                "having": {"type": "array", "items": {"type": "object"}},
+                                "having": {"type": "array", "items": predicate(&value)},
                             },
                             "required": ["match", "select"],
                             "additionalProperties": false,
@@ -953,7 +1124,7 @@ fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
                     "type": "object",
                     "properties": {
                         "version": {"const": 1},
-                        "idempotency_key": {"type": "string", "description": "Names this one intended change. Resend unchanged to retry."},
+                        "idempotency_key": {"type": "string", "minLength": 1, "description": "Names this one intended change. Resend unchanged to retry."},
                         "schema": {
                             "type": "array",
                             "description": "New attributes.",
@@ -980,15 +1151,9 @@ fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
                                 "type": "object",
                                 "properties": {
                                     "op": {"enum": ["assert", "retract"]},
-                                    "entity": {
-                                        "type": "object",
-                                        "description": "{\"id\":\"e1...\"}, {\"temp\":\"label\"}, or {\"lookup\":{\"attr\":unique attribute,\"value\":tagged value}}.",
-                                    },
+                                    "entity": change_entity(&value),
                                     "attr": {"type": "string"},
-                                    "value": {
-                                        "type": "object",
-                                        "description": "A tagged value. A reference may be {\"ref\":{\"temp\":\"label\"}} or {\"ref\":{\"lookup\":{...}}}.",
-                                    },
+                                    "value": tagged(change_entity(&value)),
                                 },
                                 "required": ["op", "entity", "attr", "value"],
                                 "additionalProperties": false,
@@ -1002,13 +1167,17 @@ fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
                                 "properties": {
                                     "entity": entity,
                                     "attr": {"type": "string"},
-                                    "values": {"type": "array", "items": {"type": "object"}},
+                                    "values": {"type": "array", "items": value},
                                 },
                                 "required": ["entity", "attr", "values"],
                                 "additionalProperties": false,
                             },
                         },
-                        "metadata": {"type": "object", "description": "Notes about this commit: name to tagged value."},
+                        "metadata": {
+                            "type": "object",
+                            "additionalProperties": tagged(json!(false)),
+                            "description": "Notes about this commit: name to tagged value, not a reference.",
+                        },
                         "expected_head": {"type": "object", "description": "Refuse the commit unless this snapshot is still the latest."},
                     },
                     "required": ["version", "idempotency_key"],

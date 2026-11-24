@@ -19,7 +19,7 @@ current.
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 291 pass locally with babashka installed and `REQUIRE_BB=1`,
+- **Tests:** 306 pass locally with babashka installed and `REQUIRE_BB=1`,
   including fifty-five 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions runs the same
   script and passed on PR 21's head with 247 tests on 2026-11-23, after the
@@ -972,7 +972,8 @@ current.
   instructions. Design: [`design/mcp.md`](design/mcp.md). Guide:
   [`mcp.md`](mcp.md).
 - **Decisions:** recorded in `decisions.md`, "MCP front end (2026-11-23)".
-- **Validation:** see the review record for this item.
+- **Validation:** `reviews/0058-mcp-front-end.md`, with Claude and Codex
+  subagent reviews and their outcomes; 306 tests in the local gate.
 - **Blockers:** none.
 - **What's next:** the user chooses among the remaining candidates in
   `design/agent-native.md` (full-text search, nested pull, a wait for a new

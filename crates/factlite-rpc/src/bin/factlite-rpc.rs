@@ -16,7 +16,7 @@ per line on stdout, diagnostics on stderr. The process ends at end of input or
 after a shutdown request.
 
 --max-line-bytes N           longest accepted line (default 16777216)
---require-idempotency-key    refuse a transact whose request has no key
+--require-idempotency-key    refuse a transact with no key or an empty key
 
 Methods: open close head verify transact schema facts pull lookup history
 transactions query backup shutdown. See docs/rpc.md.

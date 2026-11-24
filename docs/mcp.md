@@ -47,7 +47,7 @@ The model sees only the stores named here and cannot open any other file.
 | `--busy-timeout-ms MS` | How long to wait for another process's lock. Default 2000. |
 | `--metadata KEY=VALUE` | Add this string to every transaction's metadata. Repeatable. |
 | `--page-items N` | The most items in one page. Default 200. |
-| `--page-bytes N` | The most bytes of items in one page, beyond its first item. Default 262144. |
+| `--page-bytes N` | The most bytes of items in one page; a page still holds one item when that item alone is larger. Default 262144. |
 | `--max-line-bytes N` | The longest accepted message. Default 16 MiB. |
 
 `NAME` is letters, digits, `_` or `-`. Every store is opened before the first
@@ -85,8 +85,10 @@ is given and the store is writable; a read-only store is never created.
 ## Pages
 
 `schema`, `facts`, `history`, `transactions` and `query` return at most one
-page: `--page-items` items and `--page-bytes` bytes, whichever comes first,
-and always at least one item. `limit` makes a page smaller.
+page: `--page-items` items and `--page-bytes` bytes, whichever comes first.
+A page holds at least one item whenever one remains. `limit` makes a page
+smaller. An offset past the end gives an empty page whose `offset` is the
+total. `offset` and `limit` are written without a fraction or exponent.
 
 `page` is `{offset, count, total}`, with `next` when items remain. To read the
 next page, repeat the call with the same arguments, `at` set to the `basis`
@@ -99,7 +101,7 @@ across pages only when the query's `order` is total.
 
 ## Writes
 
-- **Every transaction needs `idempotency_key`.** The same request sent again
+- **Every transaction needs a non-empty `idempotency_key`.** The same request sent again
   returns the first report and commits nothing. The same key with a
   different request is refused with `IdempotencyConflict`.
 - **`--metadata` is added to every transaction.** A request that sets one of
@@ -111,7 +113,7 @@ across pages only when the query's `order` is total.
 
 ## Resources
 
-Each store's schema is a resource, `factlite://NAME/schema`, read at the
+Each store's schema is a resource, `factlite://stores/NAME/schema`, read at the
 latest revision.
 
 ## Protocol
@@ -122,16 +124,20 @@ latest revision.
   answered in the form of the revision it names.
 - **Capabilities:** tools and resources. No prompts, sampling, roots,
   logging, subscriptions or list-change notifications.
-- **Not supported:** batches, `null` ids, HTTP.
+- **Batches** are answered entry by entry, as `2025-03-26` allows.
+- **Not supported:** `null` or fractional ids, list cursors, HTTP.
 
 ## Tested
 
 In `crates/factlite-rpc/tests/mcp_stdio.rs`, against the real binary: the
 handshake of each revision and the per-request form of `2026-07-28`; protocol
-errors and notifications; each tool's result against the library; pages
-read while another process commits, joined and compared with the whole result
-at the first basis; byte-bounded pages; read-only bindings that cannot write
-or create a file; required keys, server metadata and replays; resources;
-start-up arguments; and the published input schemas against arguments the
-tools accept and refuse. The `2026-07-28` form is tested only against this
+errors, batches and notifications, including a write sent as one; each
+tool's result against the library; pages of five reads, each read while
+another connection commits, joined and compared with the whole result at the
+first basis; pages filled up to the byte bound; read-only bindings, shown to
+use a read-only connection by serving a damaged store with structural
+validation; required non-empty keys, operator metadata and replays;
+resources, including names that differ only in case; start-up arguments; and
+the published input schemas against arguments the tools accept and refuse.
+A unit test checks store names in the library type. The `2026-07-28` form is tested only against this
 repository's own scripted client.
