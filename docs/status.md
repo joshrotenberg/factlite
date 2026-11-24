@@ -980,6 +980,13 @@ current.
   revision, a Datalog text form, a query deadline, vector search) and roadmap
   12.
 
+## Independent MCP client check (user, 2026-11-23): recorded
+
+- **Done:** `factlite-mcp` driven by `mcp-repl` 0.4.0 under the `stable`,
+  `2026-07-28` and `auto` lifecycles, with the same results in each.
+  Recorded in `mcp.md` and as an addendum to review 0058.
+- **Validation:** by hand; not part of the automated gate.
+
 ## MCP subscription streams (follow-up to 14.3): done
 
 - **Done:** `factlite-mcp` acknowledges a `2026-07-28` `subscriptions/listen`
