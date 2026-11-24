@@ -30,7 +30,8 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
   incrementally and checks the index against it. The log stays authoritative.
 - **Interfaces:** the Rust library is the core. A CLI and a babashka pod
   (`crates/factlite-pod`) are thin adapters over the same strict, versioned JSON
-  wire contract. A JSON-RPC interface is designed but deferred.
+  wire contract. So is `factlite-rpc` (`crates/factlite-rpc`), a JSON-RPC 2.0
+  server over stdio for a client in any language.
 - **Operations:** WAL with FULL synchronization and a configurable busy
   timeout. Opening an existing current-format store validates it without
   blocking writers; initialization and format upgrades take the write lock.
@@ -44,7 +45,8 @@ Current state (format 4): see [status](docs/status.md) for what is implemented a
 - [Implementation plan](docs/plan.md): ordered items and acceptance criteria.
 - [Status](docs/status.md): done, decisions, blockers, and next items.
 - [Roadmap](docs/roadmap.md): candidate work not yet authorized, and the decision each needs.
-- [JSON-RPC design](docs/design/json-rpc.md): the deferred process-boundary interface.
+- [JSON-RPC server](docs/rpc.md): `factlite-rpc` over stdio: methods, handles, rules and errors.
+- [JSON-RPC design](docs/design/json-rpc.md): why the process-boundary interface has the shape it has.
 - [Acceptance audit](docs/acceptance.md): tests mapped to the supplied contract.
 - [Reviews](docs/reviews/): evidence recorded before each branch is merged.
 - [Babashka pod](crates/factlite-pod/README.md): Clojure API, value mapping and errors.

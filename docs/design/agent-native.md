@@ -31,9 +31,10 @@ describes itself as AI-native.
   eventually write a secret, and Factlite cannot remove it.
 - **The largest step is already designed:** the process interface in
   [`json-rpc.md`](json-rpc.md) with an MCP front end. Its two decision
-  preconditions (roadmap items 3 and 4) were decided on 2026-11-06. It still
-  needs the user's authorization, the two prerequisites that design lists, and
-  a revision for what items 3, 4 and 5 added since it was written.
+  preconditions (roadmap items 3 and 4) were decided on 2026-11-06. When this
+  was written it still needed the user's authorization, the two prerequisites
+  that design lists, and a revision for what items 3, 4 and 5 added. The user
+  authorized it on 2026-11-23; it is plan step 14.
 
 ## What Datalevin ships
 
@@ -376,7 +377,7 @@ None is authorized. Sizes are rough.
 
 | # | Candidate | Serves | Needs | Size |
 | --- | --- | --- | --- | --- |
-| 1 | Build `factlite-rpc` with an MCP front end as described above | all four | Authorization; `AGENTS.md` excludes a server. Also the two prerequisites `json-rpc.md` lists | large |
+| 1 | Build `factlite-rpc` with an MCP front end as described above | all four | Authorized 2026-11-23, plan step 14. The server is [built](../rpc.md); the MCP front end is item 14.3 | large |
 | 2 | Result caps and snapshot-bound continuation for reads | context | A cursor design; part of 1 or after it | medium |
 | 3 | Nested pull as a read API | context | A design (depth limit, cycles) and a go-ahead; brief 05 only placed it as a separate read API | medium |
 | 4 | Full-text search through FTS5 | recall | Decisions on declaration, validation, ranking and query integration; a storage format change | large |
