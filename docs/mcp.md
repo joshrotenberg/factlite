@@ -139,5 +139,17 @@ use a read-only connection by serving a damaged store with structural
 validation; required non-empty keys, operator metadata and replays;
 resources, including names that differ only in case; start-up arguments; and
 the published input schemas against arguments the tools accept and refuse.
-A unit test checks store names in the library type. The `2026-07-28` form is tested only against this
+A unit test checks store names in the library type.
+
+Checked by hand on 2026-11-23 with an independent client, `mcp-repl` 0.4.0,
+in one-shot JSON mode, under each of its lifecycles: `stable`
+(`initialize`, which negotiated `2025-11-25`), `2026-07-28` (per-request
+`_meta`), and `auto` (which chose `2026-07-28` after `server/discover`). The
+same session gave the same results under all three: the surface, the
+instructions and the annotations as listed above; a schema, three writes and
+an edit through a lookup reference; an exact replay that returned the first
+report; every read tool; a page with `next`; refusals of a missing key, an
+operator metadata key, a write to a read-only store, an offset without `at`
+and an unknown store; and the schema resource. This check is not in the
+automated gate. The `2026-07-28` form is tested only against this
 repository's own scripted client.

@@ -108,3 +108,14 @@ is not in the repository, each followed by the crate's MCP and stdio tests.
 - Each page recomputes its read.
 - Query rows tile across pages only under a total order.
 - JSON Schema's integer `1.0` is refused by the tools.
+
+## Addendum, 2026-11-23: independent client
+
+After merge, at the user's request, the server was driven by `mcp-repl`
+0.4.0, a separate MCP client, under its `stable`, `2026-07-28` and `auto`
+lifecycles. Nineteen commands, writes, replays, reads, pages, refusals and a
+resource read, gave the same results in all three. The only failure was
+`ping` under `2026-07-28`, refused by the client itself because that
+revision removed it. The first limitation above is narrowed: the
+`2026-07-28` form has now met one independent client, by hand, not in the
+gate.
