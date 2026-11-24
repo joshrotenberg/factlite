@@ -2,23 +2,24 @@
 
 ## Current state
 
-Updated 2026-11-23 (plan items 14.1 and 14.2 done). This section is the summary. The entries below are the full
+Updated 2026-11-23 (plan step 14 done). This section is the summary. The entries below are the full
 per-item log, oldest first, and are kept as written, so older entries describe
 the state at their time. Where they disagree with this section, this section is
 current.
 
-- **Implemented:** plan steps 0 to 13, all checked in `plan.md`: the v1
+- **Implemented:** plan steps 0 to 14, all checked in `plan.md`: the v1
   contract, plus the temporal datom index and indexed reads and commits (9.1 to
   9.5), the babashka pod (10.1), consumer requests (11.1 to 11.5), the
   decided roadmap items (12.1 to 12.5), and the queue and agent guides (13.1
   and 13.2), which changed no library code. From step 14: the wire read
-  decoders (14.1) and the JSON-RPC stdio server `factlite-rpc` (14.2).
+  decoders (14.1), the JSON-RPC stdio server `factlite-rpc` (14.2) and the
+  MCP server `factlite-mcp` (14.3).
   Storage format 4.
 - **Roadmap:**
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 291 pass locally with babashka installed and `REQUIRE_BB=1`,
+- **Tests:** 306 pass locally with babashka installed and `REQUIRE_BB=1`,
   including fifty-five 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions runs the same
   script and passed on PR 21's head with 247 tests on 2026-11-23, after the
@@ -37,11 +38,10 @@ current.
   - 12.4: permanence and encryption guidance (done);
   - 12.5: `avg` and HAVING (done).
 - **Deferred:** the Elixir NIF and pod registry publishing.
-- **In progress:** plan step 14, the JSON-RPC server (14.1 and 14.2 done) and
-  its MCP front end (14.3).
 - **Explored:** agent-native use (roadmap 11, `design/agent-native.md`),
   written 2026-11-23. Its candidates 6 and 11 are done as plan step 13: the
-  [queue guide](queues.md) and the [agent guide](agents.md).
+  [queue guide](queues.md) and the [agent guide](agents.md). Candidate 1 is
+  done as plan step 14: the [JSON-RPC](rpc.md) and [MCP](mcp.md) servers.
 - **Found, undecided:** a joined read visits every entity holding the
   attribute it is driven from (roadmap 12). The queue pattern works around
   it.
@@ -962,6 +962,23 @@ current.
 - **Blockers:** none. Still undecided, and not blocking: the CLI's exit code
   when a commit succeeds and its report cannot be written.
 - **What's next:** 14.3, the MCP front end, on its own branch.
+
+## 14.3 MCP front end: done
+
+- **Done:** `factlite-mcp`, a second binary in `crates/factlite-rpc` on the
+  same dispatch: stores bound by name at start-up, read-only unless bound
+  writable; nine tools; the schema of each store as a resource; pages bound
+  to a basis; keys required on writes; operator metadata stamped; server
+  instructions. Design: [`design/mcp.md`](design/mcp.md). Guide:
+  [`mcp.md`](mcp.md).
+- **Decisions:** recorded in `decisions.md`, "MCP front end (2026-11-23)".
+- **Validation:** `reviews/0058-mcp-front-end.md`, with Claude and Codex
+  subagent reviews and their outcomes; 306 tests in the local gate.
+- **Blockers:** none.
+- **What's next:** the user chooses among the remaining candidates in
+  `design/agent-native.md` (full-text search, nested pull, a wait for a new
+  revision, a Datalog text form, a query deadline, vector search) and roadmap
+  12.
 
 ## Environment notes
 

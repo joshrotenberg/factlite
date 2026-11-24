@@ -1,6 +1,6 @@
 [package]
 name = "factlite-rpc"
-description = "JSON-RPC 2.0 stdio server for the Factlite library"
+description = "JSON-RPC 2.0 and MCP stdio servers for the Factlite library"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,12 @@ publish.workspace = true
 name = "factlite-rpc"
 path = "src/bin/factlite-rpc.rs"
 # Usage lives in docs/rpc.md; rustdoc would collide with the library's name.
+doc = false
+
+[[bin]]
+name = "factlite-mcp"
+path = "src/bin/factlite-mcp.rs"
+# Usage lives in docs/mcp.md.
 doc = false
 
 [dependencies]

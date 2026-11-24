@@ -920,3 +920,46 @@ while building plan items 14.1 and 14.2:
 - **Left undecided:** the CLI's exit code when a commit succeeds and its
   report cannot be written. The server has the same gap when its pipe closes,
   and documents the keyed retry as the recovery.
+
+## MCP front end (2026-11-23)
+
+Plan item 14.3, designed in `design/mcp.md`. Decisions made while building it:
+
+- **Stores are named at start-up, never opened by a tool.** No tool takes a
+  path, so a model reaches only the files its operator named.
+- **Read-only unless bound writable, at the connection.** A read-only binding
+  opens a read-only connection, which cannot create, upgrade or write the
+  store, and `transact` is not listed when no store is writable. SQLite still
+  creates its sidecar files, so the store's directory must be writable.
+- **Results are one text block.** No `structuredContent` and no output
+  schema, so a result is never sent twice.
+- **Wrong arguments are tool errors.** Only an unknown tool or `arguments`
+  that is not an object is a protocol error; a model can read and correct the
+  rest. This follows the 2025-11-25 and 2026-07-28 revisions.
+- **Pages are offsets bound to a basis.** A page after the first needs `at`,
+  so every page is a slice of one result. Each page recomputes the read. A
+  cursor that avoids recomputing was not built.
+- **Keys required, metadata stamped.** `transact` requires an idempotency key.
+  `--metadata` pairs are added to every request as strings, and a request
+  that sets one is refused. No time is stamped, because metadata is part of a
+  request's identity and a per-attempt time would break retries; `head`
+  returns `now` for the model to write.
+- **Both protocol eras, per request.** `initialize` serves the four handshake
+  revisions; a request naming `2026-07-28` in `_meta` is answered in that
+  revision's form. Nothing is kept between requests.
+- **Unknown MCP params members are ignored; unknown tool arguments are
+  refused.** The protocol grows between revisions; a tool's arguments are
+  this server's contract.
+- **Annotations:** reads are read-only; `transact` is destructive, because a
+  retraction or replacement changes the current state even though history
+  keeps it, and idempotent, because a non-empty key is required.
+- **Resource URIs put the store name in the path:**
+  `factlite://stores/NAME/schema`. Names are case-sensitive and a URI's
+  authority is not.
+- **Batches are accepted.** The 2025-03-26 revision allows them; refusing
+  them would break that revision, and later clients do not send them.
+- **Schemas are as strict as the decoders where JSON Schema can say so:**
+  tagged values, change entities, query terms, patterns and predicates,
+  `offset` needing `at`, a non-empty key, and the operator's metadata keys.
+  One difference is left: JSON Schema counts `1.0` as an integer and the
+  wire contract does not; the descriptions say so.

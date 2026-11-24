@@ -125,7 +125,8 @@ are refused.
   `idempotency_key`. If the first attempt committed, the original report comes
   back and nothing new is committed. A request with no key cannot be
   recovered this way: sending it again may commit twice. Start the server with
-  `--require-idempotency-key` to refuse unkeyed transactions.
+  `--require-idempotency-key` to refuse unkeyed transactions, and those
+  whose key is empty.
 - **A batch is not a transaction.** An array of requests gets an array of
   responses, one per request that has an `id`, plus one -32600 response with
   a null `id` for each entry that is not a request object. `transact`,
@@ -178,7 +179,7 @@ factlite-rpc --help | --version
 - **`--max-line-bytes N`:** the longest accepted line, 16 MiB by default. A
   longer line is dropped as it is read and answered with -32700.
 - **`--require-idempotency-key`:** refuse a `transact` whose request has no
-  key.
+  key, or an empty one.
 - **Exit codes:** 0 at end of input or after `shutdown`, 2 for invalid
   arguments, 5 when reading stdin or writing stdout fails.
 

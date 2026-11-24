@@ -377,8 +377,8 @@ None is authorized. Sizes are rough.
 
 | # | Candidate | Serves | Needs | Size |
 | --- | --- | --- | --- | --- |
-| 1 | Build `factlite-rpc` with an MCP front end as described above | all four | Authorized 2026-11-23, plan step 14. The server is [built](../rpc.md); the MCP front end is item 14.3 | large |
-| 2 | Result caps and snapshot-bound continuation for reads | context | A cursor design; part of 1 or after it | medium |
+| 1 | Build `factlite-rpc` with an MCP front end as described above | all four | Done 2026-11-23, plan step 14: [JSON-RPC](../rpc.md) and [MCP](../mcp.md) | large |
+| 2 | Result caps and snapshot-bound continuation for reads | context | Done in the MCP front end as offset pages bound to a basis; a cursor that avoids recomputing is not built | medium |
 | 3 | Nested pull as a read API | context | A design (depth limit, cycles) and a go-ahead; brief 05 only placed it as a separate read API | medium |
 | 4 | Full-text search through FTS5 | recall | Decisions on declaration, validation, ranking and query integration; a storage format change | large |
 | 5 | Vector search | recall | A decision among the three sizes; a dependency decision for sqlite-vec | small to large |
