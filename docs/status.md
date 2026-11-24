@@ -996,6 +996,13 @@ current.
 - **Validation:** `reviews/0059-mcp-subscriptions-listen.md` (self-review).
 - **What's next:** unchanged.
 
+## MCP argument error messages (follow-up to 14.3): done
+
+- **Done:** argument errors from `factlite-mcp` tools carry the problem
+  alone, without the JSON-RPC `invalid params:` prefix.
+- **Validation:** `reviews/0060-mcp-argument-messages.md` (self-review).
+- **What's next:** unchanged.
+
 ## Environment notes
 
 The local toolchain lives outside Git in `/workspace/.factlite-tools`. For this
