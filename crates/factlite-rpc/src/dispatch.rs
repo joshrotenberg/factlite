@@ -47,10 +47,12 @@ impl Failure {
             context: format!(r#"{{"field":{}}}"#, json::quote(field)),
         }
     }
+    /// The CLI's error for a failed file operation: the operating system's
+    /// message, with the operation in the context.
     fn io(operation: &str, error: &std::io::Error) -> Self {
         Self::Adapter {
             code: "Storage",
-            message: format!("{operation}: {error}"),
+            message: error.to_string(),
             context: format!(r#"{{"operation":{}}}"#, json::quote(operation)),
         }
     }
@@ -346,8 +348,10 @@ impl Dispatcher {
             let head = db.snapshot().clone();
             (Conn::Reader(db), head)
         } else {
-            if !create {
-                // Creation is explicit, though the library's open can initialize.
+            // Creation is explicit, though the library's open can initialize.
+            // A writable structural open is the library's to refuse, before
+            // it looks at the path, so it is not checked here.
+            if !create && options.validation() != Validation::Structural {
                 std::fs::metadata(&path).map_err(|error| Failure::io("open database", &error))?;
             }
             let store = Store::open_with(&path, &options)?;

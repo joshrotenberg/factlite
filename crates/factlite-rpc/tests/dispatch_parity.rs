@@ -141,6 +141,7 @@ fn request(write: &Write, step: usize, keyed: bool) -> Option<Tx> {
 /// The reads made after every write, as (method, params without handle and
 /// `at`, the same read through the library).
 type LibraryRead = Box<dyn Fn(&Db) -> factlite::Result<String>>;
+type SharedRead = std::rc::Rc<dyn Fn(&Db) -> factlite::Result<String>>;
 
 fn reads(pick: &Picks, entities: &[EntityId]) -> Vec<(&'static str, Json, LibraryRead)> {
     let entity = entities
@@ -336,6 +337,14 @@ proptest! {
                 .unwrap(),
         );
         let handle = opened["handle"].clone();
+        // A read-only handle on the same file must read what the writer
+        // reads.
+        let reader = parse(
+            &dispatcher
+                .call("open", Some(&json!({"path": path, "read_only": true}).to_string()))
+                .unwrap(),
+        )["handle"]
+            .clone();
         let library = Store::open(&path).unwrap();
         let transact = |dispatcher: &mut Dispatcher, text: &str| {
             dispatcher.call(
@@ -344,6 +353,14 @@ proptest! {
             )
         };
         transact(&mut dispatcher, &wire::encode_tx(&schema())).unwrap();
+        // An independent oracle for writes: a backup keeps the store's
+        // identity, lineage and allocation state, so the library committing
+        // each request to the copy must report exactly what the dispatcher
+        // reports on the original. The two are kept in step by sending every
+        // request to both.
+        let twin_path = directory.path().join("twin.sqlite");
+        library.backup(&twin_path).unwrap();
+        let twin = Store::open(&twin_path).unwrap();
 
         // Every request sent, with the reply to a committed one.
         let mut sent: Vec<(String, Option<Json>)> = Vec::new();
@@ -361,9 +378,12 @@ proptest! {
                 }
             };
             let before = library.head().unwrap();
+            let oracle = twin.commit(wire::decode_tx(&text).unwrap());
             match transact(&mut dispatcher, &text) {
                 Ok(report) => {
                     let report = parse(&report);
+                    let oracle = oracle.expect("the library commits what the dispatcher committed");
+                    prop_assert_eq!(&report, &parse(&wire::encode_report(&oracle)));
                     let after: SnapshotId =
                         wire::decode_snapshot(&report["after"].to_string()).unwrap();
                     // The log holds the report the client was given.
@@ -397,11 +417,10 @@ proptest! {
                     sent.push((text, Some(report)));
                 }
                 Err(failure) => {
-                    // Nothing was committed, so the library refuses the same
-                    // request for the same reason.
+                    // Nothing was committed, and the library refused the
+                    // same request on the twin for the same reason.
                     prop_assert_eq!(&library.head().unwrap(), &before);
-                    let error = library
-                        .commit(wire::decode_tx(&text).unwrap())
+                    let error = oracle
                         .expect_err("the library must refuse what the dispatcher refused");
                     prop_assert_eq!(failure_data(&failure), library_error(&error));
                     prop_assert_eq!(failure.message(), error.to_string());
@@ -424,8 +443,16 @@ proptest! {
                 };
                 (snapshot, spelling)
             });
-            for (method, mut params, read) in reads(pick, &entities) {
-                params["handle"] = handle.clone();
+            for ((method, mut params, read), on) in reads(pick, &entities)
+                .into_iter()
+                .flat_map(|read| {
+                    let (method, params, read) = read;
+                    let read: SharedRead = read.into();
+                    [handle.clone(), reader.clone()]
+                        .map(|on| ((method, params.clone(), read.clone()), on))
+                })
+            {
+                params["handle"] = on;
                 if let Some((_, spelling)) = &at {
                     params["at"] = spelling.clone();
                 }

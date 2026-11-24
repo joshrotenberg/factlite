@@ -5,7 +5,7 @@
 //! syntax only and handed on unchanged, so the wire decoders apply their own
 //! strictness to exactly what arrived.
 
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::value::RawValue;
@@ -68,8 +68,9 @@ impl<'de> Deserialize<'de> for Top {
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Top, A::Error> {
                 let mut members: Vec<(String, Box<RawValue>)> = Vec::new();
+                let mut seen = HashSet::new();
                 while let Some(key) = map.next_key::<String>()? {
-                    if members.iter().any(|(seen, _)| *seen == key) {
+                    if !seen.insert(key.clone()) {
                         return Err(serde::de::Error::custom(format!("{DUPLICATE}{key}")));
                     }
                     members.push((key, map.next_value()?));
@@ -83,10 +84,20 @@ impl<'de> Deserialize<'de> for Top {
 
 impl Top {
     /// Parses one complete JSON value. Trailing text is a syntax error.
+    ///
+    /// The whole text is checked as JSON first, without converting numbers,
+    /// so a syntax error anywhere is reported as one even when the text also
+    /// repeats a key, and a number too large for a machine type is still
+    /// JSON. Only then is the top level opened and checked for repeats.
     pub(crate) fn parse(text: &str) -> Result<Self, Malformed> {
-        serde_json::from_str::<Top>(text).map_err(|error| {
+        let raw: &RawValue =
+            serde_json::from_str(text).map_err(|error| Malformed::Syntax(error.to_string()))?;
+        if !matches!(kind(raw), Kind::Object | Kind::Array) {
+            return Ok(Top::Scalar);
+        }
+        serde_json::from_str::<Top>(raw.get()).map_err(|error| {
             // The only data error this parser raises is the duplicate key;
-            // everything else is serde_json reporting the text itself.
+            // anything else is serde_json refusing a key it cannot decode.
             if error.classify() == serde_json::error::Category::Data {
                 Malformed::Duplicate(strip_position(&error.to_string()))
             } else {
@@ -192,13 +203,35 @@ mod tests {
 
     #[test]
     fn a_repeated_key_at_the_parsed_level_is_named_even_when_escaped() {
-        for text in [r#"{"a":1,"a":2}"#, r#"{"a":1,"a":2}"#] {
+        for text in [r#"{"a":1,"a":2}"#, r#"{"a":1,"\u0061":2}"#] {
             assert_eq!(
                 Top::parse(text).err(),
                 Some(Malformed::Duplicate("duplicate object key: a".into())),
                 "{text}"
             );
         }
+    }
+
+    /// Duplicate detection must not grow with the square of the key count:
+    /// one line of the default size can hold over a million keys. The
+    /// quadratic form took about 20 s for 80,000 keys in a debug build; the
+    /// bound here is loose, to absorb a slow runner.
+    #[test]
+    fn many_keys_are_checked_for_repeats_in_linear_time() {
+        let keys = 200_000;
+        let mut text = String::from("{");
+        for index in 0..keys {
+            text.push_str(&format!("\"k{index}\":0,"));
+        }
+        text.push_str("\"k0\":1}");
+        let started = std::time::Instant::now();
+        assert_eq!(
+            Top::parse(&text).err(),
+            Some(Malformed::Duplicate("duplicate object key: k0".into()))
+        );
+        let text = text.replace(",\"k0\":1}", "}");
+        assert!(matches!(Top::parse(&text), Ok(Top::Object(_))));
+        assert!(started.elapsed() < std::time::Duration::from_secs(15));
     }
 
     #[test]
@@ -235,6 +268,28 @@ mod tests {
             Top::parse(r#"{"\ud800":1}"#),
             Err(Malformed::Syntax(_))
         ));
+    }
+
+    /// A syntax error is reported as one even after a repeated key, and a
+    /// number JSON allows is a scalar however large it is.
+    #[test]
+    fn syntax_is_checked_before_repeats_and_numbers_are_not_converted() {
+        for text in [
+            r#"{"id":1,"id":}"#,
+            r#"{"id":1,"id":2} trailing"#,
+            r#"{"a":1,"a":[}"#,
+        ] {
+            assert!(
+                matches!(Top::parse(text), Err(Malformed::Syntax(_))),
+                "{text}"
+            );
+        }
+        for text in ["1e400", "-1e400", "123456789012345678901234567890"] {
+            assert!(matches!(Top::parse(text), Ok(Top::Scalar)), "{text}");
+        }
+        assert!(matches!(Top::parse("[1e400]"), Ok(Top::Array(_))));
+        let mut object = members(r#"{"n":1e400}"#);
+        assert_eq!(object.take("n").unwrap().get(), "1e400");
     }
 
     #[test]

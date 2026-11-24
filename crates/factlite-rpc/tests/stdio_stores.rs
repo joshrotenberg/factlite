@@ -374,14 +374,21 @@ fn no_file_is_created_unless_create_is_passed() {
     let mut server = server(&[]);
     let entries = || std::fs::read_dir(directory.path()).unwrap().count();
 
+    // The CLI's error for the same case: the operating system's message,
+    // with the operation in the context.
     let missing = server.refused("open", json!({"path": path}), "Storage");
     assert_eq!(missing["context"], json!({"operation": "open database"}));
-    assert!(
-        missing["message"]
-            .as_str()
-            .unwrap()
-            .starts_with("open database: ")
+    assert_eq!(
+        missing["message"],
+        std::fs::metadata(&path).unwrap_err().to_string()
     );
+    // A writable structural open is the library's refusal, path or not.
+    let structural = server.refused(
+        "open",
+        json!({"path": path, "validation": "structural"}),
+        "InvalidRequest",
+    );
+    assert_eq!(structural["context"], json!({"field": "validation"}));
     server.refused("open", json!({"path": path, "create": false}), "Storage");
     server.refused("open", json!({"path": path, "read_only": true}), "Storage");
     let both = server.refused(
@@ -604,8 +611,26 @@ fn a_busy_store_fails_busy_and_the_keyed_retry_then_commits_once() {
     let blocker = rusqlite::Connection::open(&path).unwrap();
     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
     let request = json!({"handle": handle, "tx": {"version": 1, "idempotency_key": "once"}});
+    let started = std::time::Instant::now();
     let busy = server.refused("transact", request.clone(), "Busy");
+    // A zero timeout fails at once, well inside the two-second default.
+    assert!(started.elapsed() < std::time::Duration::from_millis(1500));
     assert_eq!(busy["commit_outcome"], "RolledBack", "{busy}");
+    // The library's own error for the same refusal.
+    let library = Store::open_with(
+        &path,
+        &factlite::StoreOptions::new()
+            .with_busy_timeout(std::time::Duration::ZERO)
+            .unwrap(),
+    );
+    let library = match library {
+        Ok(store) => {
+            store.commit(wire::decode_tx(r#"{"version":1,"idempotency_key":"once"}"#).unwrap())
+        }
+        Err(error) => Err(error),
+    }
+    .unwrap_err();
+    assert_eq!(busy, library_error(&library));
     // Reads are not blocked by a writer.
     assert_eq!(
         revision(&server.ok("facts", json!({"handle": handle}))["basis"]),
@@ -678,6 +703,33 @@ fn a_keyed_retry_after_the_server_is_killed_returns_the_original_report() {
         })
         .collect();
     assert_eq!(created, [1, 1]);
+
+    // The commit happened, and its response was never read: the server is
+    // killed only once the file shows the revision.
+    let mut fourth = server(&[]);
+    let handle = fourth.open(&path, json!({}));
+    fourth.send(
+        &json!({"jsonrpc":"2.0","id":"lost","method":"transact","params":request(&handle, "committed")})
+            .to_string(),
+    );
+    let deadline = std::time::Instant::now() + common::PATIENCE;
+    while Db::open_read_only(&path)
+        .unwrap()
+        .snapshot()
+        .revision()
+        .get()
+        < 3
+    {
+        assert!(std::time::Instant::now() < deadline, "the commit landed");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    fourth.kill();
+    let mut fifth = server(&[]);
+    let handle = fifth.open(&path, json!({}));
+    let report = fifth.ok("transact", request(&handle, "committed"));
+    assert_eq!(revision(&report["after"]), 3);
+    assert_eq!(revision(&fifth.ok("head", json!({"handle": handle}))), 3);
+    drop(fifth);
 }
 
 #[test]
@@ -759,4 +811,63 @@ fn server_processes_on_one_file_lose_no_commit_and_repeat_none() {
         .unwrap();
     assert_eq!(ids.len(), 1 + PROCESSES * COMMITS);
     view.verify().unwrap();
+}
+
+#[test]
+fn structural_opens_skip_the_log_and_verify_checks_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = store(directory.path());
+    {
+        let store = Store::open(&path).unwrap();
+        store.commit(wire::decode_tx(SCHEMA).unwrap()).unwrap();
+    }
+    // Damage a retained report without touching the head or the index.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("UPDATE transactions SET report = X'00'")
+        .unwrap();
+    let mut server = server(&[]);
+    // A full open replays the log and refuses the file.
+    let full = server.refused("open", json!({"path": path}), "Storage");
+    assert_eq!(full, library_error(&Store::open(&path).err().unwrap()));
+    server.refused("open", json!({"path": path, "read_only": true}), "Storage");
+    // A structural open does not, and verify then finds the damage.
+    let handle = server.open(
+        &path,
+        json!({"read_only": true, "validation": "structural"}),
+    );
+    let verified = server.refused("verify", json!({"handle": handle}), "Storage");
+    let library = Db::open_read_only_with(
+        &path,
+        &factlite::StoreOptions::new().with_validation(factlite::Validation::Structural),
+    )
+    .unwrap()
+    .verify()
+    .unwrap_err();
+    assert_eq!(verified, library_error(&library));
+}
+
+#[test]
+fn a_store_of_an_unknown_format_is_refused_as_the_library_refuses_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = store(directory.path());
+    Store::open(&path).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .pragma_update(None, "user_version", 99)
+        .unwrap();
+    let mut server = server(&[]);
+    for extra in [json!({}), json!({"read_only": true})] {
+        let mut params = json!({"path": path});
+        for (key, value) in extra.as_object().unwrap() {
+            params[key] = value.clone();
+        }
+        let refused = server.refused("open", params, "UnsupportedFormat");
+        let library = if extra.as_object().unwrap().is_empty() {
+            Store::open(&path).err().unwrap()
+        } else {
+            Db::open_read_only(&path).err().unwrap()
+        };
+        assert_eq!(refused, library_error(&library));
+    }
 }

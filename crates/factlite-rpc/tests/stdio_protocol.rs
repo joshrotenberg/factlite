@@ -47,6 +47,7 @@ fn a_response_repeats_the_id_exactly_as_sent() {
         r#""""#,
         r#""a\n""#,
         r#""1""#,
+        r#""a\u0020b""#,
         "null",
     ] {
         server.send(&format!(
@@ -201,6 +202,16 @@ fn a_batch_answers_each_entry_and_refuses_methods_that_depend_on_order() {
     assert_eq!(responses[1]["id"], 3);
     assert_eq!(revision(&responses[1]["result"]), "0");
 
+    // An entry that is JSON but cannot be held, such as a number out of
+    // range, is an invalid request; its neighbours are served.
+    server.send(&format!(
+        r#"[1e99999,{{"jsonrpc":"2.0","id":4,"method":"head","params":{head}}}]"#
+    ));
+    let responses = server.response();
+    error_of(&responses[0], -32600);
+    assert_eq!(responses[0]["id"], Json::Null);
+    assert_eq!(revision(&responses[1]["result"]), "0");
+
     // An empty batch is one error, not an array.
     server.send("[]");
     let response = server.response();
@@ -268,6 +279,14 @@ fn malformed_lines_fail_with_the_standard_codes_and_the_server_keeps_serving() {
             format!(r#"{{"jsonrpc":"2.0","id":1,"method":"head","params":{head},"extra":1}}"#),
             -32600,
         ),
+        // A syntax error is one even after a repeated key.
+        (r#"{"jsonrpc":"2.0","id":1,"id":}"#.to_owned(), -32700),
+        (
+            r#"{"jsonrpc":"2.0","id":1,"id":2} trailing"#.to_owned(),
+            -32700,
+        ),
+        // JSON that is not an object, however large its number.
+        ("1e400".to_owned(), -32600),
         // A repeated member, however it is spelled.
         (
             format!(r#"{{"jsonrpc":"2.0","id":1,"id":1,"method":"head","params":{head}}}"#),
@@ -284,7 +303,9 @@ fn malformed_lines_fail_with_the_standard_codes_and_the_server_keeps_serving() {
             -32600,
         ),
         (
-            format!(r#"{{"jsonrpc":"2.0","id":1,"method":"head","params":{{}},"params":{head}}}"#),
+            format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"head","\u0070arams":{{}},"params":{head}}}"#
+            ),
             -32600,
         ),
         (
@@ -599,56 +620,8 @@ fn params_are_an_object_of_known_members_and_the_wire_decodes_its_own() {
         "transact",
         json!({"handle": handle, "tx": null}),
     );
-    for (method, params) in [
-        (
-            "transact",
-            format!(r#"{{"handle":"{handle}","tx":{{"version":1,"version":1}}}}"#),
-        ),
-        (
-            "facts",
-            format!(r#"{{"handle":"{handle}","filter":{{"attr":"a/b","attr":"a/b"}}}}"#),
-        ),
-        (
-            "lookup",
-            format!(r#"{{"handle":"{handle}","attr":"a/b","value":{{"i64":"1","i64":"1"}}}}"#),
-        ),
-        (
-            "facts",
-            format!(r#"{{"handle":"{handle}","at":{{"version":1,"version":1}}}}"#),
-        ),
-        (
-            "lookup",
-            format!(r#"{{"handle":"{handle}","attr":"\ud800/b","value":{{"i64":"1"}}}}"#),
-        ),
-    ] {
-        server.send(&format!(
-            r#"{{"jsonrpc":"2.0","id":"nested","method":"{method}","params":{params}}}"#
-        ));
-        let response = server.response();
-        assert_eq!(response["id"], "nested", "{params}");
-        let code = error_of(&response, -32000)["data"]["code"]
-            .as_str()
-            .unwrap();
-        assert!(
-            code == "InvalidRequest" || code == "InvalidSnapshot",
-            "{params}: {response}"
-        );
-    }
-    // A snapshot that does not decode is the wire's InvalidSnapshot, in
-    // either spelling.
-    server.refused(
-        "facts",
-        json!({"handle": handle, "at": {"version": 1}}),
-        "InvalidSnapshot",
-    );
-    server.refused(
-        "facts",
-        json!({"handle": handle, "at": 3}),
-        "InvalidSnapshot",
-    );
-    let token = server.err("facts", json!({"handle": handle, "at": "d1.nope"}));
-    assert_eq!(token["code"], -32000, "{token}");
-
+    // Their exact error objects are compared with the decoders' own in
+    // a_malformed_wire_member_fails_with_the_decoders_own_error.
     assert_eq!(revision(&server.ok("head", json!({"handle": handle}))), "0");
 }
 
@@ -796,6 +769,23 @@ fn arguments_are_checked_before_anything_is_served() {
         assert_eq!(stderr.lines().count(), 1, "{args:?}: {stderr}");
     }
 
+    // Help and version on a pipe nobody reads fail with exit code 5.
+    for flag in ["--help", "--version"] {
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let output = std::process::Command::new(cargo_bin("factlite-rpc"))
+            .arg(flag)
+            .stdout(writer)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(5), "{flag}");
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .starts_with("factlite-rpc: ")
+        );
+    }
+
     // With no input at all the server ends cleanly and says nothing.
     run(&[])
         .write_stdin("")
@@ -809,4 +799,213 @@ fn arguments_are_checked_before_anything_is_served() {
         .success()
         .stdout("")
         .stderr("");
+}
+
+#[test]
+fn a_malformed_wire_member_fails_with_the_decoders_own_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut server = server(&[]);
+    let handle = server.open(&store(directory.path()), json!({"create": true}));
+    const ENTITY: &str = r#"{"id":"e1.00000000000000000000000000000001.0000000000000001"}"#;
+    const QUERY: &str = r#"{"version":1,"query":{"match":[],"select":[]},"params":{}}"#;
+    let library = |error: factlite::Error| -> Json {
+        common::parse(&factlite::wire::encode_error(&error))["error"].clone()
+    };
+    use factlite::wire;
+    // (method, the other members, the member under test, its text, the
+    // library's own error for that text)
+    let cases: Vec<(&str, String, &str, &str, factlite::Error)> = vec![
+        (
+            "facts",
+            String::new(),
+            "filter",
+            "null",
+            wire::decode_filter("null").unwrap_err(),
+        ),
+        (
+            "facts",
+            String::new(),
+            "filter",
+            r#"{"attr":5}"#,
+            wire::decode_filter(r#"{"attr":5}"#).unwrap_err(),
+        ),
+        (
+            "facts",
+            String::new(),
+            "filter",
+            r#"{"attr":"a/b","attr":"a/b"}"#,
+            wire::decode_filter(r#"{"attr":"a/b","attr":"a/b"}"#).unwrap_err(),
+        ),
+        (
+            "facts",
+            String::new(),
+            "filter",
+            r#"{"value":{"i64":"3","i64":"4"}}"#,
+            wire::decode_filter(r#"{"value":{"i64":"3","i64":"4"}}"#).unwrap_err(),
+        ),
+        (
+            "pull",
+            r#","attrs":[]"#.into(),
+            "entity",
+            r#""e1""#,
+            wire::decode_entity_id(r#""e1""#).unwrap_err(),
+        ),
+        (
+            "pull",
+            r#","attrs":[]"#.into(),
+            "entity",
+            r#"{"temp":"a"}"#,
+            wire::decode_entity_id(r#"{"temp":"a"}"#).unwrap_err(),
+        ),
+        (
+            "pull",
+            format!(r#","entity":{ENTITY}"#),
+            "attrs",
+            r#"["a/b",1]"#,
+            wire::decode_attrs(r#"["a/b",1]"#).unwrap_err(),
+        ),
+        (
+            "pull",
+            format!(r#","entity":{ENTITY}"#),
+            "attrs",
+            r#""a/b,c/d""#,
+            wire::decode_attrs(r#""a/b,c/d""#).unwrap_err(),
+        ),
+        (
+            "lookup",
+            r#","value":{"i64":"1"}"#.into(),
+            "attr",
+            "5",
+            wire::decode_attr("5").unwrap_err(),
+        ),
+        (
+            "lookup",
+            r#","value":{"i64":"1"}"#.into(),
+            "attr",
+            "\"nope\"",
+            wire::decode_attr("\"nope\"").unwrap_err(),
+        ),
+        (
+            "lookup",
+            r#","attr":"a/b""#.into(),
+            "value",
+            "1",
+            wire::decode_value("1").unwrap_err(),
+        ),
+        (
+            "lookup",
+            r#","attr":"a/b""#.into(),
+            "value",
+            r#"{"ref":{"temp":"a"}}"#,
+            wire::decode_value(r#"{"ref":{"temp":"a"}}"#).unwrap_err(),
+        ),
+        (
+            "history",
+            String::new(),
+            "after",
+            "0",
+            wire::decode_revision("0").unwrap_err(),
+        ),
+        (
+            "history",
+            String::new(),
+            "after",
+            r#""01""#,
+            wire::decode_revision(r#""01""#).unwrap_err(),
+        ),
+        (
+            "transactions",
+            String::new(),
+            "after",
+            "null",
+            wire::decode_revision("null").unwrap_err(),
+        ),
+        (
+            "query",
+            String::new(),
+            "query",
+            r#"{"version":2}"#,
+            wire::decode_query(r#"{"version":2}"#).unwrap_err(),
+        ),
+        (
+            "query",
+            String::new(),
+            "query",
+            r#"{"version":1,"version":1}"#,
+            wire::decode_query(r#"{"version":1,"version":1}"#).unwrap_err(),
+        ),
+        (
+            "transact",
+            String::new(),
+            "tx",
+            r#"{"version":1,"extra":1}"#,
+            wire::decode_tx(r#"{"version":1,"extra":1}"#).unwrap_err(),
+        ),
+        (
+            "transact",
+            String::new(),
+            "tx",
+            "null",
+            wire::decode_tx("null").unwrap_err(),
+        ),
+        (
+            "schema",
+            String::new(),
+            "at",
+            r#"{"version":1}"#,
+            wire::decode_snapshot(r#"{"version":1}"#).unwrap_err(),
+        ),
+        (
+            "schema",
+            String::new(),
+            "at",
+            "3",
+            wire::decode_snapshot("3").unwrap_err(),
+        ),
+        (
+            "schema",
+            String::new(),
+            "at",
+            r#""d1.nope""#,
+            "d1.nope".parse::<factlite::SnapshotId>().unwrap_err(),
+        ),
+        (
+            "query",
+            format!(r#","query":{QUERY}"#),
+            "at",
+            r#"{"version":1,"version":1}"#,
+            wire::decode_snapshot(r#"{"version":1,"version":1}"#).unwrap_err(),
+        ),
+    ];
+    for (method, others, member, text, expected) in cases {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","id":"w","method":"{method}","params":{{"handle":"{handle}"{others},"{member}":{text}}}}}"#
+        );
+        server.send(&line);
+        let response = server.response();
+        assert_eq!(response["id"], "w", "{line}");
+        let error = error_of(&response, -32000);
+        assert_eq!(error["data"], library(expected), "{line}");
+        assert_eq!(error["message"], error["data"]["message"], "{line}");
+    }
+}
+
+#[test]
+fn a_closed_output_ends_the_server_with_exit_code_5() {
+    use std::{io::Write, process::Stdio};
+    let mut child = std::process::Command::new(cargo_bin("factlite-rpc"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Nobody will read the answer.
+    drop(child.stdout.take());
+    let mut stdin = child.stdin.take().unwrap();
+    let _ = stdin.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"none\"}\n");
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(5));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.starts_with("factlite-rpc: "), "{stderr}");
 }

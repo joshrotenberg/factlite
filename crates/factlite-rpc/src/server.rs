@@ -172,6 +172,10 @@ impl<L: Write> Session<'_, L> {
             Ok(Top::Object(members)) => members,
             Ok(_) => return invalid("a request must be an object"),
             Err(Malformed::Duplicate(message)) => return invalid(&message),
+            // A batch entry was read as JSON with the line, so it can fail
+            // here only on a value JSON allows and this parser cannot hold,
+            // such as a number out of range: an invalid request.
+            Err(Malformed::Syntax(message)) if in_batch => return invalid(&message),
             Err(Malformed::Syntax(message)) => {
                 return Outcome::Respond(failure("null", PARSE_ERROR, &message, None));
             }
@@ -309,9 +313,11 @@ mod tests {
             shown: Rc<RefCell<Vec<u8>>>,
         }
         impl Write for Held {
+            /// Takes at most seven bytes at a time, as a pipe may.
             fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                self.pending.extend_from_slice(bytes);
-                Ok(bytes.len())
+                let taken = bytes.len().min(7);
+                self.pending.extend_from_slice(&bytes[..taken]);
+                Ok(taken)
             }
             fn flush(&mut self) -> io::Result<()> {
                 self.shown.borrow_mut().append(&mut self.pending);
@@ -366,10 +372,17 @@ mod tests {
             &ServerOptions::default(),
         )
         .unwrap();
-        assert_eq!(
-            shown.borrow().iter().filter(|byte| **byte == b'\n').count(),
-            2
-        );
+        let shown = String::from_utf8(shown.borrow().clone()).unwrap();
+        let lines: Vec<&str> = shown.lines().collect();
+        assert_eq!(lines.len(), 2);
+        for (line, id) in lines.iter().zip([1, 2]) {
+            assert_eq!(
+                *line,
+                format!(
+                    r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"method not found: none"}}}}"#
+                )
+            );
+        }
     }
 
     #[test]

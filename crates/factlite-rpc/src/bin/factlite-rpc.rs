@@ -69,16 +69,25 @@ fn parse(args: Vec<std::ffi::OsString>) -> Result<Command, String> {
     Ok(Command::Serve(dispatch, server))
 }
 
+/// Writes text to stdout, exiting 5 if stdout is closed.
+fn print(text: &str) -> ExitCode {
+    let mut stdout = std::io::stdout().lock();
+    match stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            let _ = writeln!(std::io::stderr(), "factlite-rpc: {error}");
+            ExitCode::from(5)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     match parse(std::env::args_os().skip(1).collect()) {
-        Ok(Command::Help) => {
-            print!("{HELP}");
-            ExitCode::SUCCESS
-        }
-        Ok(Command::Version) => {
-            println!("factlite-rpc {}", env!("CARGO_PKG_VERSION"));
-            ExitCode::SUCCESS
-        }
+        Ok(Command::Help) => print(HELP),
+        Ok(Command::Version) => print(&format!("factlite-rpc {}\n", env!("CARGO_PKG_VERSION"))),
         Ok(Command::Serve(dispatch, server)) => {
             let mut dispatcher = Dispatcher::new(dispatch);
             let served = serve(
