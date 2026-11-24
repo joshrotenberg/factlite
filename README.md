@@ -98,7 +98,7 @@ Storage configures WAL, FULL synchronization, foreign keys, and a busy timeout
 (two seconds unless set through `StoreOptions` or `--busy-timeout-ms`). A live store may have SQLite sidecar files; `Store::backup` uses SQLite
 to produce a validated standalone copy. See [storage decisions](docs/decisions.md).
 
-The repository is hosted privately on GitHub. Packages are not published.
+The repository is hosted publicly on GitHub. Packages are not published.
 
 ## License
 

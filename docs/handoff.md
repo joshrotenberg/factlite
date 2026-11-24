@@ -13,8 +13,8 @@ cd factlite
 git fsck --full
 ```
 
-The repository is private, so the clone needs access to it. Item branches are
-kept on the remote alongside `main`.
+The repository is public. Item branches are kept on the remote alongside
+`main`.
 
 Install Rust with rustup; `rust-toolchain.toml` pins 1.99.0. Install babashka
 to run the pod's babashka tests, which otherwise skip. CI installs 1.13.229.

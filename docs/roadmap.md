@@ -11,7 +11,8 @@ For the current state, see the summary at the top of [`status.md`](status.md).
 ## 1. Publish (plan item 8.2): done
 
 Published to the private repository `github.com/joshrotenberg/factlite` on
-2026-11-05. CI passed there. The user chose MIT OR Apache-2.0 on 2026-11-05;
+2026-11-05. CI passed there. The user made the repository public on
+2026-11-23. The user chose MIT OR Apache-2.0 on 2026-11-05;
 the crates and README carry it.
 
 ## 2. Pod release packaging: decided, not now

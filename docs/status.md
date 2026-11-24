@@ -19,13 +19,15 @@ current.
   - Item 9 (this summary) is done.
 - **Tests:** 247 pass locally with babashka installed and `REQUIRE_BB=1`,
   including fifty-five 1,024-case properties and the pod's three babashka
-  tests; without babashka those three skip. GitHub Actions is unavailable for
-  this account this month, so the local gate stands in for CI.
+  tests; without babashka those three skip. GitHub Actions runs the same
+  script and passed on PR 21's head with 247 tests on 2026-11-23, after the
+  repository was made public. From 2026-11-06 until then it refused every job
+  for billing, and merges relied on the local gate.
 - **Reviews:** entries 0001 to 0043 in `reviews/` are self-reviews. Since 0044,
   each review also records independent Claude and Codex subagent reviews, run
   with the kit subagent tooling, alongside a self-review.
-- **Hosting:** private repository `github.com/joshrotenberg/factlite`. Licensed
-  MIT OR Apache-2.0. Crates are unpublished.
+- **Hosting:** `github.com/joshrotenberg/factlite`, public since 2026-11-23
+  and private before. Licensed MIT OR Apache-2.0. Crates are unpublished.
 - **Decided, next to build:** plan step 12, from the four briefs in
   `decision-briefs/` decided on 2026-11-06:
   - 12.1: read-only structural open and verify (done);
@@ -895,7 +897,9 @@ current.
   is unavailable. Of sixteen single changes to the pattern tried by hand,
   fourteen fail at least one test and two remove expectations that others
   imply. The process tests passed repeated runs. GitHub Actions refused
-  every job on this branch for billing, including a re-run.
+  every job on this branch for billing, including a re-run. After this entry
+  was written the repository was made public, and the job then passed on the
+  branch head `26fb73f` with 247 tests on ubuntu-latest, before the merge.
   Independent Claude and Codex subagent reviews are recorded in
   `reviews/0056-queue-and-agent-guides.md`.
 - **Blockers:** none.
@@ -920,6 +924,23 @@ current.
 - **What's next:** the user chooses among the remaining candidates in
   `design/agent-native.md` and roadmap 12.
 
+## Repository made public (user, 2026-11-23): recorded
+
+- **Done:** the user made `github.com/joshrotenberg/factlite` public on
+  2026-11-23. GitHub Actions, which had refused every job for billing since
+  2026-11-06, then ran. PR 21's `check` job passed on `26fb73f` with 247
+  tests on ubuntu-latest in about nine minutes, the first run of the
+  multi-process queue tests on Linux, and the PR was merged after it. The
+  summary above, the 13.1 entry, the roadmap, the README, the handoff and
+  review 0056 are corrected to say so.
+- **Decisions:** entries in this log written while the repository was private
+  and CI was unavailable are left as written.
+- **Validation:** before publication, the tracked files and the full history
+  were scanned for secret-like strings, home-directory paths, email addresses
+  and sensitive file names; none were found. Commits carry the user's email
+  address as author.
+- **What's next:** unchanged.
+
 ## Environment notes
 
 The local toolchain lives outside Git in `/workspace/.factlite-tools`. For this
@@ -931,5 +952,6 @@ offline. The database and CLI require no outbound network access.
 
 ## Open repository decisions
 
-- Remote hosting destination: private `github.com/joshrotenberg/factlite`.
+- Remote hosting destination: `github.com/joshrotenberg/factlite`, made
+  public by the user on 2026-11-23.
 - License: MIT OR Apache-2.0 (chosen 2026-11-05). Crates remain unpublished.
