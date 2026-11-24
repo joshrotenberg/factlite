@@ -353,3 +353,50 @@ and tests on the existing public API. No library change.
   expectation, context loads at one basis, changes since a revision, handoff
   by snapshot token, and keyed writes. A runnable example checks every
   convention the guide shows. `scripts/check.sh` runs both new examples.
+
+## Step 14: JSON-RPC server and MCP front end
+
+Authorized by the user on 2026-11-23: candidate 1 in
+[`design/agent-native.md`](design/agent-native.md), roadmap 10. One new crate,
+`crates/factlite-rpc`, holding a dispatch library and two stdio binaries. It is
+a thin adapter: storage semantics stay in the library, and requests and results
+are the version-1 wire contract.
+
+- [ ] **14.1 Wire decoders for read requests.** Public decoders and encoders
+  in `wire` for the parts of a read request that the CLI takes from options:
+  an existing entity, an attribute name, an attribute list, a fact filter and
+  a revision. Coverage:
+  - 1,024-case round-trip properties for each;
+  - strictness cases: a duplicate key, an unknown field, a wrong JSON kind, a
+    temporary or lookup entity, a revision that is not canonical decimal.
+- [ ] **14.2 `factlite-rpc`: dispatch and stdio server.** JSON-RPC 2.0, one
+  message per line, as designed in [`design/json-rpc.md`](design/json-rpc.md)
+  and revised there on 2026-11-23. Methods: `open`, `close`, `head`, `verify`,
+  `transact`, `schema`, `facts`, `pull`, `lookup`, `history`, `transactions`,
+  `query`, `backup` and `shutdown`. Coverage:
+  - parity: every read and `transact` gives the library's wire output for the
+    same input, and every Factlite error the library's wire error;
+  - specification: notifications are not executed and get no reply; a batch
+    answers each entry and refuses order-dependent methods; duplicate members,
+    invalid lines and oversized lines fail with the standard codes and the
+    server keeps serving; ids are echoed exactly;
+  - handles: no file is created without `create`; read-only handles refuse
+    `transact` and `backup`; requests after `close` fail;
+  - recovery: a keyed retry after the server process is killed returns the
+    original report;
+  - contention: several server processes commit to one file;
+  - `assert_cmd` scenarios over stdio for all of the above.
+- [ ] **14.3 MCP front end.** A second binary, `factlite-mcp`, on the same
+  dispatch, as designed in `design/mcp.md` (written with this item). Stores
+  are bound by name at start-up and are read-only unless bound writable.
+  Tools: `head`, `schema`, `query`, `pull`, `lookup`, `facts`, `history`,
+  `transactions`, and `transact` when a store is writable. The schema of each
+  store is also a resource. `transact` requires an idempotency key and adds
+  the provenance metadata the server was started with. List results are cut
+  at a page size and continue at the same basis. Coverage:
+  - `assert_cmd` scenarios over stdio for the handshake of each supported
+    protocol revision, every tool, the resource, and each error class;
+  - a read-only binding cannot write or create a file;
+  - pages of one result, read while another process commits, concatenate to
+    the complete result at the first page's basis;
+  - published input schemas accept the request fixtures the decoders accept.
