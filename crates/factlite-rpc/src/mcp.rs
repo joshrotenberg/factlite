@@ -1019,3 +1019,43 @@ fn definition(tool: Tool) -> (&'static str, Json, Vec<&'static str>) {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn binding(name: &str, path: &std::path::Path) -> Binding {
+        Binding {
+            name: name.into(),
+            path: path.to_owned(),
+            writable: false,
+        }
+    }
+
+    /// The binary checks names before it starts the server; the server
+    /// checks them again for any other caller of this library.
+    #[test]
+    fn a_server_refuses_store_names_it_could_not_publish_and_repeated_names() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("store.sqlite");
+        factlite::Store::open(&path).unwrap();
+        for name in ["", "a b", "a/b", "a=b", "é", &"x".repeat(65)] {
+            let options = McpOptions {
+                stores: vec![binding(name, &path)],
+                ..McpOptions::default()
+            };
+            assert!(McpServer::start(options).is_err(), "{name:?}");
+        }
+        let repeated = McpOptions {
+            stores: vec![binding("a", &path), binding("a", &path)],
+            ..McpOptions::default()
+        };
+        assert!(McpServer::start(repeated).is_err());
+        assert!(McpServer::start(McpOptions::default()).is_err());
+        let fine = McpOptions {
+            stores: vec![binding("A-z_9", &path), binding(&"x".repeat(64), &path)],
+            ..McpOptions::default()
+        };
+        assert!(McpServer::start(fine).is_ok());
+    }
+}

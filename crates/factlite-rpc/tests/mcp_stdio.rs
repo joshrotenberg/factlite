@@ -1127,3 +1127,60 @@ fn published_input_schemas_accept_what_the_tools_accept_and_name_every_argument(
         assert_eq!(result["isError"], true, "{name} {arguments}");
     }
 }
+
+#[test]
+fn read_only_stores_open_read_only_and_structural_validation_skips_the_log() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("notes.sqlite");
+    store_with(&path, 2);
+    // Damage a retained report: a full open replays the log and refuses the
+    // file; a structural open, which only a read-only connection accepts,
+    // does not look.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("UPDATE transactions SET report = X'00'")
+        .unwrap();
+    let full = start(&bind("--store", "notes", &path));
+    let (status, _, stderr) = full.finish();
+    assert_eq!(status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.starts_with("factlite-mcp: cannot open store notes at "),
+        "{stderr}"
+    );
+
+    let mut args: Vec<String> = bind("--store", "notes", &path).into();
+    args.extend(["--validation".into(), "structural".into()]);
+    let mut server = start(&args);
+    let head = tool(&mut server, "head", json!({}));
+    assert_eq!(head["snapshot"]["revision"], "3");
+    // A read-only server lists no transact tool at all.
+    let tools = server.ok("tools/list", json!({}))["tools"].clone();
+    let names: Vec<&str> = tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "head",
+            "schema",
+            "facts",
+            "pull",
+            "lookup",
+            "history",
+            "transactions",
+            "query"
+        ]
+    );
+    // With one store bound, no tool requires naming it.
+    for tool in tools.as_array().unwrap() {
+        let required = tool["inputSchema"]["required"].as_array().unwrap();
+        assert!(!required.contains(&json!("store")), "{tool}");
+        assert_eq!(
+            tool["inputSchema"]["properties"]["store"]["enum"],
+            json!(["notes"])
+        );
+    }
+}
