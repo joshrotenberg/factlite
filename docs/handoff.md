@@ -52,8 +52,10 @@ Prefer cloning the remote, which is newer.
   `docs/status.md`, and merge with a merge commit once CI passes.
 - **Gates:** the existing reference, stateful, fault, isolation, recovery and
   backup tests must gate any change to storage or reads.
-- **Deferred scope:** the JSON-RPC server, the NIF, subscriptions, JMESPath and
-  other explicitly deferred scope need the user's authorization first.
+- **Deferred scope:** the NIF, a network listener, subscriptions, JMESPath and
+  other explicitly deferred scope need the user's authorization first. The
+  JSON-RPC server and its MCP front end were authorized on 2026-11-23 (plan
+  step 14).
 - **Restoring a store:** continuing a restored database lineage requires
   retiring the old writer and keeping identical complete history. Divergent
   writable clones are unsupported (see `docs/backup.md`).

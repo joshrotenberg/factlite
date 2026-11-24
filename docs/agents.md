@@ -177,8 +177,8 @@ the [queue guide](queues.md).
 
 ## Interfaces
 
-The Rust API, the [CLI](cli.md) and the
-[babashka pod](../crates/factlite-pod/README.md) share these semantics. The
-example is Rust. There is no server and no MCP interface; the design for one
-is in [`design/json-rpc.md`](design/json-rpc.md) and is not authorized to
-build.
+The Rust API, the [CLI](cli.md), the
+[babashka pod](../crates/factlite-pod/README.md) and the
+[JSON-RPC server](rpc.md) share these semantics. The example is Rust. An agent
+in another language can start `factlite-rpc` and keep a store open for a
+session. There is no MCP interface yet; it is plan item 14.3.

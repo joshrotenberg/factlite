@@ -75,23 +75,20 @@ requires. It gains a short current-state section at the top that replaces the
 drifting summary. The README overview and `handoff.md` are rewritten for the
 current state.
 
-## 10. JSON-RPC interface: designed, deferred
+## 10. JSON-RPC interface: authorized, plan step 14
 
 - **Why:** One process-boundary protocol for every language. A long-lived
-  process opens a store once, and the same dispatch can back an MCP server.
+  process opens a store once, and the same dispatch is to back an MCP server.
   The library stays the core.
-- **Design:** [`design/json-rpc.md`](design/json-rpc.md). It would live in this
-  workspace as `crates/factlite-rpc`, a dispatch library and a stdio server
-  binary over the strict wire contract. No such crate exists yet.
-- **When to build:** only after items 3 (open-time integrity) and 4 (lookup
-  refs in transactions) are decided. A ready consumer (Elixir, or agents
-  through MCP) raises the priority but does not skip that condition. Building
-  it needs the user's authorization, like the pod did.
-- **Prerequisites that can land earlier:** public wire decoders for read
-  requests (entity, filter, revision and lookup params, which the CLI parses
-  itself today); and a defined CLI outcome when a commit succeeds but writing
-  its report fails. The latter changes the CLI's exit-code contract, so it
-  needs a decision.
+- **Design:** [`design/json-rpc.md`](design/json-rpc.md), revised on
+  2026-11-23. It lives in this workspace as `crates/factlite-rpc`, a dispatch
+  library and the `factlite-rpc` stdio binary over the strict wire contract
+  (plan 14.2). The MCP binary on the same dispatch is plan 14.3.
+- **Authorized:** by the user on 2026-11-23, with an MCP front end. Items 3
+  and 4, which it waited on, were decided on 2026-11-06.
+- **Still undecided:** the CLI's outcome when a commit succeeds but writing
+  its report fails. It changes the CLI's exit-code contract, and does not
+  block this interface.
 
 ## 11. Agent-native use: explored, first candidates chosen
 
@@ -110,9 +107,9 @@ current state.
 - **Decided 2026-11-23:** candidates 6 and 11, the queue guide with a tested
   claim pattern and the agent guide, move into the plan as step 13. Done:
   [queues](queues.md) and [agents](agents.md).
+- **Decided 2026-11-23:** candidate 1, item 10 with an MCP front end, moves
+  into the plan as step 14.
 - **Decision needed:** which other candidates, if any, to move into the plan.
-  Item 10's decision preconditions (items 3 and 4) are met; it still needs
-  authorization, its two listed prerequisites and a design revision.
 
 ## 12. Joined reads visit every entity holding the driving attribute: found, undecided
 

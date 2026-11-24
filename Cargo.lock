@@ -153,6 +153,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "factlite-rpc"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "factlite",
+ "proptest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

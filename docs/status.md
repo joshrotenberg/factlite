@@ -2,7 +2,7 @@
 
 ## Current state
 
-Updated 2026-11-23 (plan step 13 done). This section is the summary. The entries below are the full
+Updated 2026-11-23 (plan items 14.1 and 14.2 done). This section is the summary. The entries below are the full
 per-item log, oldest first, and are kept as written, so older entries describe
 the state at their time. Where they disagree with this section, this section is
 current.
@@ -11,13 +11,14 @@ current.
   contract, plus the temporal datom index and indexed reads and commits (9.1 to
   9.5), the babashka pod (10.1), consumer requests (11.1 to 11.5), the
   decided roadmap items (12.1 to 12.5), and the queue and agent guides (13.1
-  and 13.2), which changed no library code.
+  and 13.2), which changed no library code. From step 14: the wire read
+  decoders (14.1) and the JSON-RPC stdio server `factlite-rpc` (14.2).
   Storage format 4.
 - **Roadmap:**
   - Item 8: the CLI busy timeout and babashka in CI are done, while `ANALYZE`
     and per-process CLI opens remain open.
   - Item 9 (this summary) is done.
-- **Tests:** 247 pass locally with babashka installed and `REQUIRE_BB=1`,
+- **Tests:** 291 pass locally with babashka installed and `REQUIRE_BB=1`,
   including fifty-five 1,024-case properties and the pod's three babashka
   tests; without babashka those three skip. GitHub Actions runs the same
   script and passed on PR 21's head with 247 tests on 2026-11-23, after the
@@ -35,8 +36,9 @@ current.
   - 12.3: transaction lookup refs (done);
   - 12.4: permanence and encryption guidance (done);
   - 12.5: `avg` and HAVING (done).
-- **Deferred:** the JSON-RPC interface (designed, roadmap 10), the Elixir NIF,
-  and pod registry publishing.
+- **Deferred:** the Elixir NIF and pod registry publishing.
+- **In progress:** plan step 14, the JSON-RPC server (14.1 and 14.2 done) and
+  its MCP front end (14.3).
 - **Explored:** agent-native use (roadmap 11, `design/agent-native.md`),
   written 2026-11-23. Its candidates 6 and 11 are done as plan step 13: the
   [queue guide](queues.md) and the [agent guide](agents.md).
@@ -940,6 +942,26 @@ current.
   and sensitive file names; none were found. Commits carry the user's email
   address as author.
 - **What's next:** unchanged.
+
+## 14.1 Wire decoders for read requests and 14.2 JSON-RPC server: done
+
+- **Done:** the user authorized the JSON-RPC interface with an MCP front end
+  on 2026-11-23 (plan step 14, roadmap 10). `wire` gained public decoders and
+  encoders for an existing entity, an attribute, a projection, a fact filter
+  and a revision. The new crate `crates/factlite-rpc` holds a dispatch library
+  and the `factlite-rpc` stdio binary, with the fourteen methods of the
+  revised design. Guide: [`rpc.md`](rpc.md). `AGENTS.md`, the design, the
+  roadmap, the README, the agent guide and the handoff are updated.
+- **Decisions:** recorded in `decisions.md`, "JSON-RPC server (2026-11-23)":
+  member text is kept and handed to the wire decoders; who defines a member
+  decides how it fails; no notification is executed; ids are echoed as text;
+  one thread; no new runtime dependency.
+- **Validation:** `reviews/0057-json-rpc-server.md`, with Claude and Codex
+  subagent reviews and their outcomes. The 1,024-case parity property and the
+  process scenarios are described in `testing.md`.
+- **Blockers:** none. Still undecided, and not blocking: the CLI's exit code
+  when a commit succeeds and its report cannot be written.
+- **What's next:** 14.3, the MCP front end, on its own branch.
 
 ## Environment notes
 

@@ -868,3 +868,55 @@ change.
 - **Found, not decided for the library:** a read that joins attributes is
   driven from one of them and visits every entity holding it. The pattern
   now avoids this; other workloads may not be able to. Roadmap 12.
+
+## JSON-RPC server (2026-11-23)
+
+The user authorized building the interface designed on 2026-11-05, with an MCP
+front end. `design/json-rpc.md` lists what its revision changed. Decisions made
+while building plan items 14.1 and 14.2:
+
+- **The envelope parser keeps text.** It opens one level of JSON, rejects a
+  repeated key at that level, and hands each member on as the bytes the client
+  sent. The wire decoders therefore apply their own strictness to the request
+  itself, and a malformed transaction fails under its request's id as a
+  Factlite error. Parsing the whole line strictly first would have turned
+  every nested mistake into a -32600 with a null id.
+- **Who owns a member decides how it fails.** Members this interface defines
+  (`handle`, `path`, `to`, `create`, `read_only`, `validation`,
+  `busy_timeout_ms`) fail as -32602. Members the wire contract defines fail as
+  the wire fails them.
+- **Checks run in a fixed order:** the shape of `params`, then the handle,
+  then whether the handle may write, then the wire members, then the store.
+- **Read decoders live in the library's wire module,** not in the adapter, so
+  the JSON spelling of an entity, a filter or a revision is defined once. A
+  property checks that they accept exactly the text the CLI's options accept.
+- **Ids are echoed as text.** Nothing parses a numeric id, so nothing can
+  round it.
+- **No notification is executed.** None of the methods is worth running
+  without its reply, and an unanswerable write is the case the design set out
+  to prevent.
+- **One thread.** A line is read after the previous response is written. The
+  design allows a batch's entries to run in any order; they run in the order
+  sent.
+- **No new runtime dependency.** `serde` and `serde_json` are already used by
+  the library; this crate turns on `serde_json`'s `raw_value` feature, which
+  adds a type and changes no existing behaviour.
+- **Handle names are `h1`, `h2`, and so on, and are not reused** within a
+  process, so a stale name cannot reach a different store.
+- **`create` is not exclusive.** It allows creating; an existing store is
+  opened as it is, as `factlite init` does.
+- **Projections are arrays.** `attrs` is a JSON array, so it can name an
+  attribute whose name contains a comma, which the CLI's comma-separated
+  `--attrs` cannot. The library allows such names.
+- **Syntax before repeats.** The whole line is checked as JSON first, without
+  converting numbers, and only then opened and checked for repeated keys. A
+  line with both a repeated key and a syntax error is a parse error, and a
+  number too large for a machine type is still JSON.
+- **The existence check stays in the adapter for now.** Like the CLI, the
+  server checks that a file exists before the library opens it without
+  `create`. The check races a removal, and an empty file passes it. An
+  "existing store only" open in the library would close both, and would
+  change the library's API, so it is left for a decision.
+- **Left undecided:** the CLI's exit code when a commit succeeds and its
+  report cannot be written. The server has the same gap when its pipe closes,
+  and documents the keyed retry as the recovery.

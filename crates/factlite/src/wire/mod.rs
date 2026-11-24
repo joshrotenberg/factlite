@@ -8,10 +8,15 @@
 mod output;
 mod query;
 pub use query::{decode_query, encode_query, encode_query_result};
+mod read;
 mod strict;
 pub use output::{
     encode_entity, encode_error, encode_facts, encode_history, encode_lookup, encode_report,
     encode_schema, encode_transactions,
+};
+pub use read::{
+    decode_attr, decode_attrs, decode_entity_id, decode_filter, decode_revision, encode_attr,
+    encode_attrs, encode_entity_id, encode_filter, encode_revision,
 };
 
 use base64::{
