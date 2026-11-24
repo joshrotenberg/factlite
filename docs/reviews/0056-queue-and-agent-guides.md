@@ -161,3 +161,11 @@ are not checked by any test.
 - The read-variant table and the extra-index experiment in `measurements.md`
   came from tests that are not in the repository.
 - `agent_session` is an example with assertions, not a property test.
+
+## Addendum, 2026-11-23
+
+Written after the review above and before the merge. The user made the
+repository public, and GitHub Actions then ran. The `check` job passed on the
+branch head `26fb73f` with 247 tests on ubuntu-latest. The statements above
+that GitHub Actions did not run describe the state when the review was
+written. PR #21 was merged after that run.
