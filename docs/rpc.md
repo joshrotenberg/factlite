@@ -6,8 +6,8 @@ than one command. Plan item 14.2; the design and its reasons are in
 [`design/json-rpc.md`](design/json-rpc.md).
 
 It is a thin adapter. Requests carry the same version-1 JSON as the
-[CLI](cli.md), results are the same JSON the CLI prints, and every rule about
-facts, snapshots and retries is the library's.
+[CLI](cli.md), results come from the same library encoders the CLI prints
+with, and every rule about facts, snapshots and retries is the library's.
 
 Build with `cargo build --locked -p factlite-rpc`; the binary is
 `target/debug/factlite-rpc`.
@@ -61,7 +61,7 @@ are refused.
 | `transactions` | `handle`, `after?`, `at?` | `{basis, value}` |
 | `query` | `handle`, `query`, `at?` | `{basis, value}` |
 | `backup` | `handle`, `to` | snapshot of the copy |
-| `shutdown` | none | `{}` |
+| `shutdown` | none; `params` may be omitted | `{}` |
 
 ### Params
 
@@ -72,14 +72,14 @@ are refused.
 | `at` | A snapshot: the object a report or `head` gives, or the compact token string (`d1.…`) the CLI's `--at` takes. Absent: the head, captured once for this call. |
 | `entity` | `{"id":"e1.…"}`. Temporary labels and lookup references belong to transactions. |
 | `attr` | An attribute name, `"namespace/name"`. |
-| `attrs` | An array of attribute names. `[]` projects no fields. |
+| `attrs` | An array of attribute names. `[]` projects no fields. Unlike the CLI's comma-separated `--attrs`, it can name an attribute whose name contains a comma. |
 | `value` | A tagged value, such as `{"i64":"3"}`. |
 | `filter` | An object with any of `entity`, `attr` and `value`. Absent, or `{}`, matches every fact. |
 | `after` | A revision as a decimal string, such as `"12"`. Absent: `"0"`. Events and transactions after it, up to the basis, are returned. |
 | `path`, `to` | A path on the server's filesystem. A relative path is taken from the server's working directory. |
 | `create`, `read_only` | Booleans. Absent: false. |
 | `validation` | `"full"` (the default) or `"structural"`. |
-| `busy_timeout_ms` | A non-negative integer. Absent: 2000. |
+| `busy_timeout_ms` | An integer from 0 to 2147483647. Absent: 2000. A larger integer is refused by the library with `InvalidRequest`. |
 
 ### Results
 
@@ -92,9 +92,18 @@ are refused.
 
 - `open` returns a handle, a short string naming one connection. Names are
   not reused within a process.
-- **`open` creates nothing unless `create` is true.** A path that does not
-  exist fails with `Storage`. With `create`, an existing store is opened as it
-  is.
+- **`open` creates no store unless `create` is true.** A path that does not
+  exist fails with `Storage`: operation `open database` for a writable open,
+  as in the CLI's `transact`, and SQLite's own error for a read-only one, as
+  in the CLI's reads. With `create`, an existing store is opened as it is.
+  Three cases fall outside the rule:
+  - an existing empty file is initialized as a new store, with or without
+    `create`, as the CLI's commands do;
+  - opening an existing store, even read-only, can leave SQLite's `-wal` and
+    `-shm` files beside it;
+  - the check that the file exists runs just before the library opens it, so
+    a file removed in between is created. The CLI has the same gap. Closing
+    it needs an "existing store only" open in the library.
 - **`read_only`** opens a connection that cannot create, upgrade or write.
   `transact` and `backup` on it fail with `InvalidRequest`. A read that names
   no snapshot, and `head`, use the latest head at the time of the call.
@@ -118,10 +127,13 @@ are refused.
   recovered this way: sending it again may commit twice. Start the server with
   `--require-idempotency-key` to refuse unkeyed transactions.
 - **A batch is not a transaction.** An array of requests gets an array of
-  responses, one per request that has an `id`. `transact`, `open`, `close`,
-  `backup` and `shutdown` are refused inside a batch, each with its own
-  -32600 response; the other entries run. One `transact` with one request is
-  the only atomic unit.
+  responses, one per request that has an `id`, plus one -32600 response with
+  a null `id` for each entry that is not a request object. `transact`,
+  `open`, `close`, `backup` and `shutdown` are refused inside a batch, each
+  with its own -32600 response; the other entries run, in order. An empty
+  batch gets one -32600 response, not an array, and a batch of notifications
+  gets no line at all. One `transact` with one request is the only atomic
+  unit.
 - **Reads report their basis.** Two reads that name no snapshot can see
   different revisions. To read one state, pass the first read's `basis` as
   `at` to the rest. A snapshot does not fence a write; use `expect` or
@@ -142,7 +154,7 @@ for Factlite failures, never on a message.
 | -32700 | The line is not JSON, not UTF-8, or longer than the limit. `id` is null. |
 | -32600 | Not a request object: a wrong or missing `jsonrpc` or `method`, an `id` of another kind, an unknown or repeated member, an empty batch, or an order-dependent method inside a batch. `id` is null except for the last case. |
 | -32601 | The method does not exist. |
-| -32602 | `params` is missing or not an object; a member is missing, repeated or unknown; or `handle`, `path`, `to`, `create`, `read_only`, `validation` or `busy_timeout_ms` has the wrong JSON kind. |
+| -32602 | `params` is missing or not an object; a member is missing, repeated or unknown; or `handle`, `path`, `to`, `create`, `read_only`, `validation` or `busy_timeout_ms` is not of its form: a string, a boolean, `"full"` or `"structural"`, a non-negative integer. |
 | -32000 | A Factlite error. `error.data` is `{code, message, context, commit_outcome?}`, the same object the CLI prints under `error`. |
 
 `error.data.code` is one of the library's codes: `InvalidRequest`,
@@ -170,7 +182,8 @@ factlite-rpc --help | --version
 - **Exit codes:** 0 at end of input or after `shutdown`, 2 for invalid
   arguments, 5 when reading stdin or writing stdout fails.
 
-Blank lines are skipped. A last line needs no newline.
+Blank lines within the limit are skipped; a longer line of spaces gets -32700
+like any other. A last line needs no newline.
 
 ## What it is not
 
@@ -192,15 +205,18 @@ Blank lines are skipped. A last line needs no newline.
 In `crates/factlite-rpc/tests/`:
 
 - **`dispatch_parity.rs`:** 1,024 random traces of writes and reads through
-  the dispatcher, each result and each error compared with the library's on
-  the same file.
+  the dispatcher, on a writable and a read-only handle, each result and each
+  error compared with the library's on the same file.
 - **`stdio_protocol.rs`:** the rules above against the real binary: ids,
-  notifications, batches, malformed and oversized lines, params, end of
-  input, `shutdown` and arguments.
+  notifications, batches, malformed and oversized lines, params, wire members
+  whose errors must equal the library decoders' own, end of input,
+  `shutdown`, a closed output and arguments.
 - **`stdio_stores.rs`:** a session compared read by read with the library;
   every refusal code; creation; read-only handles; closed handles; a busy
   store; a keyed retry after the server is killed; and four server processes
   committing to one file.
 
-Not tested: a commit whose outcome is `Unknown`. That needs the library's
-test-only fault hooks, and its own suite covers the retry.
+Not tested: a commit whose outcome is `Unknown`, which needs the library's
+test-only fault hooks (its own suite covers the retry); and the CLI binary
+itself. The tests compare with the library, whose encoders the CLI also
+uses.

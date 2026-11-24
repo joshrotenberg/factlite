@@ -362,14 +362,14 @@ Authorized by the user on 2026-11-23: candidate 1 in
 a thin adapter: storage semantics stay in the library, and requests and results
 are the version-1 wire contract.
 
-- [ ] **14.1 Wire decoders for read requests.** Public decoders and encoders
+- [x] **14.1 Wire decoders for read requests.** Public decoders and encoders
   in `wire` for the parts of a read request that the CLI takes from options:
   an existing entity, an attribute name, an attribute list, a fact filter and
   a revision. Coverage:
   - 1,024-case round-trip properties for each;
   - strictness cases: a duplicate key, an unknown field, a wrong JSON kind, a
     temporary or lookup entity, a revision that is not canonical decimal.
-- [ ] **14.2 `factlite-rpc`: dispatch and stdio server.** JSON-RPC 2.0, one
+- [x] **14.2 `factlite-rpc`: dispatch and stdio server.** JSON-RPC 2.0, one
   message per line, as designed in [`design/json-rpc.md`](design/json-rpc.md)
   and revised there on 2026-11-23. Methods: `open`, `close`, `head`, `verify`,
   `transact`, `schema`, `facts`, `pull`, `lookup`, `history`, `transactions`,

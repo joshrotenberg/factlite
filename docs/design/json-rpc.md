@@ -59,8 +59,14 @@ retry rules below. Revisit this design if either is adopted.
 - `open` never creates a file unless `create: true` is passed, so a mistyped
   path fails instead of making an empty store. This matches the CLI, which
   creates stores only through `init`. A missing path fails with Factlite
-  `Storage` and the operation `open database`, as in the CLI. `create` with
-  `read_only` is refused.
+  `Storage`: the operation `open database` for a writable open, as in the
+  CLI's `transact`, and SQLite's error for a read-only open, as in its reads.
+  The existence check runs just before the library's open, which can still
+  create, so a file removed in between is created; the CLI shares the gap. `create` with
+  `read_only` is refused. An existing empty file is initialized by the
+  library as a new store with or without `create`, as the CLI's commands
+  initialize one. Closing that case would need an "existing store only" open
+  in the library.
 - A writable `open` upgrades older formats in place, as `Store::open` does. A
   `read_only: true` open fails `UnsupportedFormat` on older formats, as
   `Db::open_read_only` does.
@@ -71,8 +77,8 @@ retry rules below. Revisit this design if either is adopted.
   `InvalidRequest`, and `head` returns the latest head through `Db::at_head`.
 - Opening the same path twice gives two handles with separate connections, the
   same as two processes.
-- `close` waits for in-flight requests on that handle, then releases it. Later
-  requests on it fail `InvalidRequest`.
+- `close` releases the handle. Requests are handled one at a time, so none is
+  in flight. Later requests on it fail `InvalidRequest`.
 - The process ends at end of input or on `shutdown`. SQLite makes every commit
   either complete or absent, but a commit interrupted by a crash or SIGKILL
   leaves the client without an outcome. It recovers with a keyed retry (see
@@ -184,8 +190,8 @@ design, and must bind snapshot, query, parameters and ordering.
   - -32601: an unknown method.
   - -32602: params that are missing or not an object; a missing, duplicate
     or unknown member; or a member this interface defines (`handle`, `path`,
-    `to`, `create`, `read_only`, `validation`, `busy_timeout_ms`) of the wrong
-    JSON kind. A member the wire contract defines is decoded by the wire and
+    `to`, `create`, `read_only`, `validation`, `busy_timeout_ms`) that is not
+    of its form. A member the wire contract defines is decoded by the wire and
     fails as a Factlite error.
 - **Factlite errors**, including wire decoding failures inside params, use code
   -32000. `error.message` is the library message. `error.data` is the inner
@@ -278,10 +284,10 @@ as it stands and to settle what the first version left open.
   or null is refused.
 - **No notification is executed,** not only the order-dependent ones.
 - **Blank lines are skipped;** oversized lines are discarded while read.
-- **One thread.** The first version left the threading open.
+- **One thread.** The first version left the threading open, and said
+  `close` waits for requests in flight; with one thread there are none.
 - **`--require-idempotency-key`** is built, not only suggested.
 - **The read decoders are in the wire module,** and the envelope parser keeps
   member text instead of rebuilding it.
 - **The `Unknown` recovery test is left to the library's fault suite.**
 - **The CLI's outcome when its report cannot be written is still undecided.**
-

@@ -243,3 +243,26 @@ files, and no assertion depends on elapsed time. The pattern's mutations
 listed in `queues.md` were applied by hand, not by a tool. `scripts/check.sh`
 runs the `work_queue` walkthrough, a small measured run with three worker
 processes, and the `agent_session` example.
+
+The read-request decoders (plan 14.1) are tested in `tests/wire_read.rs`:
+strictness cases for each, 1,024-case round trips, and a property that the
+JSON spellings of an entity, an attribute and a revision accept exactly the
+text the CLI's options accept. The JSON-RPC server (plan 14.2) is tested in
+`crates/factlite-rpc/tests`. `dispatch_parity.rs` runs 1,024 random traces of
+colliding writes and reads through the dispatcher and compares every result
+and error with the library on the same file, including keyed replays and
+reads at earlier snapshots in both spellings. `stdio_protocol.rs` and
+`stdio_stores.rs` drive the real binary over pipes: ids, notifications,
+batches, malformed and oversized lines, params, end of input and `shutdown`;
+a session compared read by read with the library; every refusal code;
+creation, read-only, closed and busy handles; a keyed retry after the server
+is killed; and four server processes, started behind a barrier, committing to
+one file. `guide_session.rs` runs the session printed in `rpc.md`. Unit tests
+cover the line reader, the envelope parser and flushing with partial writes.
+Writes in the parity property have an independent oracle: a backup of the
+store, which keeps its identity and allocation state, receives every request
+through the library, and its reports and errors must equal the dispatcher's.
+Hand mutations of the crate's source are listed in the review record; the
+script that applied them is not in the repository. A commit whose outcome is
+`Unknown` is not tested through the server, and the CLI binary is not run by
+these tests.

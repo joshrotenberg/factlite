@@ -905,7 +905,18 @@ while building plan items 14.1 and 14.2:
   process, so a stale name cannot reach a different store.
 - **`create` is not exclusive.** It allows creating; an existing store is
   opened as it is, as `factlite init` does.
+- **Projections are arrays.** `attrs` is a JSON array, so it can name an
+  attribute whose name contains a comma, which the CLI's comma-separated
+  `--attrs` cannot. The library allows such names.
+- **Syntax before repeats.** The whole line is checked as JSON first, without
+  converting numbers, and only then opened and checked for repeated keys. A
+  line with both a repeated key and a syntax error is a parse error, and a
+  number too large for a machine type is still JSON.
+- **The existence check stays in the adapter for now.** Like the CLI, the
+  server checks that a file exists before the library opens it without
+  `create`. The check races a removal, and an empty file passes it. An
+  "existing store only" open in the library would close both, and would
+  change the library's API, so it is left for a decision.
 - **Left undecided:** the CLI's exit code when a commit succeeds and its
   report cannot be written. The server has the same gap when its pipe closes,
   and documents the keyed retry as the recovery.
-
