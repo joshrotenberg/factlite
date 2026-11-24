@@ -38,20 +38,21 @@ A job is an entity. Every attribute holds one value.
 | `job/queue` | keyword | Which queue the job is in. |
 | `job/state` | keyword | `pending`, `claimed`, `done` or `failed`. |
 | `job/payload` | string | What to do. Permanent; see [permanence](#permanence). |
-| `job/run-after` | inst | When the job becomes claimable. Held only while pending. |
+| `job/run-after` | inst | When the job becomes claimable. Set to "never" while the job is not pending. |
 | `job/attempt` | i64 | Claims made so far. The fence. |
 | `job/owner` | string | The last worker to claim the job. |
-| `job/lease-until` | inst | When another worker may take the job. Held only while claimed. |
+| `job/lease-until` | inst | When another worker may take the job. Set to "never" once the job is no longer claimed. |
 | `job/result` | string | Set by finish or fail. |
 
 A job moves from `pending` to `claimed` and then to `done` or `failed`. A
 claimed job can also go back to `pending` (release), or stay `claimed` under a
 new owner and the next attempt (takeover).
 
-A job holds a due time only while pending and a lease only while claimed.
-Claiming retracts the due time; finishing, failing and releasing retract the
-lease. The values stay in history. This is what keeps finished jobs out of
-the reads that find claimable work; see [costs](#costs).
+A job holds a real due time only while pending and a real lease only while
+claimed. Claiming sets the due time to "never", the largest instant;
+finishing, failing and releasing set the lease to it. The real values stay in
+history. This is what keeps finished jobs out of the reads that find
+claimable work; see [costs](#costs).
 
 Factlite records no clock. Every function takes the current time from its
 caller.
@@ -64,12 +65,12 @@ hold for the commit to be accepted.
 | Operation | Expects | Writes | Idempotency key |
 | --- | --- | --- | --- |
 | `enqueue` | nothing | a new pending job at attempt 0 | from `job/id` |
-| `try_claim`, pending job | state `pending`, attempt as read | state `claimed`, owner, lease, attempt + 1; retracts the due time | none |
+| `try_claim`, pending job | state `pending`, attempt as read | state `claimed`, owner, lease, attempt + 1; due time "never" | none |
 | `try_claim`, expired job | state `claimed`, lease and attempt as read | owner, lease, attempt + 1 | none |
-| `heartbeat` | state `claimed`, owner, attempt, lease | a later lease, never an earlier one | none |
-| `finish` | state `claimed`, owner, attempt, lease | state `done`, result; retracts the lease | from job and attempt |
-| `fail` | state `claimed`, owner, attempt, lease | state `failed`, result; retracts the lease | none |
-| `release` | state `claimed`, owner, attempt, lease | state `pending`, a new due time; retracts the lease | none |
+| `heartbeat` | state `claimed`, owner, attempt | a later lease, never an earlier one | none |
+| `finish` | state `claimed`, owner, attempt | state `done`, result; lease "never" | from job and attempt |
+| `fail` | state `claimed`, owner, attempt | state `failed`, result; lease "never" | none |
+| `release` | state `claimed`, owner, attempt | state `pending`, a new due time; lease "never" | none |
 
 `candidates` reads the jobs claimable at one snapshot: pending jobs that are
 due, oldest first, then claimed jobs whose lease has passed. Factlite queries
@@ -78,9 +79,10 @@ own limit. `try_claim` refuses, without committing, a candidate that is not
 claimable at the time it is given. `claim` reads candidates, tries one, and
 reads again if it lost.
 
-A claim belongs to one thread of control. Each heartbeat returns the claim to
-use from then on. A copy from before a heartbeat no longer matches the stored
-lease and is refused like a lost claim.
+Copies of a claim are interchangeable. Any copy at the current attempt may
+write, so a heartbeat thread can run beside the thread doing the work, and a
+worker that did not see a heartbeat's outcome can carry on with the claim it
+has.
 
 Only enqueue and finish are keyed. A repeated `fail` or `release` whose first
 call committed returns `false`, because the job is no longer claimed; read the
@@ -111,17 +113,21 @@ Each line names the test in
   contention; the one above does.
 - **Only the current holder can write.** Heartbeat, finish, fail and release
   are accepted only while the job is claimed, from the owner, at the current
-  attempt and lease. The attempt is needed as well as the owner and lease: a
-  worker that releases a job and claims it again at the same instant holds
-  two claims that differ only in the attempt.
+  attempt. The attempt is needed as well as the owner: a worker that releases
+  a job and claims it again at the same instant holds two claims that differ
+  only in the attempt.
   `an_expired_lease_is_taken_and_the_old_claim_can_no_longer_commit`,
   `a_worker_that_claims_its_own_expired_job_again_loses_the_earlier_claim`,
   `a_claim_from_before_a_release_is_refused_even_with_the_same_owner_and_lease`.
-- **A takeover needs an expired lease and loses races.** It loses to a
-  heartbeat because it expects the lease it read, and to a late finish, fail
-  or release because it expects the job to still be claimed.
+- **A takeover needs an expired lease and loses races.** It expects the lease
+  it read. A heartbeat changes that lease, and a late finish, fail or release
+  sets it to "never", so the takeover is refused in each case. It also
+  expects the job to still be claimed, as a second guard.
   `a_heartbeat_between_read_and_reclaim_wins`,
   `a_takeover_loses_to_a_late_finish_fail_or_release`.
+- **Copies of a claim are interchangeable.** A copy from before a heartbeat
+  finishes the job, and the copy the heartbeat returned then repeats that
+  finish exactly. The end of `a_heartbeat_between_read_and_reclaim_wins`.
 - **A stale read cannot claim.** A candidate read before the job was claimed
   and released is refused, because the attempt moved. A candidate is also
   refused before the time it was read for.
@@ -129,7 +135,8 @@ Each line names the test in
   `a_candidate_is_not_claimed_before_the_time_it_was_read_for`.
 - **A heartbeat never shortens a lease.**
   `a_heartbeat_never_shortens_the_lease`.
-- **A due time is held only while pending and a lease only while claimed.**
+- **A real due time is held only while pending and a real lease only while
+  claimed,** through claim, release, takeover, finish and fail.
   `a_job_holds_a_due_time_only_while_pending_and_a_lease_only_while_claimed`.
 - **The original enqueue stays exact after the job is rescheduled,** and a job
   id is refused in a second queue.
@@ -158,16 +165,17 @@ Each line names the test in
   the process tests and by Factlite's own commit serialization.
 
 Sixteen single changes to the pattern were each tried by hand. Fourteen made
-at least one test fail: removing the owner, attempt or lease expectation from
+at least one test fail: removing the state, owner or attempt expectation from
 a holder's write; removing the attempt expectation from a claim; removing the
-lease expectation from a takeover; keeping the due time on a claim or the
-lease on a finish; letting a heartbeat shorten a lease; removing the check
-that a candidate is claimable at the claimer's time; four changes to the
-boundaries of "due" and "expired"; and dropping the attempt from the finish
-key. Two passed every test: removing the state expectation from a holder's
-write, and from a takeover. Both are implied by the lease expectation, since
-a job that is not claimed holds no lease. They are kept as a second guard.
-This was not done with a mutation tool.
+lease expectation from a takeover; leaving the real due time on a claim or
+the real lease on a job given up; letting a heartbeat shorten a lease;
+removing the check that a candidate is claimable at the claimer's time; four
+changes to the boundaries of "due" and "expired"; and dropping the attempt
+from the finish key. Two passed every test, because another expectation
+implies each: the state expectation on a takeover, implied by the lease
+expectation, and the state expectation on a pending claim, implied by the
+attempt expectation. Both are kept as a second guard. This was not done with
+a mutation tool.
 
 ## What is not guaranteed
 
@@ -219,28 +227,29 @@ machine, not a latency promise. Method and more figures:
 
 | Workers | Jobs | Spread | Jobs per second | Lost claims | File | Writable reopen |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 500 | 1 | 1,292 | 0 | 4.8 MB | 49 ms |
-| 1 | 2,000 | 1 | 1,214 | 0 | 19.0 MB | 197 ms |
-| 4 | 2,000 | 1 | 1,164 | 220 | 19.0 MB | 193 ms |
-| 4 | 2,000 | 8 | 1,099 | 120 | 19.0 MB | 197 ms |
-| 8 | 2,000 | 16 | 1,070 | 123 | 19.1 MB | 195 ms |
-| 1 | 8,000 | 1 | 1,029 | 0 | 75.8 MB | 817 ms |
-| 4 | 8,000 | 8 | 998 | 735 | 76.2 MB | 813 ms |
+| 1 | 500 | 1 | 1,182 | 0 | 5.2 MB | 53 ms |
+| 1 | 2,000 | 1 | 951 | 0 | 20.7 MB | 257 ms |
+| 4 | 2,000 | 1 | 1,008 | 248 | 20.6 MB | 216 ms |
+| 4 | 2,000 | 8 | 853 | 102 | 20.7 MB | 268 ms |
+| 8 | 2,000 | 16 | 1,009 | 147 | 20.9 MB | 220 ms |
+| 1 | 8,000 | 1 | 925 | 0 | 82.7 MB | 922 ms |
+| 4 | 8,000 | 8 | 870 | 866 | 83.1 MB | 913 ms |
 
 What these runs show:
 
-- **Each job is three permanent revisions and about 9.5 KB of file.** Enqueue,
-  claim and finish; more with heartbeats, releases or takeovers. Nothing can
-  be removed, and the file does not shrink.
-- **A writable open cost 32 to 34 microseconds per revision:** 0.8 s after
+- **Each job is three permanent revisions and about 10.3 KB of file.**
+  Enqueue, claim and finish; more with heartbeats, releases or takeovers.
+  Nothing can be removed, and the file does not shrink.
+- **A writable open cost 35 to 45 microseconds per revision:** 0.9 s after
   8,000 jobs. Every worker process pays it at start.
 - **A claim slows a little as finished jobs accumulate.** The read that starts
   every claim took 0.22 ms with no finished jobs. With 8,000 finished it took
   0.6 ms, and 1.0 ms once the leases those jobs were worked under had passed:
   roughly 0.05 to 0.1 ms per 1,000 finished jobs.
-- **More worker processes did not raise throughput.** Commits are serialized
-  by SQLite's lock and these workers do nothing else. Several workers are for
-  running handlers at the same time, not for draining faster.
+- **More worker processes did not raise throughput.** It stayed between 850
+  and 1,200 jobs per second in every run. Commits are serialized by SQLite's
+  lock and these workers do nothing else. Several workers are for running
+  handlers at the same time, not for draining faster.
 
 What to do about it:
 
@@ -252,23 +261,34 @@ What to do about it:
   one due time are read as a whole tie: with 2,000 pending jobs a candidate
   read took 0.22 ms with distinct due times and 2.0 ms with one.
 
-### Why the pattern retracts scheduling values
+### Why a finished job's times are set to "never"
 
-An earlier form of this pattern left `job/run-after` and `job/lease-until` on
-finished jobs. Its claim read took 6.5 ms with 8,000 finished jobs, and one
-worker's throughput fell from 1,185 jobs per second over 500 jobs to 258 over
-8,000 ([before](benchmarks/2026-11-23-macos-work-queue-before.jsonl)). A
-reviewer measured 12.6 ms for the same read once those jobs' leases had
-passed, a case the runs above did not include.
+The first form of this pattern left `job/run-after` and `job/lease-until` as
+they were on finished jobs. Its claim read took 6.5 ms with 8,000 finished
+jobs, and one worker's throughput fell from 1,185 jobs per second over 500
+jobs to 258 over 8,000
+([before](benchmarks/2026-11-23-macos-work-queue-before.jsonl)). A reviewer
+measured 12.6 ms for the same read once those jobs' leases had passed, a case
+those runs did not include.
 
 The cause is how the two reads are executed. Each is driven from a time
 range, due times up to now or leases before now, and then looks up the
 queue, state and attempt of every job in that range. Finished jobs have the
 oldest times, so every read stepped over all of them before reaching a
-pending job. A review reproduced this from the query plan of the generated
-SQL on plain SQLite. Once a finished job holds neither value, the range
-holds only closed intervals for it, which are skipped from the index without
-a lookup. That is the remaining slope.
+pending job. Two reviews reproduced this from the query plan of the
+generated SQL on plain SQLite.
+
+Once a job that is not pending holds "never" as its due time, and a job that
+is not claimed holds it as its lease, no finished job has a current value in
+either range. What remains in range are its earlier values, which are closed
+intervals and are skipped from the index without a lookup. That is the
+remaining slope.
+
+Retracting the two values would do the same with one event fewer per write,
+but a retraction must name the stored value. Finish, fail and release would
+then have to expect the exact lease, and a worker whose copy of the claim
+predates a heartbeat would be refused while it still held the job. Writing a
+value replaces whatever is stored, so the lease stays out of the fence.
 
 This is a property of how Factlite executes a query that joins attributes,
 not only of queues. It is recorded in the [roadmap](roadmap.md), item 12.

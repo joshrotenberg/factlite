@@ -9,7 +9,7 @@ use factlite::{
     Db, EntityId, ErrorCode, FactFilter, Operation, PulledValue, Revision, Store, TempId, Tx, Value,
 };
 use proptest::prelude::*;
-use queue::{Basis, CLAIMED, Candidate, Claim, DONE, FAILED, PENDING, attr};
+use queue::{Basis, CLAIMED, Candidate, Claim, DONE, FAILED, NEVER, PENDING, attr};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -192,40 +192,54 @@ fn a_heartbeat_between_read_and_reclaim_wins() {
         None
     );
     assert_eq!(store.head().unwrap(), head);
-    // The claim from before the heartbeat is out of date about its own lease
-    // and is refused; the current one is accepted.
-    assert!(!queue::finish(&store, &held, "a", "ok").unwrap());
-    assert_eq!(store.head().unwrap(), head);
+    // Copies of a claim are interchangeable. The copy from before the
+    // heartbeat finishes the job, and the copy the heartbeat returned then
+    // repeats that finish exactly.
+    assert!(queue::finish(&store, &held, "a", "ok").unwrap());
+    let head = store.head().unwrap();
     assert!(queue::finish(&store, &extended, "a", "ok").unwrap());
+    assert_eq!(store.head().unwrap(), head);
 }
 
 #[test]
 fn a_job_holds_a_due_time_only_while_pending_and_a_lease_only_while_claimed() {
-    let (_dir, store) = open();
-    let job = queue::enqueue(&store, QUEUE, "a", "", 3).unwrap();
-    let times = |store: &Store| {
-        let db = store.db().unwrap();
-        (
-            one(&db, &job, "job/run-after"),
-            one(&db, &job, "job/lease-until"),
-        )
-    };
-    assert_eq!(times(&store), (Some(Value::Inst(3)), None));
-    let held = claim(&store, "a", 3).unwrap();
-    assert_eq!(times(&store), (None, Some(Value::Inst(3 + LEASE))));
-    assert!(queue::release(&store, &held, "a", 9).unwrap());
-    assert_eq!(times(&store), (Some(Value::Inst(9)), None));
-    let held = claim(&store, "b", 9).unwrap();
-    let taken = claim(&store, "c", 9 + LEASE + 1).unwrap();
-    assert_eq!(times(&store), (None, Some(Value::Inst(taken.lease_until))));
-    assert!(!queue::finish(&store, &held, "b", "late").unwrap());
-    assert!(queue::finish(&store, &taken, "c", "ok").unwrap());
-    assert_eq!(times(&store), (None, None));
-    // The values are gone from the head, not from history.
-    assert_eq!(
-        asserted(&store.db().unwrap(), &job, "job/run-after"),
-        [Value::Inst(3), Value::Inst(9)]
-    );
+    for ending in ["finish", "fail"] {
+        let (_dir, store) = open();
+        let job = queue::enqueue(&store, QUEUE, "a", "", 3).unwrap();
+        let times = |store: &Store| {
+            let db = store.db().unwrap();
+            let time = |name: &str| match one(&db, &job, name) {
+                Some(Value::Inst(time)) => Some(time),
+                None => None,
+                other => panic!("{name} must be an instant, not {other:?}"),
+            };
+            (time("job/run-after"), time("job/lease-until"))
+        };
+        // A job that has never been claimed has no lease at all.
+        assert_eq!(times(&store), (Some(3), None));
+        let held = claim(&store, "a", 3).unwrap();
+        assert_eq!(times(&store), (Some(NEVER), Some(3 + LEASE)));
+        assert!(queue::release(&store, &held, "a", 9).unwrap());
+        assert_eq!(times(&store), (Some(9), Some(NEVER)));
+        let held = claim(&store, "b", 9).unwrap();
+        let taken = claim(&store, "c", 9 + LEASE + 1).unwrap();
+        assert_eq!(times(&store), (Some(NEVER), Some(taken.lease_until)));
+        assert!(!queue::finish(&store, &held, "b", "late").unwrap());
+        assert!(
+            match ending {
+                "finish" => queue::finish(&store, &taken, "c", "ok"),
+                _ => queue::fail(&store, &taken, "c", "no"),
+            }
+            .unwrap()
+        );
+        assert_eq!(times(&store), (Some(NEVER), Some(NEVER)), "after {ending}");
+        // No clock reaches the value, so the job is in neither read.
+        let found = queue::candidates(&store.db().unwrap(), QUEUE, NEVER - 1, 8).unwrap();
+        assert_eq!(found, []);
+        // The real times are in history.
+        let due: Vec<Value> = [3, NEVER, 9, NEVER].map(Value::Inst).into();
+        assert_eq!(asserted(&store.db().unwrap(), &job, "job/run-after"), due);
+    }
 }
 
 #[test]
@@ -349,8 +363,8 @@ fn a_takeover_loses_to_a_late_finish_fail_or_release() {
             }
             .unwrap()
         );
-        // None of these touches the lease or the attempt, so only the state
-        // expectation stops the takeover.
+        // Each of these sets the lease to never, so the lease the takeover
+        // expects is gone. Its state expectation is a second guard.
         let head = store.head().unwrap();
         assert_eq!(
             queue::try_claim(&store, &stale[0], "b", LEASE + 1, LEASE).unwrap(),
@@ -623,14 +637,22 @@ fn run_trace(operations: &[(u8, usize, usize, i64)]) {
                 .owner
                 .map(|owner| Value::String(WORKERS[owner].into()))
         );
-        // A due time only while pending, a lease only while claimed.
-        assert_eq!(
-            stored("job/run-after"),
-            (model.state == PENDING).then_some(Value::Inst(model.run_after))
-        );
+        // A real due time only while pending, a real lease only while
+        // claimed, and no lease at all before the first claim.
+        let due = if model.state == PENDING {
+            model.run_after
+        } else {
+            NEVER
+        };
+        let lease = if model.state == CLAIMED {
+            model.lease_until
+        } else {
+            NEVER
+        };
+        assert_eq!(stored("job/run-after"), Some(Value::Inst(due)));
         assert_eq!(
             stored("job/lease-until"),
-            (model.state == CLAIMED).then_some(Value::Inst(model.lease_until))
+            model.owner.map(|_| Value::Inst(lease))
         );
         assert_eq!(stored("job/result"), model.result());
         assert_eq!(claimable.contains(&model.entity), model.claimable(now));

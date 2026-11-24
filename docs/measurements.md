@@ -267,7 +267,7 @@ cargo run --release --locked -p factlite --example work_queue -- \
 
 The run enqueues every job with a distinct due time in the past, starts the
 worker processes, and has them begin claiming at the same instant, two
-seconds after the last is started. Each worker claims, reads the job and
+seconds after the first is started. Each worker claims, reads the job and
 finishes it, with no work in between. `drain_ms` runs from that instant to
 the last worker's exit. One run per configuration.
 
@@ -284,25 +284,27 @@ Raw output:
 
 | Workers | Jobs | Spread | Drain ms | Jobs per second | Lost claims | Candidate read ms: start, end, after leases | File bytes | Writable open ms |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 500 | 1 | 387 | 1,292 | 0 | 0.223, 0.239, 0.269 | 4,800,512 | 48.5 |
-| 1 | 2,000 | 1 | 1,647 | 1,214 | 0 | 0.217, 0.308, 0.409 | 18,972,672 | 197.2 |
-| 4 | 2,000 | 1 | 1,718 | 1,164 | 220 | 0.216, 0.311, 0.411 | 18,976,768 | 193.2 |
-| 4 | 2,000 | 8 | 1,820 | 1,099 | 120 | 0.217, 0.313, 0.422 | 18,997,248 | 197.1 |
-| 8 | 2,000 | 16 | 1,870 | 1,070 | 123 | 0.225, 0.307, 0.407 | 19,132,416 | 194.7 |
-| 1 | 8,000 | 1 | 7,778 | 1,029 | 0 | 0.215, 0.613, 0.980 | 75,759,616 | 816.7 |
-| 4 | 8,000 | 8 | 8,014 | 998 | 735 | 0.213, 0.599, 1.071 | 76,156,928 | 812.5 |
+| 1 | 500 | 1 | 423 | 1,182 | 0 | 0.216, 0.242, 0.267 | 5,238,784 | 53.0 |
+| 1 | 2,000 | 1 | 2,104 | 951 | 0 | 0.222, 0.327, 1.123 | 20,676,608 | 256.9 |
+| 4 | 2,000 | 1 | 1,984 | 1,008 | 248 | 0.229, 0.312, 0.409 | 20,647,936 | 215.6 |
+| 4 | 2,000 | 8 | 2,346 | 853 | 102 | 0.223, 0.326, 0.451 | 20,742,144 | 268.3 |
+| 8 | 2,000 | 16 | 1,983 | 1,009 | 147 | 0.222, 0.321, 0.423 | 20,910,080 | 220.2 |
+| 1 | 8,000 | 1 | 8,649 | 925 | 0 | 0.224, 0.610, 1.031 | 82,685,952 | 921.8 |
+| 4 | 8,000 | 8 | 9,200 | 870 | 866 | 0.221, 0.596, 0.983 | 83,062,784 | 913.4 |
 
-Each job is three revisions (`3 * jobs + 2` in every run) and about 9.5 KB of
-file. A writable open cost 32 to 34 microseconds per revision. The candidate
-read grew by about 0.05 ms per 1,000 finished jobs, and about 0.1 ms once
-their leases had passed. `lost_claims` can undercount: a worker that meets a
+Each job is three revisions (`3 * jobs + 2` in every run) and about 10.3 KB
+of file. A writable open cost 35 to 45 microseconds per revision. The
+candidate read grew by about 0.05 ms per 1,000 finished jobs, and about 0.1
+ms once their leases had passed. The after-leases reading of 1.123 ms in the
+second row is out of line with the four other 2,000-job runs, 0.41 to 0.45
+ms, and was not repeated. `lost_claims` can undercount: a worker that meets a
 busy store in the middle of a claim drops the losses it had counted in that
 call.
 
 ### Before finished jobs gave up their scheduling values
 
-The first form of the pattern never retracted `job/run-after` or
-`job/lease-until`. Raw output:
+The first form of the pattern left `job/run-after` and `job/lease-until` as
+they were on finished jobs. Raw output:
 [benchmarks/2026-11-23-macos-work-queue-before.jsonl](benchmarks/2026-11-23-macos-work-queue-before.jsonl).
 It has no after-leases reading.
 
@@ -346,8 +348,14 @@ in the attribute and value index, with the queue, state and attempt looked up
 by primary key for each job in the range. The plan inside the bundled SQLite
 was not captured. Finished jobs hold the oldest times, so the scan passed all
 of them before the first pending job. An interval that has been retracted is
-rejected from the index alone, with no lookup, which is why retracting the
-two values removes most of the cost and leaves a smaller linear term.
+rejected from the index alone, with no lookup, which is why moving the two
+values out of the scanned ranges removes most of the cost and leaves a
+smaller linear term.
+
+An intermediate form retracted the two values instead of setting them to the
+largest instant. It measured slightly better, 998 to 1,292 jobs per second
+and about 9.5 KB per job, with the same reads. It was replaced because its
+writes had to expect the exact stored lease.
 
 Two other observations on the first form:
 

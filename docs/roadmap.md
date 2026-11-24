@@ -122,9 +122,10 @@ current state.
   and looked up the other three for every job in that range, including every
   finished job. Figures and method: [measurements](measurements.md), "Work
   queue pattern".
-- **Worked around in the pattern:** a finished job now holds no due time and
-  no lease, so the range holds only retracted intervals for it, which are
-  skipped from the index. The read is 0.6 to 1.0 ms at 8,000 finished jobs.
+- **Worked around in the pattern:** a finished job now holds the largest
+  instant as its due time and lease, so each range holds only closed
+  intervals for it, which are skipped from the index. The read is 0.6 to 1.0
+  ms at 8,000 finished jobs.
   A workload whose finished entities must keep the attribute a read is
   driven from cannot do the same.
 - **What is known:**

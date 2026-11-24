@@ -820,28 +820,31 @@ change.
   `tests/work_queue.rs` both include, so the guide describes the code that is
   tested.
 - **The fence is the attempt number.** Every write by a holder expects
-  `job/state`, `job/owner` and `job/attempt`. Owner alone is not enough: one
-  worker name can claim the same job twice. A mutation that removed the
+  `job/state`, `job/owner` and `job/attempt`, and not the lease. Owner alone
+  is not enough: one worker name can claim the same job twice. A mutation that removed the
   attempt expectation passed the first test suite, which led to a
   deterministic case and a property that keeps every claim a worker was ever
   given.
-- **A takeover expects state, lease and attempt.** An expectation covers one
-  attribute, so expecting the lease alone would let a takeover follow a late
-  finish. The lease expectation makes it lose to a heartbeat.
+- **A takeover expects state, lease and attempt.** The lease expectation
+  makes it lose to a heartbeat, and to a late finish, fail or release, which
+  set the lease to the largest instant. The state expectation is a second
+  guard for the latter.
 - **Time alone takes nothing away.** An expired lease that nobody has taken
   still belongs to its owner. The store has no clock, so this is the only
   rule it can enforce.
-- **A job holds a due time only while pending and a lease only while
-  claimed.** A claim retracts `job/run-after`; finish, fail and release
-  retract `job/lease-until`. The first form of the pattern retracted nothing,
-  and its claim read was driven through every finished job: 6.5 ms at 8,000
-  finished jobs against 0.6 ms now. The cost is one more event per claim and
-  per finish, about 0.8 KB more file per job. `job/owner` is still the last
-  claimant and stays on a finished job.
-- **A holder's write also expects the lease it records,** so the retraction
-  names the stored value. This makes a claim copied before a heartbeat fail
-  like a lost one, and makes the state expectations on a holder's write and
-  on a takeover redundant. They are kept as a second guard.
+- **A job holds a real due time only while pending and a real lease only
+  while claimed.** A claim sets `job/run-after` to the largest instant;
+  finish, fail and release set `job/lease-until` to it. The first form of the
+  pattern left both alone, and its claim read was driven through every
+  finished job: 6.5 ms at 8,000 finished jobs against 0.6 ms now. The cost is
+  two more events per claim and per finish, about 1.6 KB more file per job.
+  `job/owner` is still the last claimant and stays on a finished job.
+- **A value, not a retraction.** Retracting the two attributes was tried. A
+  retraction must name the stored value, so every write that gave a job up
+  had to expect the exact lease, and a claim copied before a heartbeat was
+  refused while its worker still held the job. Writing a value replaces what
+  is stored, the lease stays out of the fence, and copies of a claim are
+  interchangeable.
 - **`claim` commits without rechecking the time;** `try_claim` checks it. A
   candidate that `claim` has just read for the same instant can only be
   refused by a commit, so the retry loop always makes progress. With the

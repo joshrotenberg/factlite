@@ -888,13 +888,14 @@ current.
   its test, what is not guaranteed, and measured costs. Measurements in
   `measurements.md`.
 - **Decisions:** see `decisions.md`, "Work queue pattern and agent
-  conventions". The fence is the attempt number and the lease; a takeover
-  expects state, lease and attempt; a job holds a due time only while pending
-  and a lease only while claimed; the caller supplies the clock.
+  conventions". The fence is the attempt number; a takeover expects state,
+  lease and attempt; a job holds a real due time only while pending and a
+  real lease only while claimed; the caller supplies the clock.
 - **Validation:** local `scripts/check.sh` with `REQUIRE_BB=1`; GitHub Actions
   is unavailable. Of sixteen single changes to the pattern tried by hand,
   fourteen fail at least one test and two remove expectations that others
-  imply. The process tests passed repeated runs.
+  imply. The process tests passed repeated runs. GitHub Actions refused
+  every job on this branch for billing, including a re-run.
   Independent Claude and Codex subagent reviews are recorded in
   `reviews/0056-queue-and-agent-guides.md`.
 - **Blockers:** none.
