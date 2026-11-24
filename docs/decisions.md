@@ -975,3 +975,7 @@ Plan item 14.3, designed in `design/mcp.md`. Decisions made while building it:
   stream with backoff in its interactive mode.
 - **No state is kept for an open stream.** Nothing is ever written for it, so
   a later `notifications/cancelled` needs no bookkeeping.
+- **Argument errors drop the JSON-RPC wording.** A wrong tool argument is a
+  tool result for the model, so its message is the problem alone (`missing
+  member: tx`), without the `invalid params:` prefix the JSON-RPC server puts
+  on a -32602 error. Found in an interactive `mcp-repl` session.

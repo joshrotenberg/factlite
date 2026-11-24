@@ -900,10 +900,15 @@ fn cached(mut result: Json, ttl_ms: u64) -> Json {
 }
 
 /// The Factlite error object for any failure of a tool call.
+///
+/// An argument error carries its own message, without the JSON-RPC wording
+/// (`invalid params: ...`) that the dispatcher adds for a protocol error: a
+/// tool error is a result for the model to read, not a protocol failure.
 fn failure_json(failure: &Failure) -> Json {
-    match failure.data() {
-        Some(data) => serde_json::from_str(&data).expect("failure data is JSON"),
-        None => argument_error(&failure.message()),
+    match (failure, failure.data()) {
+        (_, Some(data)) => serde_json::from_str(&data).expect("failure data is JSON"),
+        (Failure::InvalidParams(message), None) => argument_error(message),
+        (_, None) => argument_error(&failure.message()),
     }
 }
 fn argument_error(message: &str) -> Json {

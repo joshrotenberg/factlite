@@ -1505,3 +1505,38 @@ fn a_subscription_is_acknowledged_with_nothing_honored_and_stays_silent() {
     assert!(rest.is_empty(), "{rest:?}");
     assert_eq!(stderr, "");
 }
+
+/// An argument error is a tool result in the model's terms, with no
+/// JSON-RPC wording in its message.
+#[test]
+fn argument_errors_name_the_problem_without_protocol_wording() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("notes.sqlite");
+    store_with(&path, 0);
+    let mut server = start(&bind("--writable-store", "notes", &path));
+    for (name, arguments, message) in [
+        ("transact", json!({}), "missing member: tx"),
+        ("facts", json!({"filters": {}}), "unknown member: filters"),
+        ("facts", json!({"store": 1}), "store must be a string"),
+        (
+            "facts",
+            json!({"offset": -1}),
+            "offset must be an unsigned integer",
+        ),
+        ("head", json!({"handle": "h1"}), "unknown member: handle"),
+    ] {
+        let error = tool_error(&mut server, name, arguments, "InvalidRequest");
+        assert_eq!(
+            error,
+            json!({"code": "InvalidRequest", "message": message, "context": {"field": "arguments"}}),
+            "{name}"
+        );
+    }
+    // A repeated argument is reported in the same form.
+    server.send(
+        r#"{"jsonrpc":"2.0","id":"dup","method":"tools/call","params":{"name":"facts","arguments":{"store":"notes","store":"notes"}}}"#,
+    );
+    let response = server.response();
+    let text = parse(response["result"]["content"][0]["text"].as_str().unwrap());
+    assert_eq!(text["error"]["message"], "duplicate object key: store");
+}
