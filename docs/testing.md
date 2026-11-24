@@ -266,3 +266,17 @@ Hand mutations of the crate's source are listed in the review record; the
 script that applied them is not in the repository. A commit whose outcome is
 `Unknown` is not tested through the server, and the CLI binary is not run by
 these tests.
+
+The MCP front end (plan 14.3) is tested in
+`crates/factlite-rpc/tests/mcp_stdio.rs` against the real binary: the
+handshake of each of the four handshake revisions and the per-request form of
+`2026-07-28`; protocol errors and ignored notifications; every tool's result
+against the library; pages of four reads, each read while another connection
+commits between pages, joined and compared with the whole result read through
+the library at the first page's basis; pages cut by bytes; read-only bindings
+that cannot write or create a file; required keys, operator metadata and
+replays, including a refused replay through a server with other metadata;
+resources in both eras; start-up arguments; and each tool's published input
+schema, checked by a small validator for the keywords the schemas use,
+against arguments the tools accept and arguments they refuse. The
+`2026-07-28` form is tested only against this repository's scripted client.

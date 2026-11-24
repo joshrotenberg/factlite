@@ -26,6 +26,7 @@
 
 mod dispatch;
 mod json;
+pub mod mcp;
 mod server;
 
 pub use dispatch::{DispatchOptions, Dispatcher, FACTLITE_ERROR, Failure, ORDER_DEPENDENT};

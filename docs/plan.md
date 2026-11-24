@@ -386,7 +386,7 @@ are the version-1 wire contract.
     original report;
   - contention: several server processes commit to one file;
   - `assert_cmd` scenarios over stdio for all of the above.
-- [ ] **14.3 MCP front end.** A second binary, `factlite-mcp`, on the same
+- [x] **14.3 MCP front end.** A second binary, `factlite-mcp`, on the same
   dispatch, as designed in `design/mcp.md` (written with this item). Stores
   are bound by name at start-up and are read-only unless bound writable.
   Tools: `head`, `schema`, `query`, `pull`, `lookup`, `facts`, `history`,

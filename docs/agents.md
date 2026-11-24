@@ -181,4 +181,6 @@ The Rust API, the [CLI](cli.md), the
 [babashka pod](../crates/factlite-pod/README.md) and the
 [JSON-RPC server](rpc.md) share these semantics. The example is Rust. An agent
 in another language can start `factlite-rpc` and keep a store open for a
-session. There is no MCP interface yet; it is plan item 14.3.
+session. A model reaches stores through [`factlite-mcp`](mcp.md), whose
+instructions repeat the rules above and which requires a key on every
+write.

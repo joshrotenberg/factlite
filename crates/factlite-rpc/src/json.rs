@@ -127,6 +127,19 @@ impl Members {
     pub(crate) fn remaining(&self) -> Option<&str> {
         self.0.first().map(|(name, _)| name.as_str())
     }
+    /// Whether a member is present.
+    pub(crate) fn contains(&self, key: &str) -> bool {
+        self.0.iter().any(|(name, _)| name == key)
+    }
+    /// Adds a member. The caller keeps keys distinct.
+    pub(crate) fn insert(&mut self, key: &str, value: Box<RawValue>) {
+        debug_assert!(!self.contains(key));
+        self.0.push((key.to_owned(), value));
+    }
+    /// The members not yet taken, in the order sent.
+    pub(crate) fn into_vec(self) -> Vec<(String, Box<RawValue>)> {
+        self.0
+    }
 }
 
 /// The kind of a raw JSON value, from its first byte. Raw text never starts

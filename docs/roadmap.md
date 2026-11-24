@@ -75,15 +75,16 @@ requires. It gains a short current-state section at the top that replaces the
 drifting summary. The README overview and `handoff.md` are rewritten for the
 current state.
 
-## 10. JSON-RPC interface: authorized, plan step 14
+## 10. JSON-RPC interface: done, plan step 14
 
 - **Why:** One process-boundary protocol for every language. A long-lived
-  process opens a store once, and the same dispatch is to back an MCP server.
+  process opens a store once, and the same dispatch backs an MCP server.
   The library stays the core.
 - **Design:** [`design/json-rpc.md`](design/json-rpc.md), revised on
   2026-11-23. It lives in this workspace as `crates/factlite-rpc`, a dispatch
   library and the `factlite-rpc` stdio binary over the strict wire contract
-  (plan 14.2). The MCP binary on the same dispatch is plan 14.3.
+  (plan 14.2), and the `factlite-mcp` binary on the same dispatch (plan 14.3,
+  [`design/mcp.md`](design/mcp.md)).
 - **Authorized:** by the user on 2026-11-23, with an MCP front end. Items 3
   and 4, which it waited on, were decided on 2026-11-06.
 - **Still undecided:** the CLI's outcome when a commit succeeds but writing

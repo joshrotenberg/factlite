@@ -40,7 +40,7 @@ pub enum Failure {
 }
 
 impl Failure {
-    fn invalid(field: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn invalid(field: &str, message: impl Into<String>) -> Self {
         Self::Adapter {
             code: "InvalidRequest",
             message: message.into(),
